@@ -16,6 +16,7 @@ Markers used in the summaries:
 | [04-smf-device-survey.md](04-smf-device-survey.md) | All Surface devices: SMF / MPTF / DTT, blobs, core versions |
 | [05-linux-interfaces.md](05-linux-interfaces.md) | Where SMF's inputs and outputs are on Linux, and what is missing |
 | [06-prototype-and-related-work.md](06-prototype-and-related-work.md) | The existing prototype controller and service, related projects and issues |
+| [07-closed-loop-simulation.md](07-closed-loop-simulation.md) | Engine + measured thermal model of the SB3 against the Windows behaviour (cut, steps, steady state) |
 
 ## Raw material (`raw/`, local only)
 
