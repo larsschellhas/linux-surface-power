@@ -1,0 +1,107 @@
+# Spec: supervisor
+
+Version 0.1, 14.11.2026. Implements FR-D1 – FR-D3, FR-S1 – FR-S7, FR-M4, NFR-5. Tests: AC-S1 – AC-S8. Markers as in `blob-format.md`.
+It takes over the proven parts of the prototype service (`../research/06-prototype-and-related-work.md`).
+
+## 1. States
+```
+start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
+             │
+             ▼
+         snapshot ─► dry-run ◄──────────────┐
+             │          (untested device,  │
+             ▼           or --dry-run)     │
+         control ─► yielded (foreign change, read-only) │
+             │  ▲                           │
+             ▼  │ recover                   │
+         emergency (firmware values) ───────┘
+             │
+             ▼
+         stop: restore snapshot, remove it
+```
+- **control:** engine outputs are written through the output stage.
+- **dry-run:** everything is computed and logged; nothing is written (FR-M4).
+- **emergency:** firmware values are written; the engine keeps running, so that recovery is possible.
+- **yielded:** firmware values are written once, then nothing more until restart. The engine keeps running for the status file.
+
+## 2. Device detection (FR-D1 – FR-D3)
+1. **DMI:** `sys_vendor == "Microsoft Corporation"`; the product name and SKU come from `/sys/class/dmi/id`.
+2. **SMF presence:** ACPI device `MSHW0187` (`/sys/bus/acpi/devices/MSHW0187:*`), and a blob source (the UEFI variable or a configured file).
+3. **Profile lookup:** the device profile is looked up by product name and SKU (6).
+   - No profile, but SMF and a blob: this is an "untested SMF device". The default is dry-run (FR-D3); `--control` overrides it.
+   - No SMF or no blob: idle, with a clear message (FR-D2).
+4. **Blob check:** the blob is loaded and checked (`blob-format.md`). Any error leads to idle with the error (G-4).
+5. **Conflicts:** if thermald is active (`systemctl is-active thermald`, or its D-Bus name), the daemon refuses to start (FR-S6). systemd `Conflicts=` normally prevents this.
+
+## 3. Snapshot and restore (FR-S1, FR-S2)
+- **Contents:** before the first write, the supervisor saves every value it may write:
+  - package PL1, PL2, PL4 with their time windows;
+  - psys PL1, PL2;
+  - the MSR 0x615 value, if PL3 is enabled.
+
+  The file is `/run/surface-power/snapshot.json`, written atomically (write a temp file, then rename).
+- **Predecessor:** if a snapshot from a crashed predecessor exists, it is kept and used as is. The current values may be the daemon's own.
+- **Restore:**
+  - on normal exit;
+  - on any unhandled exception;
+  - on `PrepareForSleep(true)`;
+  - on entering emergency or yielded.
+
+  Order: time window before PL1. Only values that differ are written.
+- **After restore on exit:** the snapshot is deleted.
+- **Reset tool:** `surface-power-reset` (`ExecStopPost`) restores from the file if it still exists, then deletes it. It does not import the engine.
+
+## 4. Emergency rules (FR-S4) [D]
+These do not depend on the blob. They are generous, so that Windows-parity behaviour never triggers them.
+
+| Rule | Trigger | Recovery |
+|---|---|---|
+| Skin hot | any SAM skin channel the blob uses as a controller input ≥ 60 °C for 10 s | below 55 °C for 60 s |
+| CPU hot | package temperature ≥ 105 °C for 10 s (TjMax is 100 °C on the SB3; the hardware already throttles there) | below 95 °C for 60 s |
+| Core inputs lost | a controller input or the slider stays invalid for 60 s | valid again for 10 s |
+
+In emergency, firmware values are written and the engine keeps running in dry-run.
+
+## 5. Foreign changes (FR-S5)
+- **Detection:** before each write cycle, the output stage compares each owned target with the last value it wrote or read back. A difference beyond the hardware rounding (PL1/PL2/psys: 0.2 W) is a foreign change. A changed PL1 time window is one too.
+- **First two changes within 60 s:** logged, then the own value is written again.
+- **Third change within 60 s:** the supervisor yields. It restores firmware values once, writes nothing more, logs it and shows it in the status file.
+
+## 6. Device profiles (FR-D3)
+A profile is a small TOML file in `profiles/`. It holds no limit values (G-2). Fields:
+- **Match:**
+  - `match.product_name` and optionally `match.sku`;
+  - `blob.source`: `efivar` or a file path (form C devices).
+- **Engine and I/O:**
+  - `engine.variant`: `classic` or `direct`;
+  - `inputs.overrides`: channel → source, for example a different hwmon sensor;
+  - `inputs.panel_max_nits`: optional;
+  - `outputs.pl3`: `false` by default;
+  - `outputs.narrow`: optional upper limits per target (FR-S7, only narrowing).
+- **Status:** `tested`, `true` when the device was validated against Windows (NFR-1).
+
+The SB3 15" profile is the only tested one in phase 4.
+
+## 7. Suspend and resume (FR-E5, NFR-5)
+- **Before sleep:** logind `PrepareForSleep(true)` → restore the firmware values, pause the loop.
+- **After resume:** `PrepareForSleep(false)` →
+  1. `engine.reset()`;
+  2. request EC data (`inputs.md` 6);
+  3. a fresh energy reference for power readings;
+  4. continue.
+- **Fallback:** without logind, a `CLOCK_BOOTTIME − CLOCK_MONOTONIC` jump of more than 5 s counts as a resume [D].
+
+## 8. Watchdog (FR-S3)
+- **systemd watchdog:** `Type=notify`, `WatchdogSec=10`. The loop sends `WATCHDOG=1` once per cycle, only after a complete cycle.
+- **Restart limits:** `Restart=on-failure` with `StartLimitBurst=3`, `StartLimitIntervalSec=600`. After that the unit stays failed and the device stays on firmware values. `OnFailure=thermald.service` is offered as an option in the unit, not set by default [D].
+
+## 9. Main loop
+Once per second:
+1. Read the adapters.
+2. Run `scheduler.step(now, inputs)`.
+3. Apply the supervisor rules.
+4. Apply the outputs, or log them in dry-run.
+5. Update the monitor.
+6. Notify the watchdog.
+
+The loop sleeps until the next full second on `CLOCK_MONOTONIC`.

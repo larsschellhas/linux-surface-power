@@ -27,10 +27,12 @@ Sources: static analysis of the SB3 drivers with Ghidra 12.2 (headless), the blo
   instance; all known blobs use 5000 ms.
 - **Stages run in ascending order**, lines within a stage in file order.
 - **Validity:** every block first checks that all its inputs are connected and valid. If not, it outputs its default: a lookup table its
-  "low" value, a min/max block its default. For example, the PL1 min node outputs 15 W and psys 45 W.
+  "low" value, a min/max block its default. For example, the PL1 min node outputs 15 W. Internal nodes themselves are always valid and start at 0; a node that no block writes
+  stays 0 (corrected 14.11.2026 evening, see `../specs/engine.md` 2).
 - **Timer:** the periodic evaluation runs while a controller is active. Otherwise the pipeline is evaluated on input changes (e.g. a slider
   change).
-- **Resume from hibernate (D0 entry):** every block is reset. Controllers go off with output = U_off and counters at 0.
+- **Resume from hibernate (D0 entry):** every block is reset. Controllers go off with output = U_off. Their divider counters, current set and error history are kept (corrected 14.11.2026
+  evening, see `../specs/controller.md` 5).
 
 ## Block types used by the SB3 blob
 These are lookup table per slider state, piecewise-linear map, add/subtract/scale, min/max select, pass-through/cap, thresholds with
@@ -80,9 +82,12 @@ Cores ≥ 3.159 go from OFF directly to ACTIVE at x ≥ W, take a law step on en
     - U_on 12–14.5 W, U_min 9 W, deadband 0.6 W, hysteresis 3 W.
 - **PL2 (output 52)** = slider PL2: 25/15/40/25/61/35/11/61/30/25 W.
 - **psys:**
-  - PL1 (54) = clamp(min(`I_IPL_TOP` + 23 W (≤ 10 % charge: + 16.1 W), K68), 10 W, 100 W), where K68 is switched by PSU size at 95 W;
-  - PL2 (55) = `I_IPL_TOP` + 34.5 W (≤ 10 %: + 23 W);
-  - default without inputs: 45 W.
+  - PL1 (54) = clamp(min(`I_IPL_TOP` + 23 W (≤ 10 % charge: + 16.1 W), K68), 10 W, 100 W). K68 is switched by PSU size at 95 W, but
+    both branches compute 45 W from an internal node that no block writes (it stays 0), so **K68 = 45 W** for any PSU;
+  - PL2 (55) = clamp(`I_IPL_TOP` + 34.5 W (≤ 10 %: + 23 W), 10 W, 100 W);
+  - with the Surface PSU (`I_IPL_TOP` ≈ 73.5 W): **psys PL1 45 W, PL2 100 W**;
+  - with `I_IPL_TOP` invalid: the intermediate blocks give their defaults, **psys PL1 23 W, PL2 34.5 W**. This matches the one-time
+    23 W psys cap measured under Windows (corrected 14.11.2026 evening; earlier text said 45 W).
 - **PL3 (59)** = clamp(`I_BAT_MAX1` + `I_IPL_TOP`, 12 W, 100 W).
 - **PL4 (53)** = clamp(`I_BAT_PEAK1` + `I_IPL_TOP` − `I_ROP_DYN` − P_display, 15 W, 129 W). P_display is estimated from the panel brightness
   (k = 0.00986 [H for the exact field order]); it is 3 W without a brightness value.

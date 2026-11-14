@@ -84,6 +84,6 @@ Version 0.2, 14.11.2026. Status: agreed direction (see requirements, section 6).
 | Misread semantics of a block | wrong limits | replay against measurements, unit tests from the analysis, dry-run before control |
 | Unknown real core version (C-2) | wrong PID variant | default from the package; replay comparison; make it configurable |
 | `0x53` field mapping wrong (C-3) | psys/PL3/PL4 off | validate with plug/unplug tests; invalid → defaults |
-| No `0x53` answer | psys at 45 W default | same as Windows' fallback; report it |
+| No `0x53` answer | psys at 23/34.5 W (block defaults) | same as Windows' fallback; report it |
 | Debug cdev / MSR not available (lockdown) | missing inputs/outputs | marked interim (NFR-11); propose kernel interfaces |
 | Blob content in the repo by mistake | licensing problem | `.gitignore`, CI check (AC-X1), synthetic test blobs |

@@ -1,0 +1,42 @@
+# Spec: tools
+
+Version 0.1, 14.11.2026. Implements FR-B9, FR-M6, FR-M7. Tests: AC-B2, AC-B3, AC-E9, AC-M2. Markers as in `blob-format.md`.
+All tools run without root, except reading EC data for the report.
+
+## 1. `surface-power-blob`
+```
+surface-power-blob [PATH] [--graph] [--outputs] [--dot] [--json]
+```
+- **Input:** `PATH` defaults to the UEFI variable. It may be a raw blob, a capsule or a text file (`blob-format.md` 2).
+- **Default output:** source, form, decoded size, line counts, the block types with counts, unknown GUIDs with the outputs they reach (AC-B3), instances used, and errors and warnings with line numbers.
+- **`--graph`:** one line per block, with stage, id, inputs → outputs and parameters, in evaluation order.
+- **`--outputs`:** for every device output, the chain of blocks that feeds it.
+- **`--dot`:** a Graphviz graph of the blocks and nodes.
+- **`--json`:** a machine-readable version of the above.
+- **Exit codes:** 0 ok; 1 the blob has errors; 2 no blob found.
+- **Privacy:** these outputs show parameter values. They are meant for local review. The report tool (3) is the one meant for sharing.
+
+## 2. `surface-power-replay`
+```
+surface-power-replay BLOB INPUT.csv [--variant classic|direct] [--out OUT.csv]
+```
+- **Input CSV:**
+  - Header: `t_ms` followed by channel names (`2E8B14C2/509`, `2DD6960F/1`, …). Other columns, such as the run kind or output columns from a recorded series, are ignored.
+  - One row per second. An empty cell means invalid. Values are in blob units.
+  - The special column `event` may hold `reset`, which applies a resume reset at that time.
+- **Run:** the replay runs the scheduler exactly as the daemon does, with the row times as `now`.
+- **Output CSV:**
+  - Columns: `t_ms`, `kind`, then every controller (`ctl<id>.state`, `ctl<id>.set`, `ctl<id>.u`) and every device output (rounded, as delivered to the adapters).
+  - One row per engine run. The output is deterministic (AC-E9).
+- **Helper:** `--from-linux-log` converts a prototype or measurement log (°C, W) into the input format.
+
+## 3. `surface-power-report` (FR-M7)
+```
+surface-power-report [--with-ec]
+```
+Prints a short text that contains no blob content and no serial numbers:
+- the device (DMI product name and SKU), the kernel version, linux-surface modules present;
+- the blob: found yes/no, form, size, a SHA-256 of the decoded text (to tell versions apart), the block types used, unknown GUIDs, the outputs and the instances used;
+- the inputs: for each input channel the blob reads, whether a Linux source exists and its current validity;
+- the outputs: for each output, its target and whether it is writable;
+- with `--with-ec` (root): whether the `0x53` and DPTF requests answer. Only yes/no is reported, not the values.

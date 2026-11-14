@@ -13,10 +13,11 @@ including the display backlight ([kernel#117](https://github.com/linux-surface/k
 
 ## Why Windows doesn't throttle [C, M]
 Windows' Surface SMF sets psys dynamically:
-- psys PL1 = available input power (from the EC) + 23 W;
-- psys PL2 = available input power + 34.5 W.
+- psys PL1 = available input power (from the EC) + 23 W, capped at 45 W;
+- psys PL2 = available input power + 34.5 W, capped at 100 W.
 
-PL1 is additionally capped by a value switched by PSU size (around 45 W). With the Surface PSU, psys did not bind in any Windows measurement. Instead, SMF regulates the **package PL1 by the skin
+With the Surface PSU this gives 45/100 W instead of the boot values 25/40 W. (The 45 W cap is selected by PSU size in the blob, but
+both choices give 45 W; corrected 14.11.2026 evening.) With the Surface PSU, psys did not bind in any Windows measurement. Instead, SMF regulates the **package PL1 by the skin
 temperature** of the display part (EC sensor `I_VTS1`). See 03.
 
 ## Power sources [M]
