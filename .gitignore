@@ -1,0 +1,31 @@
+# Raw research material: measurements, blobs, firmware, drivers, decompiled Microsoft code.
+# Kept locally for reference only. Never commit.
+docs/research/raw/
+
+# Safety net, in case such files end up elsewhere in the tree
+**/acpi/
+*.efivar
+SMF_DATA_BLOB*
+*.dsl
+*.dat
+*.aml
+*.sys
+*.exe
+*.dll
+*.msi
+*.cab
+*.cat
+*.inf
+**/ghidra/
+**/decomp/
+**/kapseln/
+**/geraete/
+*.gpr
+*.rep/
+
+# Python / editors
+__pycache__/
+*.pyc
+.venv/
+.idea/
+.vscode/
