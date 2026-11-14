@@ -21,11 +21,21 @@ Discussion upstream: [linux-surface#2383](https://github.com/linux-surface/linux
 | `docs/research/` | Findings so far: measurements, SMF analysis, device survey, Linux interfaces. Only summaries are committed; raw material lives in `docs/research/raw/` (git-ignored) |
 | `docs/requirements/` | Requirements, acceptance criteria and the architecture design |
 | `docs/specs/` | Technical specifications, derived from the requirements (next step) |
-| `src/` | Implementation of the specs |
+| `src/` | Python reference implementation of the specs (see `src/README.md`) |
+| `packaging/` | systemd units and the sleep hook |
+| `scripts/check-repo.py` | CI check that no Microsoft content gets into the repository (AC-X1) |
 
 ## Status
 
-Research done, requirements written. No code yet. See `docs/requirements/README.md`.
+- Research, requirements and specs v0.1 are written (`docs/`).
+- **Reference implementation in Python** (`src/`):
+  - loader for all known blob forms (all 42 local blobs parse);
+  - engine for the block types of the 2020–2023 blobs, with the PID in both core variants;
+  - adapters, supervisor, monitoring, the daemon and the tools.
+  - 153 unit tests.
+- **On the SB3 15"** the daemon runs in dry-run. Control is implemented but not yet validated against Windows; the device profile is
+  marked untested, so the default is dry-run.
+- Next: dry-run with EC data, replay against the Windows measurements, then control on the SB3 (phase 4).
 
 ## Confidentiality
 

@@ -26,7 +26,12 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
 
 ## 2. Device detection (FR-D1 – FR-D3)
 1. **DMI:** `sys_vendor == "Microsoft Corporation"`; the product name and SKU come from `/sys/class/dmi/id`.
-2. **SMF presence:** ACPI device `MSHW0187` (`/sys/bus/acpi/devices/MSHW0187:*`), and a blob source (the UEFI variable or a configured file).
+2. **SMF presence:** any of
+   - an ACPI device `MSHW0187` (`/sys/bus/acpi/devices/MSHW0187:*`);
+   - the ACPI thermal zone `\TPOL`. On the SB3, `MSHW0187` is the `_HID` of this thermal zone; Linux enumerates it as `LNXTHERM:00` with path `\TPOL`, so the HID itself is not visible in sysfs [M];
+   - a non-empty UEFI variable `SMF_DATA_BLOB-…`.
+
+   A blob source is needed in any case: the UEFI variable or a configured file.
 3. **Profile lookup:** the device profile is looked up by product name and SKU (6).
    - No profile, but SMF and a blob: this is an "untested SMF device". The default is dry-run (FR-D3); `--control` overrides it.
    - No SMF or no blob: idle, with a clear message (FR-D2).
@@ -60,7 +65,8 @@ These do not depend on the blob. They are generous, so that Windows-parity behav
 | CPU hot | package temperature ≥ 105 °C for 10 s (TjMax is 100 °C on the SB3; the hardware already throttles there) | below 95 °C for 60 s |
 | Core inputs lost | a controller input or the slider stays invalid for 60 s | valid again for 10 s |
 
-In emergency, firmware values are written and the engine keeps running in dry-run.
+In emergency, firmware values are written and the engine keeps running in dry-run. The skin channels are the process values of
+the blob's controllers that are temperatures; the CPU channel is the `coretemp` package temperature.
 
 ## 5. Foreign changes (FR-S5)
 - **Detection:** before each write cycle, the output stage compares each owned target with the last value it wrote or read back. A difference beyond the hardware rounding (PL1/PL2/psys: 0.2 W) is a foreign change. A changed PL1 time window is one too.
@@ -83,13 +89,16 @@ A profile is a small TOML file in `profiles/`. It holds no limit values (G-2). F
 The SB3 15" profile is the only tested one in phase 4.
 
 ## 7. Suspend and resume (FR-E5, NFR-5)
-- **Before sleep:** logind `PrepareForSleep(true)` → restore the firmware values, pause the loop.
-- **After resume:** `PrepareForSleep(false)` →
+The reference implementation uses only the Python standard library, so it does not listen on D-Bus. A systemd sleep hook
+(`packaging/system-sleep/surface-power`) sends `SIGUSR2` before sleep and `SIGUSR1` after resume [D].
+- **Before sleep:** `SIGUSR2` (logind `PrepareForSleep(true)` in a later version) → restore the firmware values, pause the loop.
+- **After resume:** `SIGUSR1` →
   1. `engine.reset()`;
   2. request EC data (`inputs.md` 6);
   3. a fresh energy reference for power readings;
   4. continue.
-- **Fallback:** without logind, a `CLOCK_BOOTTIME − CLOCK_MONOTONIC` jump of more than 5 s counts as a resume [D].
+- **Fallback:** without the hook, a `CLOCK_BOOTTIME − CLOCK_MONOTONIC` jump of more than 5 s counts as a resume [D]. In that case
+  the firmware values are not restored before sleep.
 
 ## 8. Watchdog (FR-S3)
 - **systemd watchdog:** `Type=notify`, `WatchdogSec=10`. The loop sends `WATCHDOG=1` once per cycle, only after a complete cycle.

@@ -1,0 +1,15 @@
+# Device profile: Surface Book 3 (13" and 15"). Spec supervisor 6. Holds no limit values (G-2): those come from the device's blob.
+tested = false          # set to true once validated against Windows (NFR-1, AC-L1 - AC-L3)
+
+[match]
+product_name = "Surface Book 3"
+
+[blob]
+source = "efivar"
+
+[engine]
+variant = "classic"     # the SB3 driver package ships SMF core 3.140
+
+[outputs]
+pl3 = false
+pl4 = false

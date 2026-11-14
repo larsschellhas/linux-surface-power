@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "linux-surface-power"
+version = "0.1.0"
+description = "Power and thermal management for Microsoft Surface devices on Linux, driven by the device's own SMF blob"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE", "LICENSE-APACHE"]
+requires-python = ">=3.11"
+dependencies = []
+classifiers = [
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Hardware",
+]
+
+[project.scripts]
+surface-powerd = "surface_power.daemon:main"
+surface-power-blob = "surface_power.tools.blob_tool:main"
+surface-power-replay = "surface_power.tools.replay:main"
+surface-power-report = "surface_power.tools.report:main"
+surface-power-reset = "surface_power.tools.reset:main"
+surface-power-notify = "surface_power.tools.notify:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+surface_power = ["profiles/*.toml"]

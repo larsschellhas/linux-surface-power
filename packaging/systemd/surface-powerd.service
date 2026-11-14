@@ -1,0 +1,37 @@
+[Unit]
+Description=Surface power management (SMF blob interpreter)
+Documentation=https://github.com/larsschellhas/linux-surface-power
+After=systemd-modules-load.service
+# thermald changes package PL1 itself and would fight the daemon (FR-S6).
+Conflicts=thermald.service
+StartLimitIntervalSec=600
+StartLimitBurst=3
+# Optional fallback when the daemon fails for good (not enabled by default, spec supervisor 8):
+# OnFailure=thermald.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/surface-powerd
+ExecStopPost=/usr/bin/surface-power-reset
+WatchdogSec=10
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=surface-power
+RuntimeDirectoryMode=0755
+# The snapshot must survive a crash so that the successor and the reset tool know the firmware values.
+RuntimeDirectoryPreserve=yes
+StateDirectory=surface-power
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX
+# DAC_OVERRIDE for powercap and the SSAM cdev; add CAP_SYS_RAWIO only if PL3 via MSR is enabled.
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+MemoryMax=100M
+
+[Install]
+WantedBy=multi-user.target

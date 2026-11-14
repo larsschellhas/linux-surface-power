@@ -1,0 +1,65 @@
+"""A fake sysfs/procfs tree for adapter, supervisor and daemon tests. Mirrors the layout on the SB3."""
+import os
+import tempfile
+
+
+class FakeSys:
+    def __init__(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+        self.write("sys/class/dmi/id/sys_vendor", "Microsoft Corporation")
+        self.write("sys/class/dmi/id/product_name", "Surface Book 3")
+        self.write("sys/class/dmi/id/product_sku", "Surface_Book_3_1899")
+        os.makedirs(self.path("sys/bus/acpi/devices/MSHW0187:00"), exist_ok=True)
+        self.write("sys/firmware/acpi/platform_profile", "performance")
+        self.write("sys/kernel/security/lockdown", "[none] integrity confidentiality")
+        # hwmon: surface_thermal with temp1..9, temp9 = I_VTS1; coretemp package.
+        labels = [f"I_RTS{i}" for i in range(1, 9)] + ["I_VTS1"]
+        for i, label in enumerate(labels, start=1):
+            self.write(f"sys/class/hwmon/hwmon2/temp{i}_label", label)
+            self.write(f"sys/class/hwmon/hwmon2/temp{i}_input", 30000)
+        self.write("sys/class/hwmon/hwmon2/name", "surface_thermal")
+        self.write("sys/class/hwmon/hwmon8/name", "coretemp")
+        self.write("sys/class/hwmon/hwmon8/temp1_label", "Package id 0")
+        self.write("sys/class/hwmon/hwmon8/temp1_input", 50000)
+        # power supplies
+        self.write("sys/class/power_supply/ADP1/type", "Mains")
+        self.write("sys/class/power_supply/ADP1/online", 1)
+        for bat, cap in (("BAT1", 80), ("BAT2", 90)):
+            self.write(f"sys/class/power_supply/{bat}/type", "Battery")
+            self.write(f"sys/class/power_supply/{bat}/status", "Charging")
+            self.write(f"sys/class/power_supply/{bat}/capacity", cap)
+            self.write(f"sys/class/power_supply/{bat}/power_now", 0)
+        self.write("proc/acpi/button/lid/LID0/state", "state:      open")
+        # powercap
+        pkg = "sys/class/powercap/intel-rapl:0"
+        self.write(f"{pkg}/name", "package-0")
+        self.write(f"{pkg}/enabled", 1)
+        for i, (name, uw) in enumerate((("long_term", 30000000), ("short_term", 61000000), ("peak_power", 100000000))):
+            self.write(f"{pkg}/constraint_{i}_name", name)
+            self.write(f"{pkg}/constraint_{i}_power_limit_uw", uw)
+        self.write(f"{pkg}/constraint_0_time_window_us", 27983872)
+        self.write(f"{pkg}/constraint_0_max_power_uw", 15000000)  # the SB3 reports its TDP here
+        psys = "sys/class/powercap/intel-rapl:1"
+        self.write(f"{psys}/name", "psys")
+        self.write(f"{psys}/enabled", 1)
+        for i, (name, uw) in enumerate((("long_term", 25000000), ("short_term", 40000000))):
+            self.write(f"{psys}/constraint_{i}_name", name)
+            self.write(f"{psys}/constraint_{i}_power_limit_uw", uw)
+        self.write(f"{psys}/constraint_0_time_window_us", 27983872)
+
+    def path(self, rel: str) -> str:
+        return os.path.join(self.root, rel)
+
+    def write(self, rel: str, value) -> None:
+        p = self.path(rel)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            f.write(f"{value}\n")
+
+    def read(self, rel: str) -> str:
+        with open(self.path(rel)) as f:
+            return f.read().strip()
+
+    def cleanup(self):
+        self.tmp.cleanup()

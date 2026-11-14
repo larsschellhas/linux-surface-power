@@ -1,0 +1,12 @@
+[Unit]
+Description=Surface power notifications (emergency, hand-off, weak charger)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/surface-power-notify
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=graphical-session.target

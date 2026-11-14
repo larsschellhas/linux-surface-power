@@ -1,0 +1,131 @@
+"""Integration tests for the daemon on a fake sysfs with a synthetic blob (spec supervisor 1, 9; monitoring 2; AC-S1, AC-S8)."""
+import io
+import json
+import os
+import tempfile
+import unittest
+
+from fakesys import FakeSys
+from helpers import LIMITS, SYSTEM, TEMP, VN, BlobBuilder, G
+
+from surface_power import daemon, monitor
+
+PL1 = "sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw"
+PL2 = "sys/class/powercap/intel-rapl:0/constraint_1_power_limit_uw"
+
+
+def blob_text():
+    b = BlobBuilder()
+    b.input_channel(TEMP, 509, 3681, 2731)
+    b.output_channel(LIMITS, 51, 25000, 31000, 7500)
+    b.line(G["pid_sets"], 1, [(TEMP, 509), (SYSTEM, 1)], [(VN, 1)], [20, 7, 15, 4, 0], divider=1)
+    for st in range(7):
+        b.line(G["pid_parameter_set"], 1, [], [], [1, st, st, 30000, 30001, 7500, 21000, 3211, 10, 40, 100, 0.4])
+    b.line(G["lookup_table"], 2, [(SYSTEM, 1)], [(VN, 2)], [6, 25000, 25000, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6,
+                                                            25000, 13000, 25000, 25000, 30000, 25000])
+    b.line(G["min_max"], 3, [(VN, 1), (VN, 2)], [(LIMITS, 51)], [30000, 8500, 15000, 0], stage=1)
+    b.line(G["lookup_table"], 4, [(SYSTEM, 1)], [(LIMITS, 52)], [6, 25000, 25000, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6,
+                                                                 25000, 15000, 40000, 25000, 61000, 35000])
+    return b.text()
+
+
+class DaemonTest(unittest.TestCase):
+    def setUp(self):
+        self.fs = FakeSys()
+        self.run = tempfile.TemporaryDirectory()
+        self.state = tempfile.TemporaryDirectory()
+        self.blob = os.path.join(self.run.name, "blob.txt")
+        with open(self.blob, "w") as f:
+            f.write(blob_text())
+        self.fs.write("sys/class/hwmon/hwmon2/temp9_input", 30000)
+
+    def tearDown(self):
+        self.fs.cleanup()
+        self.run.cleanup()
+        self.state.cleanup()
+
+    def start(self, *extra):
+        args = ["--root", self.fs.root, "--blob", self.blob, "--run-dir", self.run.name, "--state-dir", self.state.name,
+                "--no-ec", *extra]
+        return daemon.Daemon(daemon.parse_args(args), monitor.Journal(stream=io.StringIO()))
+
+    def status(self):
+        with open(os.path.join(self.run.name, "status.json")) as f:
+            return json.load(f)
+
+    def test_dry_run_writes_nothing(self):
+        d = self.start("--dry-run")
+        for t in range(5):
+            d.cycle(t * 1000)
+        self.assertEqual(self.fs.read(PL1), "30000000")
+        st = self.status()
+        self.assertEqual(st["state"], "dry-run")
+        pl1 = next(o for o in st["outputs"] if o["name"] == "PL1")
+        self.assertEqual((pl1["value_w"], pl1["target"]), (30.0, "dry-run"))
+        d.stop()
+
+    def test_untested_device_defaults_to_dry_run(self):
+        d = self.start()
+        self.assertEqual(d.mode, "dry-run")
+        d.stop()
+
+    def test_control_writes_and_restores(self):
+        d = self.start("--control")
+        self.fs.write("sys/firmware/acpi/platform_profile", "balanced")
+        self.fs.write("sys/class/power_supply/ADP1/online", 0)       # balanced on battery: state 2 -> 13/15 W
+        d.cycle(0)
+        self.assertEqual(self.fs.read(PL1), "13000000")
+        self.assertEqual(self.fs.read(PL2), "15000000")
+        self.assertTrue(os.path.exists(os.path.join(self.run.name, "snapshot.json")))
+        d.stop()
+        self.assertEqual(self.fs.read(PL1), "30000000")              # AC-S1
+        self.assertEqual(self.fs.read(PL2), "61000000")
+        self.assertFalse(os.path.exists(os.path.join(self.run.name, "snapshot.json")))
+
+    def test_foreign_changes_make_it_yield(self):
+        d = self.start("--control")
+        d.cycle(0)
+        for t in (1000, 2000, 3000):
+            self.fs.write(PL1, 12000000)
+            d.cycle(t)
+        self.assertEqual(d.state, "yielded")
+        self.assertEqual(self.fs.read(PL1), "30000000")              # firmware value once
+        self.fs.write(PL1, 12000000)
+        d.cycle(4000)
+        self.assertEqual(self.fs.read(PL1), "12000000")              # then hands off
+        d.stop()
+
+    def test_suspend_and_resume(self):
+        d = self.start("--control")
+        self.fs.write("sys/firmware/acpi/platform_profile", "balanced")
+        d.cycle(0)
+        d.before_sleep()
+        self.assertEqual(self.fs.read(PL1), "30000000")
+        d.cycle(1000)                                                  # paused: nothing written
+        self.assertEqual(self.fs.read(PL1), "30000000")
+        d.after_resume(2000)
+        d.cycle(2000)
+        self.assertEqual(self.fs.read(PL1), "25000000")
+        d.stop()
+
+    def test_unsupported_device_exits_without_writes(self):  # AC-S8
+        self.fs.write("sys/class/dmi/id/sys_vendor", "LENOVO")
+        with self.assertRaises(daemon.Idle):
+            self.start("--control")
+        self.assertEqual(self.fs.read(PL1), "30000000")
+
+    def test_time_series(self):
+        d = self.start("--dry-run")
+        for t in range(3):
+            d.cycle(t * 1000)
+        d.stop()
+        files = [f for f in os.listdir(self.state.name) if f.startswith("series-")]
+        self.assertEqual(len(files), 1)
+        with open(os.path.join(self.state.name, files[0])) as f:
+            header = f.readline().strip().split(",")
+        self.assertEqual(header[:2], ["t_ms", "kind"])
+        self.assertIn("2E8B14C2/509", header)
+
+
+if __name__ == "__main__":
+    unittest.main()

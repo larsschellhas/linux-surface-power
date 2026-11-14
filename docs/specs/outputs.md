@@ -25,7 +25,7 @@ These are independent of any blob. A value above the hard maximum is cut to it a
 | psys PL1, PL2 | 5 W | 250 W |
 | PL3 | 5 W | 250 W |
 
-In addition, no PL1/PL2 value may exceed the maximum the powercap zone reports (`constraint_*_max_power_uw`), where it reports one.
+The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On the SB3 it reports the 15 W TDP, while the firmware PL1 is 30 W and Windows sets up to 30 W [M].
 
 ## 3. Channel → target (FR-O1, FR-O2, FR-O5)
 
@@ -33,7 +33,7 @@ In addition, no PL1/PL2 value may exceed the maximum the powercap zone reports (
 |---|---|---|---|
 | `0B7B5350` | 51 | package PL1 | `/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw` (`long_term`) |
 | | 52 | package PL2 | `intel-rapl:0/constraint_1_power_limit_uw` (`short_term`) |
-| | 53 | PL4 | `intel-rapl:0/constraint_2_power_limit_uw` if its name is `peak_power`, else log-only |
+| | 53 | PL4 | `intel-rapl:0/constraint_2_power_limit_uw` if its name is `peak_power`, and only if enabled in the device profile. Default: log-only [D]. On the SB3 Linux reports 0 for it; what writing it does there is not verified. |
 | | 54 | psys PL1 | `intel-rapl:1/constraint_0_power_limit_uw` (zone named `psys`) |
 | | 55 | psys PL2 | `intel-rapl:1/constraint_1_power_limit_uw` |
 | | 59 | PL3 | MSR 0x615, see 4 |
