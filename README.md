@@ -37,8 +37,8 @@ The `acpi/` dumps in the raw folder contain a Windows product key (MSDM table) a
 
 Licensed under either of
 
+- MIT license ([LICENSE](LICENSE))
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
 
 at your option. Unless you explicitly state otherwise, any contribution you intentionally submit for inclusion in this project, as defined
 in the Apache-2.0 license, is dual licensed as above, without any additional terms or conditions.
