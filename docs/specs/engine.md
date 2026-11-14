@@ -167,4 +167,5 @@ These follow from the published analysis (`../research/03-smf-architecture.md`).
   - The 45 W cap is the same for both PSU sizes. The table that picks it reads an internal node that no block writes, so that node is 0.
 - **psys, charge ≤ 10 %:** + 16.1 W and + 23 W instead.
 - **psys with `I_IPL_TOP` invalid:** the add/subtract blocks give their defaults. The result is **PL1 23 W, PL2 34.5 W**. This matches the 23 W psys cap seen once under Windows.
-- **PL1 with any of its four inputs invalid:** 15 W (the min block's default).
+- **PL1 with the posture invalid:** 25.001 W, the "below" value of the posture table. The min block in front of PL1 reads only
+  internal nodes, so its 15 W default never applies.

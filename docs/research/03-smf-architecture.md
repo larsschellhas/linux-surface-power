@@ -27,8 +27,10 @@ Sources: static analysis of the SB3 drivers with Ghidra 12.2 (headless), the blo
   instance; all known blobs use 5000 ms.
 - **Stages run in ascending order**, lines within a stage in file order.
 - **Validity:** every block first checks that all its inputs are connected and valid. If not, it outputs its default: a lookup table its
-  "low" value, a min/max block its default. For example, the PL1 min node outputs 15 W. Internal nodes themselves are always valid and start at 0; a node that no block writes
-  stays 0 (corrected 14.11.2026 evening, see `../specs/engine.md` 2).
+  "low" value, a min/max block its default. Internal nodes themselves are always valid and start at 0; a node that no block writes stays 0. So the fallbacks that
+  matter are those of blocks reading device inputs: e.g. an invalid posture makes the posture table give 25.001 W. The PL1 min
+  block's 15 W default is never reached on the SB3, because all its inputs are internal nodes (corrected 14.11.2026 evening, see
+  `../specs/engine.md` 2).
 - **Timer:** the periodic evaluation runs while a controller is active. Otherwise the pipeline is evaluated on input changes (e.g. a slider
   change).
 - **Resume from hibernate (D0 entry):** every block is reset. Controllers go off with output = U_off. Their divider counters, current set and error history are kept (corrected 14.11.2026

@@ -30,6 +30,8 @@ Version 0.1, 14.11.2026. Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC
 | `5D0EE597` lid | 1 | lid state | lid switch (section 4) | 1 = open, 2 = closed [H] |
 | `1FB53D4C` power/state | 41 | display brightness in millinits | not provided by default (section 5) | |
 
+The placeholder channel `99999999-…/1` (`blob-format.md` 5.2b) is never provided and is not reported as missing.
+
 Readings outside the input-line range (`blob-format.md` 5.1) are invalid (FR-I2) [H: the Windows client reports a range error and drops the value].
 
 ## 3. Slider state (FR-I3, OD-4)

@@ -48,7 +48,8 @@ Detection order: B, A, C, Text, Capsule. A blob that matches none fails with "un
   - Displacement = `(token >> (16 − b)) + 1`.
   - Length = `(token & (2^(16−b) − 1)) + 3`.
   - Copies may overlap.
-- **Errors:** A truncated chunk, a displacement before the chunk start, or a signature other than `0b011` is an error. The Windows core accepts at most 30 720 bytes of decompressed output [C]; the loader enforces the same limit.
+- **Errors:** A truncated chunk, a displacement before the chunk start, or a signature other than `0b011` is an error.
+- **Size limit:** The SB3 core accepts at most 30 720 bytes of decompressed output [C]. Newer blobs are larger: the Laptop Studio 2 dGPU blob decodes to 30 825 bytes, the macro-source blobs to about 33 kB. The loader therefore accepts up to 1 MiB [D].
 
 ## 4. Text forms (FR-B4)
 
@@ -66,7 +67,7 @@ The preprocessor processes the text line by line:
 2. **Macro definitions:** a line whose first token is `#macro` defines `NAME → VALUE`. The name is at most 63 characters [C]; the value is the rest of the line, trimmed. A definition line produces no output line.
 3. **References:** `%NAME%` is replaced by its value, repeatedly, until nothing changes. The depth limit is 16 [D]. Exceeding it, or an undefined name, is an error that names the line.
 4. **Built-in macro** `VN<n>` → `{FB805E77-616E-4EA8-BAC1-6859A6C2D4B1}_<n>`, the internal-node channel `n` [C].
-5. **Braced channels:** `{GUID}_N` becomes the two fields `GUID,N`.
+5. **Braced channels:** a field `{GUID}_N` becomes the two fields `GUID,N`. The parser does this after splitting the line at commas, because braced channels also occur inside expressions (4.2).
 6. **Whitespace:** leading and trailing whitespace around each field is removed. GUIDs are compared case-insensitively and stored in upper case.
 
 ### 4.2 Expressions (AC-B5)
@@ -79,7 +80,12 @@ The preprocessor processes the text line by line:
   number := digits ['.' digits] [('e'|'E') ['+'|'-'] digits]
   ```
 - **Evaluator:** a recursive-descent evaluator over this grammar; Python `eval` is never used. Division by zero and any other token are errors.
-- **Windows behaviour:** the Windows core keeps expressions and evaluates them on every run [C]. They may also reference channels [C, telemetry text]. No known blob does that, so a constant expression is evaluated once at load time. An expression that contains anything other than a constant is rejected: the blob is not used for control (FR-B8).
+- **Windows behaviour:** the Windows core keeps expressions and evaluates them on every run [C]. They may also reference channels [C].
+  - Contrary to the earlier survey, some blobs do this. Laptop 7 Intel, Pro 11 Intel and the macro-source blobs use for example `({FB805E77-…}_208+30)` as table bounds.
+- **Our handling:**
+  - A constant expression is evaluated once at load time.
+  - An expression with braced channel references is kept as text and marks its line as *dynamic*. Dynamic lines are not implemented yet (phase 5); `blob-format.md` 7 applies to them like to an unknown GUID.
+  - Any other content (names, operators outside the grammar) is a parse error.
 
 ### 4.3 Numbers
 - **Integer fields** (counts, ids, kinds, flags) are parsed like C `atoi`: an optional sign and digits; anything after the digits is ignored [C].
@@ -97,6 +103,7 @@ After preprocessing, the text has these sections, in order:
 | Telemetry | end of text | `#VNTELEMETRY` and `#IOTELEMETRY` blocks: display ranges, not used for control [C] |
 
 - **Empty lines** are skipped.
+- **Lines without a comma** in the first two sections are skipped with a warning. Pro 7+ blobs contain a separator line of asterisks [H: the Windows core skips such lines too].
 - **The first section** may be empty.
 - **Unknown lines in the telemetry section** are kept as text for the `blob` tool.
 
@@ -118,7 +125,13 @@ GUID, channel, default, max, min
 ```
 - **Check:** `min ≤ default ≤ max`.
 - **Use:** the range bounds every write to this channel (FR-O3, `outputs.md`).
-- A line with 5 fields whose third field is not a GUID is an output line. A line with 10 fields is an input line [D: told apart by field count].
+- A line with 5 fields is an output line; a line with 10 fields is an input line [D: told apart by field count].
+
+### 5.2a Other channel lines
+Newer blobs define composite sensors (interface `87008365`) with 14 or 19 fields. Their layout is not analysed. The parser keeps them as "other channel" lines and warns [D]. They give no validity range.
+
+### 5.2b Placeholder input
+Some blobs pass a constant (e.g. a date-like number) through a pass-through block whose input is the placeholder channel `99999999-9999-9999-9999-999999999999/1`. No client provides it, so it stays invalid and the block outputs its constant default [C, blob text].
 
 ### 5.3 Algorithm line [C]
 ```
