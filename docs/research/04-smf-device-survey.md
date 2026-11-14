@@ -32,7 +32,9 @@ The current Microsoft firmware package (MSI) of each model was unpacked and its 
 ## Blob text forms [C]
 1. **Plain CSV** (all cores).
 2. **Expressions** (core ≥ 3.204.23; used by Laptop 7 Intel, Pro 11 Intel): channels as `{GUID}_N`, parameters as bracketed arithmetic,
-   e.g. `(28000+10000)`. In all known blobs the expressions contain only numbers and + − * /.
+   e.g. `(28000+10000)`. Most contain only numbers and + − * /, but Laptop 7 Intel, Pro 11 Intel and the macro-source blobs also
+   use internal nodes inside expressions, e.g. `({FB805E77-…}_208+30)` as table bounds (corrected 14.11.2026 evening; found when
+   parsing all blobs, `../specs/blob-format.md` 4.2).
 3. **Macro source** (form C): `//` comments, `#macro NAME VALUE`, `%NAME%`, built-in `VN<n>` = intermediate node.
 
 The macro blobs carry Microsoft's own names, which confirm the SB3 reading:
