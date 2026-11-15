@@ -134,6 +134,39 @@ class CorpusTest(unittest.TestCase):  # AC-B2, AC-B3
                 for u in graph.unsupported:
                     self.assertTrue(u.reason)
 
+    def test_all_blobs_control_and_run(self):  # phase 5: every SMF blob builds fully and survives a heat-up sweep
+        import math
+        files = sorted(glob.glob(os.path.join(RAW, "tools", "fw", "*", "keep", "SurfaceUpdate", "*", "*.bin")))
+        fixed = {(SYSTEM, 1): 5, (POWER, 1): 80, (POWER, 101): 80, (POWER, 7): 65000, (POWER, 8): 60000, (POWER, 6): 8000,
+                 ("8060B17F-2FFB-4139-82E6-8B4C60F48419", 1): 1}
+        n_smf = 0
+        for path in files:
+            with open(path, "rb") as f:
+                data = f.read()
+            try:
+                dec = container.decode(data)
+            except Exception as e:  # noqa: BLE001
+                self.assertIn("MPTF", str(e), path)
+                continue
+            n_smf += 1
+            for variant in ("classic", "direct"):
+                with self.subTest(blob=os.path.relpath(path, RAW), variant=variant):
+                    graph = build_graph(parser.parse_text(dec.text, dec.form), variant)
+                    self.assertTrue(graph.usable_for_control, [u.reason for u in graph.unsupported])
+                    eng = Engine(graph)
+                    sched = Scheduler(eng)
+                    active = False
+                    for k in range(121):
+                        temp = 3031 + 300 * k / 120
+                        values = {r: (temp if r.guid == TEMP and r.channel >= 500 else fixed.get((r.guid, r.channel)))
+                                  for r in graph.inputs}
+                        for run_ in sched.step(k * 15000, values):
+                            active = active or run_.active
+                        for v in eng.outputs().values():
+                            self.assertTrue(math.isfinite(v))
+                    self.assertTrue(active, "no controller became active between 30 and 60 °C")
+        self.assertEqual(n_smf, 41)
+
 
 if __name__ == "__main__":
     unittest.main()
