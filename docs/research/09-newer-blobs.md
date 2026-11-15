@@ -72,6 +72,8 @@ stays in dry-run on that device (`../specs/supervisor.md` 2.5), even though the 
 
 | Channel | Microsoft name | Blobs reading it / reaching PL1-PL2-psys | Possible Linux source [H] |
 |---|---|---|---|
+| `1FB53D4C/42` | `_I_DISP_PWR1` (display power) | 29 / 29 | not known; on Windows the display client reports the panel brightness [H] |
+| `1FB53D4C/31` | not named | 2 / 2 | Laptop Studio dGPU blobs; not analysed |
 | `28B7BD85/12` | `I_BCDR1_I` (battery current, mA [H]) | 29 / 20 | `power_supply` `current_now` |
 | `28B7BD85/13` | `I_BDR_EWMA1_LVL` | 24 / 16 | not known; probably derived from channel 12 by the power-tracker client |
 | `28B7BD85/16` | `I_BAT1_MAX_CHARGE` | 12 / 9 | not known |
