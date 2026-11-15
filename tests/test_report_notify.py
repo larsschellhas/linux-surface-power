@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from fakesys import FakeSys
-from helpers import LIMITS, SYSTEM, TEMP, VN, BlobBuilder, G, efivar
+from helpers import LIMITS, POWER, SYSTEM, TEMP, VN, BlobBuilder, G, efivar
 
 from surface_power.tools import notify, report
 
@@ -39,6 +39,46 @@ class ReportTest(unittest.TestCase):
         body = "\n".join(line for line in text.splitlines() if "sha256" not in line)
         for value in ("21234", "15678", "30001", "7500"):      # parameter values of the blob
             self.assertNotIn(value, body)
+
+
+class ReportSourcesTest(unittest.TestCase):
+    """The report says where the EC power data come from and whether the dGPU stand-in would write (tester guide)."""
+
+    def setUp(self):
+        self.fs = FakeSys()
+        b = BlobBuilder()
+        b.line(G["pass_through"], 1, [(POWER, 8)], [(LIMITS, 201)], [50000], stage=1)
+        self.blob = self.fs.path("blob.txt")
+        with open(self.blob, "w") as f:
+            f.write(b.text())
+
+    def tearDown(self):
+        self.fs.cleanup()
+
+    def run_report(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            report.main(["--root", self.fs.root, "--blob", self.blob])
+        return out.getvalue()
+
+    def test_without_kernel_attributes(self):
+        text = self.run_report()
+        self.assertIn("EC power data: debug device only", text)
+        self.assertIn("28B7BD85/8: needs the debug device", text)
+        self.assertIn("0B7B5350/201: log-only", text)          # no NVIDIA GPU in this fake system
+
+    def test_with_kernel_attributes_and_gpu(self):
+        for bat in ("BAT1", "BAT2"):
+            self.fs.write(f"sys/class/power_supply/{bat}/dptf_battery/available_input_power_mw", 73113)
+        self.fs.write("sys/class/power_supply/ADP1/dptf_power/adapter_rating_mw", 120000)
+        self.fs.write("sys/bus/pci/devices/0000:02:00.0/vendor", "0x10de")
+        self.fs.write("sys/bus/pci/devices/0000:02:00.0/class", "0x030200")
+        os.makedirs(self.fs.path("sys/module/surface_fan"))
+        text = self.run_report()
+        self.assertIn("EC power data: kernel attributes", text)
+        self.assertIn("28B7BD85/8: provided", text)
+        self.assertIn("0B7B5350/201: clock-cap stand-in (DO-1)", text)
+        self.assertIn("surface_fan", text)
 
 
 class NotifyTest(unittest.TestCase):

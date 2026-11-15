@@ -10,6 +10,7 @@ import platform
 import sys
 
 from .. import supervisor
+from ..adapters import gpu
 from ..adapters import inputs as inp
 from ..adapters.outputs import OutputStage
 from ..engine.graph import build_graph
@@ -17,8 +18,8 @@ from ..loader import container, parser
 from ..loader.errors import BlobError
 from ..loader.source import EFIVAR, NoBlob, read_raw
 
-MODULES = ("surface_aggregator", "surface_aggregator_cdev", "surface_temp", "surface_dtx", "surface_battery",
-           "surface_platform_profile")
+MODULES = ("surface_aggregator", "surface_aggregator_cdev", "surface_temp", "surface_fan", "surface_dtx", "surface_battery",
+           "surface_charger", "surface_platform_profile")
 
 
 def main(argv=None) -> int:
@@ -57,23 +58,40 @@ def main(argv=None) -> int:
         lines.append(f"  unsupported: {u.guid[:8]} ({u.reason.split(':')[0]}) -> {', '.join(str(r) for r in u.reaches) or 'no output'}")
     sources = [inp.HwmonTemperatures(root), inp.SliderState(root), inp.Batteries(root), inp.Posture(root, lambda: None)]
     provided = set().union(*(s.channels for s in sources))
-    if args.with_ec:
-        pp = inp.PlatformPower(root)
+    # EC power data (spec inputs 6): from the kernel attributes if present, else only through the debug device.
+    pp = inp.PlatformPower(root)
+    if not pp.needs_cdev:
+        lines.append("EC power data: kernel attributes (power_supply dptf_battery / dptf_power)")
+        provided |= pp.channels
+        via_cdev = set()
+    else:
+        lines.append("EC power data: debug device only (needs root and surface_aggregator_cdev; "
+                     "kernel attributes missing)")
+        via_cdev = set(pp.channels)
+    if args.with_ec and via_cdev:
         pp.refresh()
         lines.append(f"EC 0x53 request answers: {pp.ok}; PSU size answers: {pp.values.get(inp.ChannelRef(inp.POWER, 7)) is not None}")
         if pp.ok:
-            provided |= pp.channels
-    else:
-        provided |= inp.PlatformPower(root, transport=None).channels
+            provided |= via_cdev
+            via_cdev = set()
     lines.append("inputs:")
     for ref in sorted(graph.inputs):
         if ref.guid == inp.PLACEHOLDER:
             continue
-        lines.append(f"  {ref}: {'provided' if ref in provided else 'not available'}")
+        state = "provided" if ref in provided else "needs the debug device" if ref in via_cdev else "not available"
+        lines.append(f"  {ref}: {state}")
     stage = OutputStage(root, graph.output_ranges, dry_run=True)
+    dgpu_ref = inp.ChannelRef("0B7B5350-BB8C-4459-8D4A-A75C57073801", 201)
+    stand_in = gpu.find_nvidia_gpu(root) is not None          # the stand-in needs an NVIDIA dGPU
     lines.append("outputs:")
     for ref in sorted(graph.outputs):
-        lines.append(f"  {ref}: {'writable (powercap)' if ref in stage.targets else 'log-only'}")
+        if ref in stage.targets:
+            kind = "writable (powercap)"
+        elif ref == dgpu_ref and stand_in:
+            kind = "clock-cap stand-in (DO-1)" + ("" if prof and prof.dgpu_clock_cap else ", off in this profile")
+        else:
+            kind = "log-only"
+        lines.append(f"  {ref}: {kind}")
     print("\n".join(lines))
     return 0
 
