@@ -184,9 +184,17 @@ Quantises the input to steps of `step` above `min`, with a hysteresis of one ste
     5. Then: if `c ≤ min`, the band is `[min, min + step]` and the result is `min`; else if `c ≥ max`, the band is `[q(max), max]` and the result is `max`.
 - **Reset:** the state is kept on resume [H, as 5.1].
 
-### 5.4 Planned
+### 5.4 Multiply/divide (`3D42677C`)
+- **Inputs/outputs:** k inputs, 1 output.
+- **Parameters:** `default, max, min, invert[0..k-1]`. There are `k + 3` columns.
+- **Checks:** `min ≤ max`, `min ≤ default ≤ max`.
+- **Result:**
+  - not `inputs_ok` → `default`.
+  - Otherwise the product of all inputs, starting from 1. An input with `invert[j] ≠ 0` enters as `1/x`; if `|x| < 0.001` it enters as 1000 for `x ≥ 0` and −1000 for `x < 0` [C].
+  - The output is `clamp(product, max, min)`.
+
+### 5.5 Planned
 These are described from the survey (`../research/04-smf-device-survey.md`). Their exact semantics will be read from the code and added here before they are implemented.
-- **Multiply/divide (`3D42677C`):** the product of the inputs, each optionally inverted, then clamped.
 - **Weighted mean (`A0CE482E`):** a weighted mean plus an offset, clamped.
 - **EWMA (`54C09C3D`):**
   - Parameters: `max, min, tau_ms, default`. Update: `y += (Δt/τ)·(x − y)`.

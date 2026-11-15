@@ -194,7 +194,7 @@ Blocks are looked up by algorithm GUID (upper case). Core type numbers are never
 | `9E2A7FED` | PID with parameter sets | controller | implemented |
 | `83F47D50` | parameter set (data only) | controller | implemented |
 | `76536F66` | conditional table | engine 5.1 | implemented |
-| `3D42677C` | multiply/divide | engine 5 | planned |
+| `3D42677C` | multiply/divide | engine 5.4 | implemented |
 | `A58AF9AA` | hysteresis quantiser | engine 5.3 | implemented |
 | `0DBF7FAB` | hysteresis table | engine 5.2 | implemented |
 | `A0CE482E` | weighted mean | engine 5 | planned |

@@ -152,5 +152,33 @@ class HysteresisQuantiserTest(unittest.TestCase):
                 single(G["hysteresis_quantiser"], [X], params)
 
 
+class MultiplyDivideTest(unittest.TestCase):
+    def test_product_and_quotient(self):
+        _, eng = single(G["multiply_divide"], [X, Y], [7, 1000, -1000, 0, 0])
+        self.assertEqual(run(eng, {X: 3, Y: 4}), 12)
+        _, eng = single(G["multiply_divide"], [X, Y], [7, 1000, -1000, 1, 0])
+        self.assertEqual(run(eng, {X: 4, Y: 10}), 2.5)
+
+    def test_clamped(self):
+        _, eng = single(G["multiply_divide"], [X, Y], [50, 100, 10, 0, 0])
+        self.assertEqual(run(eng, {X: 30, Y: 4}), 100)
+        self.assertEqual(run(eng, {X: 1, Y: 4}), 10)
+
+    def test_near_zero_divisor(self):
+        _, eng = single(G["multiply_divide"], [X, Y], [7, 1e9, -1e9, 1, 0])
+        self.assertEqual(run(eng, {X: 0.0005, Y: 2}), 2000)
+        self.assertEqual(run(eng, {X: -0.0005, Y: 2}), -2000)
+        self.assertEqual(run(eng, {X: 0, Y: 2}), 2000)
+
+    def test_invalid_input_gives_default(self):
+        _, eng = single(G["multiply_divide"], [X, Y], [50, 100, 10, 0, 0])
+        self.assertEqual(run(eng, {X: 30, Y: None}), 50)
+
+    def test_checks(self):
+        for params in ([7, 10, 100, 0, 0], [7, 5, 0, 0, 0], [7, 100, 10, 0, 0], [7, 100, 0, 0]):
+            with self.subTest(params=params), self.assertRaises(BlobError):
+                single(G["multiply_divide"], [X, Y], params)
+
+
 if __name__ == "__main__":
     unittest.main()
