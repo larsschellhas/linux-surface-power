@@ -65,28 +65,37 @@ The three arm64 cores (3.181, 3.205.8, 3.205.17) were checked separately:
 - **Not checked:** whether the arm64 compiler contracts multiply-adds into fused operations. That can change the last bit of a result,
   not the behaviour [H].
 
-## 4. Inputs the newer blobs need [C, blob text; Linux sources H]
+## 4. Inputs the newer blobs need
 
 Inputs that reach PL1, PL2 or psys in some blobs but have no Linux source in the daemon yet. While such an input is missing, the daemon
 stays in dry-run on that device (`../specs/supervisor.md` 2.5), even though the blob itself is fully supported.
 
-| Channel | Microsoft name | Blobs reading it / reaching PL1-PL2-psys | Possible Linux source [H] |
-|---|---|---|---|
-| `1FB53D4C/42` | `_I_DISP_PWR1` (display power) | 29 / 29 | not known; on Windows the display client reports the panel brightness [H] |
-| `1FB53D4C/31` | not named | 2 / 2 | Laptop Studio dGPU blobs; not analysed |
-| `28B7BD85/12` | `I_BCDR1_I` (battery current, mA [H]) | 29 / 20 | `power_supply` `current_now` |
-| `28B7BD85/13` | `I_BDR_EWMA1_LVL` | 24 / 16 | not known; probably derived from channel 12 by the power-tracker client |
-| `28B7BD85/16` | `I_BAT1_MAX_CHARGE` | 12 / 9 | not known |
-| `8060B17F/2` | `I_EXT_DISPLAY` | 37 / 27 | DRM connector status |
-| `8060B17F/3` | `I_CAMERA` | 34 / 25 | camera in use (e.g. an open video device) |
-| `8060B17F/9` | `I_SURF_DOCK` | 19 / 11 | Surface Dock present (USB or Thunderbolt device) |
-| `DEF1AB69/100` | `I_MS_NOTIFY` | 24 / 16 | not known |
-| `049E36F2/9` | `I_USB_SOURCE_PWR` | 8 / 8 | USB-C PD source power (`ucsi`/`typec`), arm64 devices |
-| `1FB53D4C/3` | `_I_DGPU_PWR` | 2 / 2 | NVML (Laptop Studio dGPU) |
-| `87008365/5`, `/113` | composite sensors | 2 / 2, 1 / 1 | the 14/19-field channel definitions, not analysed (`../specs/blob-format.md` 5.2a) |
+Sources of the facts:
+- the blobs (macro names, value ranges, how the blocks use the value) [C];
+- the Windows clients of the Laptop 7 Intel and Laptop 4 AMD driver packages (which client provides the value and what it measures) [C];
+- this SB3 (whether Linux has a matching sysfs entry) [M].
 
-Values of these inputs (units, encodings, which client provides them) still have to be read from the Windows clients before adapters are
-written. That is the next step for the newer devices.
+The Linux sources are candidates until an adapter has been compared on a device that needs it [H].
+
+| Channel | Microsoft name | Blobs reading it / reaching a limit | What Windows sends | Linux source |
+|---|---|---|---|---|
+| `1FB53D4C/42` | `I_DISP_PERCENT1` | 29 / 29 | Display brightness in percent, 0–100, from the Windows power setting for the current monitor brightness. The blob turns it into display power itself (e.g. 43.73 · % − 1554.4 mW). | `/sys/class/backlight/*`: `brightness` / `max_brightness` · 100 [H: Windows percent and the raw backlight scale may not be linear to each other] |
+| `8060B17F/2` | `I_EXT_DISPLAY` | 37 / 27 | 1 while a wired external monitor is connected, else 0. Reported by the user-mode service. | `/sys/class/drm/card*-*/status` = `connected` for any connector except `eDP`/`LVDS`/`DSI` [M: `DP-1 connected` here] |
+| `8060B17F/3` | `I_CAMERA` | 34 / 25 | 1 while an application uses a camera, else 0 (Windows sensor-activity monitor). | Runtime-PM state of the camera device: `power/runtime_status` = `active` while streaming [M: a USB webcam here shows `suspended` when idle]. The built-in IPU cameras need a check on a device. |
+| `8060B17F/9` | `I_SURF_DOCK` | 19 / 11 | Number of attached Surface Dock USB hubs: Microsoft vendor 045E with product 0900, 0857 or 09A9. It counts up on attach and down on removal. | USB devices with `idVendor` 045e and one of these `idProduct` values below `/sys/bus/usb/devices` |
+| `28B7BD85/12` | `I_BCDR1_I` | 29 / 20 | Battery discharge rate in mA. It is signed in some blobs (range ±14400), and one blob smooths it over ±15000 mA. The system client reads it from the power tracker, which gets it from a battery driver that is not in the local packages. | `power_supply` `current_now`, else `power_now` / `voltage_now`. The sign convention is open: Linux reports positive values for both directions on some drivers [H]. |
+| `28B7BD85/13` | `I_BDR_EWMA1_LVL` | 24 / 16 | An integer level 0–16 that selects controller sets. It comes from the same battery driver. The power tracker does not compute it. | open: needs the battery driver (not in the local packages) |
+| `28B7BD85/16` | `I_BAT1_MAX_CHARGE` | 12 / 9 | A value that a conditional table compares with bands up to 25001 or 55001, next to the input power limit (mW) [H: a charge power in mW]. Same battery driver. | open: needs the battery driver |
+| `DEF1AB69/100` | `I_MS_NOTIFY` | 24 / 16 | A level 1–5. The interface belongs to the Surface thermal-policy driver on the ACPI thermal zone `TPOL` (`MSHW0187`). That driver reads Windows thermal-zone values from the devices that the ACPI method `INPS` lists, and turns SMF outputs into Windows thermal requests for the devices that `OPTS` lists. The SB3 has `TPOL` with `OPTS` only. | open: needs the ACPI tables (`INPS`) of a device whose blob reads it |
+| `049E36F2/9` | `I_USB_SOURCE_PWR` | 8 / 8 | Power data item of the power tracker, mW (ranges 0–16000/32000). A block combines it with the input power limit [H: power the device supplies to USB peripherals]. The providing driver is not in the local packages. | candidates: `/sys/class/typec` port power role and PD contracts; open |
+| `1FB53D4C/3` | `_I_DGPU_PWR` | 2 / 2 | dGPU power (Laptop Studio). | NVML / `nvidia-smi --query-gpu=power.draw` |
+| `1FB53D4C/31` | not named | 2 / 2 | range 0–8, Laptop Studio dGPU blobs | open |
+| `87008365/5`, `/113` | composite sensors | 2 / 2, 1 / 1 | the 14/19-field channel definitions, not analysed (`../specs/blob-format.md` 5.2a) | open |
+
+- **Ready for adapters:** display brightness, external display, camera, dock, and battery current with a sign check. These four channels and
+  channel 12 cover most devices in the README overview.
+- **Need more material:** channels 13 and 16 and USB source power come from Surface battery and USB-C drivers that are not in the local
+  package extracts (they were not kept). `I_MS_NOTIFY` needs an ACPI dump of an affected device.
 
 ## 5. Start-up observation [C, engine run]
 
