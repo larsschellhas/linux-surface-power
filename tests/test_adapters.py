@@ -1,4 +1,5 @@
 """Tests for the input and output adapters on a fake sysfs (spec inputs, outputs; AC-I4, AC-O1, AC-S7)."""
+import os
 import unittest
 
 from fakesys import FakeSys
@@ -110,6 +111,37 @@ class InputsTest(unittest.TestCase):
         calls = tr.calls
         pp.read(62000)
         self.assertGreater(tr.calls, calls)                        # every 60 s
+
+    def test_platform_power_from_sysfs(self):
+        """With the kernel attributes (surface_battery dptf_battery, surface_charger dptf_power) no cdev request is made,
+        and an EC event that the kernel has applied is seen at the next read."""
+        for bat, ipl in (("BAT1", 73113), ("BAT2", 119250)):
+            d = f"sys/class/power_supply/{bat}/dptf_battery"
+            for name, value in (("max_platform_power_mw", 41440), ("max_steady_state_power_mw", 34130),
+                                ("high_freq_impedance_mohm", 174), ("no_load_voltage_mv", 8082),
+                                ("available_input_power_mw", ipl), ("rest_of_platform_power_mw", 9700)):
+                self.fs.write(f"{d}/{name}", value)
+        self.fs.write("sys/class/power_supply/ADP1/dptf_power/adapter_rating_mw", 120000)
+        tr = FakeTransport()
+        pp = inputs.PlatformPower(self.fs.root, transport=tr)
+        v = pp.read(0)
+        self.assertEqual((v[ref(POWER, 2)], v[ref(POWER, 4)], v[ref(POWER, 5)]), (41440, 174, 8082))
+        self.assertEqual((v[ref(POWER, 8)], v[ref(POWER, 108)], v[ref(POWER, 7)]), (73113, 119250, 120000))
+        self.assertEqual(tr.calls, 0)
+        self.assertFalse(pp.needs_cdev)
+        self.fs.write("sys/class/power_supply/BAT2/dptf_battery/available_input_power_mw", 65000)   # event: base on USB-C
+        self.assertEqual(pp.read(1000)[ref(POWER, 108)], 65000)
+
+    def test_platform_power_unknown_adapter_rating(self):
+        """ENODATA (no rating known) reads as missing; the attribute's existence still means: no cdev for it."""
+        self.fs.write("sys/class/power_supply/BAT1/dptf_battery/available_input_power_mw", 45720)
+        os.makedirs(self.fs.path("sys/class/power_supply/ADP1/dptf_power"), exist_ok=True)
+        os.makedirs(self.fs.path("sys/class/power_supply/ADP1/dptf_power/adapter_rating_mw"))   # a read fails like ENODATA
+        tr = FakeTransport()
+        v = inputs.PlatformPower(self.fs.root, transport=tr).read(0)
+        self.assertIsNone(v[ref(POWER, 7)])
+        self.assertEqual(v[ref(POWER, 8)], 45720)
+        self.assertEqual(v[ref(POWER, 108)], 119200)                     # BAT2 has no attributes here: cdev
 
     def test_platform_power_without_transport_is_invalid(self):
         pp = inputs.PlatformPower(self.fs.root, transport=FakeTransport(fail=True))

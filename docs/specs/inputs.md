@@ -74,6 +74,13 @@ The SB3 15" blob reads only posture 1, through the PL1 and dGPU posture tables. 
 
 ## 6. EC requests for platform power data (FR-I4, NFR-11)
 The same payload also arrives as an EC event on some devices (surface-aggregator-module#29, values there fit the field names below).
+- **Preferred source: kernel attributes.**
+  - `power_supply/BAT<n>/dptf_battery/{max_platform_power_mw, max_steady_state_power_mw, high_freq_impedance_mohm, no_load_voltage_mv, available_input_power_mw, rest_of_platform_power_mw}` come from `surface_battery`, which applies the EC event.
+  - `power_supply/ADP1/dptf_power/adapter_rating_mw` comes from `surface_charger`. It gives ENODATA while no rating is known.
+  - The names follow the DPTF participant ABI (`sysfs-platform-dptf`).
+  - Prototype patches tested on the SB3 15" (15.11.2026 [M]). They are not upstream yet.
+  - With them, these channels need neither root nor the debug device. The values match the debug-device readings exactly.
+- **Fallback:** the requests below through the debug device, per battery, only where the kernel attributes are missing.
 - **Requests:**
   - **`0x53` "TpUpdate"**: target category 0x02 (BAT), command 0x53, instance 1, with response; sent to SAM and to KIP. The 21-byte answer:
     - @0 u8 version;

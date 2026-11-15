@@ -172,9 +172,10 @@ class Daemon:
         # The EC power data come through the SSAM debug device for now (NFR-11). Without it they stay invalid and the
         # blob falls back (SB3: psys 23/34.5 W), so say clearly what is missing.
         available = getattr(self.platform.transport, "available", None)
-        if available and not available() and any(r.guid == inp.POWER for r in self.graph.inputs):
-            self.log("warning", f"{self.platform.transport.path} missing: load the module surface_aggregator_cdev; "
-                                "until then the EC power data are invalid")
+        if (self.platform.needs_cdev and available and not available()
+                and any(r.guid == inp.POWER for r in self.graph.inputs)):
+            self.log("warning", f"{self.platform.transport.path} missing and no kernel DPTF attributes: load the module "
+                                "surface_aggregator_cdev; until then the EC power data are invalid")
         for note in self.outputs.notes:
             self.log("info", note)
 

@@ -259,31 +259,70 @@ class CdevTransport:
 
 
 class PlatformPower(Source):
-    """`0x53` fields of SAM (battery 1) and KIP (battery 2) and the PSU size, requested at start, on AC changes, every 60 s."""
+    """`0x53` fields of SAM (battery 1) and KIP (battery 2) and the PSU size (spec inputs 6).
+
+    Preferred source: the kernel attributes `power_supply/BAT<n>/dptf_battery/*` (surface_battery) and
+    `power_supply/ADP1/dptf_power/adapter_rating_mw` (surface_charger). The kernel updates the battery values on the EC
+    event, so they are read on every call. Without these attributes, the values are requested through the SSAM debug
+    device (interim, NFR-11): at start, on AC changes and every 60 s. The two paths can be mixed per battery.
+    """
 
     REFRESH_MS = 60000
-    # (offset, struct format, channel offset within the battery's block: 0 for SAM -> channels 2..8, 100 for KIP)
-    FIELDS = ((1, "<I", 2), (5, "<I", 3), (9, "<H", 4), (11, "<H", 5), (17, "<I", 6), (13, "<I", 8))
+    # (offset in the 0x53 answer, struct format, kernel attribute, channel offset within the battery's block)
+    FIELDS = ((1, "<I", "max_platform_power_mw", 2), (5, "<I", "max_steady_state_power_mw", 3),
+              (9, "<H", "high_freq_impedance_mohm", 4), (11, "<H", "no_load_voltage_mv", 5),
+              (17, "<I", "rest_of_platform_power_mw", 6), (13, "<I", "available_input_power_mw", 8))
+    BATTERIES = ((1, "BAT1", 0), (2, "BAT2", 100))      # (SSAM target, power_supply name, channel base)
+    ARTG = ChannelRef(POWER, 7)
 
     def __init__(self, root: str = "/", transport=None):
         self.root = root
         self.transport = transport if transport is not None else CdevTransport(os.path.join(root, SSAM_CDEV.lstrip("/")))
-        self.channels = {ChannelRef(POWER, base + ch) for base in (0, 100) for *_, ch in self.FIELDS} | {ChannelRef(POWER, 7)}
+        self.channels = {ChannelRef(POWER, base + f[3]) for *_, base in self.BATTERIES for f in self.FIELDS} | {self.ARTG}
         self.values: dict[ChannelRef, float | None] = {ref: None for ref in self.channels}
         self.next_ms: int | None = None
         self.ac: bool | None = None
         self.ok = False
 
+    def _psy(self, *parts: str) -> str:
+        return os.path.join(self.root, "sys/class/power_supply", *parts)
+
+    def _sysfs_battery(self, name: str) -> str | None:
+        d = self._psy(name, "dptf_battery")
+        return d if os.path.isdir(d) else None
+
+    def _sysfs_artg(self) -> str | None:
+        p = self._psy("ADP1", "dptf_power", "adapter_rating_mw")
+        return p if os.path.exists(p) else None
+
+    @property
+    def needs_cdev(self) -> bool:
+        """True if any value still has to come through the SSAM debug device."""
+        return self._sysfs_artg() is None or any(self._sysfs_battery(n) is None for _, n, _ in self.BATTERIES)
+
+    def _read_sysfs(self) -> None:
+        for _, name, base in self.BATTERIES:
+            d = self._sysfs_battery(name)
+            if d:
+                for *_, attr, ch in self.FIELDS:
+                    self.values[ChannelRef(POWER, base + ch)] = _int(os.path.join(d, attr))
+        p = self._sysfs_artg()
+        if p:
+            self.values[self.ARTG] = _int(p)            # ENODATA (no rating known) reads as None
+
     def refresh(self) -> None:
-        for tid, base in ((1, 0), (2, 100)):
+        """Requests through the debug device for everything the kernel does not provide."""
+        for tid, name, base in self.BATTERIES:
+            if self._sysfs_battery(name):
+                continue
             data = self.transport.request(tid, 0x53)
-            for off, fmt, ch in self.FIELDS:
-                ref = ChannelRef(POWER, base + ch)
-                self.values[ref] = struct.unpack_from(fmt, data, off)[0] if data and len(data) >= 21 else None
-        artg = self.transport.request(1, 0x0F)
-        v = struct.unpack_from("<I", artg, 0)[0] if artg and len(artg) >= 4 else None
-        self.values[ChannelRef(POWER, 7)] = None if v in (None, 0x80000000) else v
-        self.ok = self.values[ChannelRef(POWER, 8)] is not None
+            for off, fmt, _, ch in self.FIELDS:
+                self.values[ChannelRef(POWER, base + ch)] = (struct.unpack_from(fmt, data, off)[0]
+                                                            if data and len(data) >= 21 else None)
+        if not self._sysfs_artg():
+            artg = self.transport.request(1, 0x0F)
+            v = struct.unpack_from("<I", artg, 0)[0] if artg and len(artg) >= 4 else None
+            self.values[self.ARTG] = None if v in (None, 0x80000000) else v
 
     def request_refresh(self) -> None:
         """Force a refresh at the next read, e.g. after resume."""
@@ -291,10 +330,12 @@ class PlatformPower(Source):
 
     def read(self, now_ms):
         ac = _ac_online(self.root)
-        if self.next_ms is None or now_ms >= self.next_ms or ac != self.ac:
-            self.ac = ac
+        if self.needs_cdev and (self.next_ms is None or now_ms >= self.next_ms or ac != self.ac):
             self.refresh()
             self.next_ms = now_ms + self.REFRESH_MS
+        self.ac = ac
+        self._read_sysfs()
+        self.ok = self.values[ChannelRef(POWER, 8)] is not None
         return dict(self.values)
 
 
