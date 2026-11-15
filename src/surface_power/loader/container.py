@@ -96,7 +96,31 @@ def _capsule(data: bytes) -> Decoded | None:
     return None
 
 
+# Interface GUIDs that occur in Windows MPTF configurations (Surface models from 2025 on) and in no SMF blob [C, corpus].
+MPTF_GUIDS = (b"91B8EBF1-53CA-4C24-B57D-D67DD628E884", b"DA0BCF26-F12B-4B03-9A67-96FABB567786")
+MPTF_MESSAGE = ("this is a Windows MPTF configuration (Surface models from 2025 on), not an SMF blob; "
+                "MPTF is not supported")
+
+
+def _is_mptf(raw: bytes) -> bool:
+    upper = raw.upper()
+    return any(g in upper for g in MPTF_GUIDS)
+
+
+def _check_not_mptf(found: Decoded) -> Decoded:
+    if _is_mptf(found.text.encode("ascii", "replace")):
+        raise BlobError(MPTF_MESSAGE)
+    return found
+
+
 def decode(data: bytes, efivar: bool = False) -> Decoded:
+    """Detect the delivery form and return the decoded text. `efivar=True` strips the 4 bytes of EFI attributes first.
+    MPTF configurations are rejected with a clear message."""
+    found = _decode(data, efivar)
+    return _check_not_mptf(found)
+
+
+def _decode(data: bytes, efivar: bool) -> Decoded:
     """Detect the delivery form and return the decoded text. `efivar=True` strips the 4 bytes of EFI attributes first."""
     if efivar:
         if len(data) < 4:
@@ -118,4 +142,11 @@ def decode(data: bytes, efivar: bool = False) -> Decoded:
     found = _capsule(data)
     if found is not None:
         return found
+    if lznt1.looks_like_stream(data):
+        try:
+            if _is_mptf(lznt1.decompress(data)):
+                raise BlobError(MPTF_MESSAGE)
+        except BlobError as e:
+            if e.message == MPTF_MESSAGE:
+                raise
     raise BlobError("unknown blob format")

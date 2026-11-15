@@ -33,6 +33,8 @@ Byte order is little-endian. `u32[i]` is the i-th 32-bit word of a header.
 
 Detection order: B, A, C, Text, Capsule. A blob that matches none fails with "unknown format".
 
+**MPTF configurations** (Surface models from 2025 on, and their telemetry files) are not SMF blobs. They are rejected with a message that says so: a decoded text, or a raw LZNT1 stream that decodes to one, that contains the interface GUIDs `91B8EBF1-53CA-4C24-B57D-D67DD628E884` or `DA0BCF26-F12B-4B03-9A67-96FABB567786`. These occur in every MPTF file of the corpus and in no SMF blob [C].
+
 ## 3. LZNT1 (MS-XCA)
 - **Chunks:** The stream is a sequence of chunks. Each chunk starts with a u16 header:
   - bits 0–11: chunk size − 1, without the 2 header bytes;

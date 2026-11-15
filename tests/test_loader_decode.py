@@ -50,6 +50,13 @@ class Lznt1Test(unittest.TestCase):
 
 
 class ContainerTest(unittest.TestCase):
+    def test_mptf_is_rejected_clearly(self):
+        mptf = "#macro A 1\r\n{91b8ebf1-53ca-4c24-b57d-d67dd628e884}_600,1,3151\r\n"
+        for data in (mptf.encode(), lznt1_compress(mptf.encode()), form_b(mptf)):
+            with self.subTest(data=data[:8]), self.assertRaises(BlobError) as cm:
+                container.decode(data)
+            self.assertIn("MPTF", cm.exception.message)
+
     def test_form_b(self):
         res = container.decode(form_b(SAMPLE))
         self.assertEqual(res.form, "B")
