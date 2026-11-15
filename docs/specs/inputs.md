@@ -51,7 +51,7 @@ Readings outside the input-line range (`blob-format.md` 5.1) are invalid (FR-I2)
 ## 4. Posture and lid (FR-I6)
 - **Mode:** `surface_dtx` (`/dev/surface/dtx`, ioctl `SDTX_IOCTL_GET_DEVICE_MODE`) gives 0 = tablet, 1 = laptop, 2 = studio.
 - **Lid:** from `/proc/acpi/button/lid/*/state`.
-- **Mapping** (Windows hot-plug driver [C], with [H] for value 3):
+- **Mapping** (Windows hot-plug driver [C]; for value 3 the Windows side is [H], the Linux side measured [M]):
 
 | Device mode | Lid open | Lid closed |
 |---|---|---|
@@ -59,6 +59,11 @@ Readings outside the input-line range (`blob-format.md` 5.1) are invalid (FR-I2)
 | studio | 5 | 4 |
 | tablet or no base | 3 | 3 |
 | dtx not available | 1 [D] | 2 [D] |
+
+**Measured on the SB3 15" (15.11.2026, lid open):** the device mode follows the base as expected. Attached gives mode 1 (posture 1),
+detached gives mode 0 with base state 0 (posture 3), and the display attached the other way round gives mode 2 (posture 5).
+- During detaching, mode 0 appears up to 2 s before the base state changes. During attaching, mode 1 can show for under a second before mode 2.
+- The Linux side of the mapping is confirmed. Whether Windows also reports 3 for a detached display stays [H]. The lid-closed values (2, 4) were not tested.
 
 The SB3 15" blob reads only posture 1, through the PL1 and dGPU posture tables. Laptop, the normal case, gives 30 W, which does not limit.
 
