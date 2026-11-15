@@ -17,6 +17,7 @@ Markers used in the summaries:
 | [05-linux-interfaces.md](05-linux-interfaces.md) | Where SMF's inputs and outputs are on Linux, and what is missing |
 | [06-prototype-and-related-work.md](06-prototype-and-related-work.md) | The existing prototype controller and service, related projects and issues |
 | [07-closed-loop-simulation.md](07-closed-loop-simulation.md) | Engine + measured thermal model of the SB3 against the Windows behaviour (cut, steps, steady state) |
+| [08-field-tests-sb3.md](08-field-tests-sb3.md) | Control mode on the SB3 15" (AC-L1 – AC-L3): results against Windows, findings, base sensors and fans |
 
 ## Raw material (`raw/`, local only)
 
