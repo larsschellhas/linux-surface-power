@@ -2,7 +2,7 @@
 # systemd sleep hook (install to /usr/lib/systemd/system-sleep/). Spec supervisor 7:
 # before sleep the daemon restores the firmware values and pauses; after resume it resets the engine and continues.
 case "$1" in
-    pre)  systemctl kill --signal=SIGUSR2 surface-powerd.service 2>/dev/null; sleep 1 ;;
-    post) systemctl kill --signal=SIGUSR1 surface-powerd.service 2>/dev/null ;;
+    pre)  for u in surface-powerd.service surface-powerd-dryrun.service; do systemctl kill --signal=SIGUSR2 "$u" 2>/dev/null; done; sleep 1 ;;
+    post) for u in surface-powerd.service surface-powerd-dryrun.service; do systemctl kill --signal=SIGUSR1 "$u" 2>/dev/null; done ;;
 esac
 exit 0

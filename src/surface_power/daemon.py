@@ -108,6 +108,8 @@ class Daemon:
             self.mode = "control"
         else:
             self.mode = "dry-run"
+        if self.mode == "control" and supervisor.thermald_running(root):
+            raise Idle("thermald is running and would fight over PL1; stop it (systemd: Conflicts=) or use --dry-run")
         if not self.graph.usable_for_control and self.mode == "control":
             self.log("warning", "blob has unsupported blocks on an output path; dry-run only")
             self.mode = "dry-run"

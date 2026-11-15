@@ -7,8 +7,8 @@ name = "linux-surface-power"
 version = "0.1.0"
 description = "Power and thermal management for Microsoft Surface devices on Linux, driven by the device's own SMF blob"
 readme = "README.md"
-license = "MIT OR Apache-2.0"
-license-files = ["LICENSE", "LICENSE-APACHE"]
+# Table form instead of a PEP 639 string, so that setuptools 68 (Ubuntu 24.04) can build the package offline.
+license = { text = "MIT OR Apache-2.0" }
 requires-python = ">=3.11"
 dependencies = []
 classifiers = [
@@ -24,6 +24,9 @@ surface-power-replay = "surface_power.tools.replay:main"
 surface-power-report = "surface_power.tools.report:main"
 surface-power-reset = "surface_power.tools.reset:main"
 surface-power-notify = "surface_power.tools.notify:main"
+
+[tool.setuptools]
+license-files = ["LICENSE", "LICENSE-APACHE"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

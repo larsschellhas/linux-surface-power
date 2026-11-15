@@ -1,0 +1,35 @@
+[Unit]
+Description=Surface power management (SMF blob interpreter), dry-run next to thermald
+Documentation=https://github.com/larsschellhas/linux-surface-power
+After=systemd-modules-load.service
+# Dry-run only (acceptance test AC-L4, idea I-10): computes and logs, writes nothing, so thermald keeps running.
+# Do not enable together with surface-powerd.service.
+Conflicts=surface-powerd.service
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=notify
+NotifyAccess=main
+ExecStart=/usr/bin/surface-powerd --dry-run
+WatchdogSec=10
+TimeoutStopSec=10
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=surface-power
+RuntimeDirectoryMode=0755
+# The snapshot must survive a crash so that the successor and the reset tool know the firmware values.
+RuntimeDirectoryPreserve=yes
+StateDirectory=surface-power
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX
+# DAC_OVERRIDE for powercap and the SSAM cdev; add CAP_SYS_RAWIO only if PL3 via MSR is enabled.
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+MemoryMax=100M
+
+[Install]
+WantedBy=multi-user.target

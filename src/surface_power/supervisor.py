@@ -59,6 +59,18 @@ def _smf_present(root: str) -> bool:
     return False
 
 
+def thermald_running(root: str = "/") -> bool:
+    """True if a thermald process runs (spec supervisor 2.6, FR-S6). Reads /proc/<pid>/comm, so it needs no systemd."""
+    for path in glob.glob(os.path.join(root, "proc/[0-9]*/comm")):
+        try:
+            with open(path) as f:
+                if f.read().strip() == "thermald":
+                    return True
+        except OSError:
+            continue        # the process ended while we looked
+    return False
+
+
 def detect(root: str = "/") -> Device:
     dmi = os.path.join(root, "sys/class/dmi/id")
     smf = _smf_present(root)

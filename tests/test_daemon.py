@@ -149,6 +149,16 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(self.fs.read(PL1), "25000000")
         d.stop()
 
+    def test_control_refuses_while_thermald_runs(self):
+        """FR-S6: thermald changes PL1 itself, so control does not start while it runs; dry-run may run next to it."""
+        self.fs.write("proc/4242/comm", "thermald")
+        with self.assertRaises(daemon.Idle):
+            self.start("--control")
+        self.assertEqual(self.fs.read(PL1), "30000000")
+        d = self.start("--dry-run")
+        self.assertEqual(d.mode, "dry-run")
+        d.stop()
+
     def test_unsupported_device_exits_without_writes(self):  # AC-S8
         self.fs.write("sys/class/dmi/id/sys_vendor", "LENOVO")
         with self.assertRaises(daemon.Idle):
