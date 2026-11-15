@@ -198,7 +198,7 @@ Blocks are looked up by algorithm GUID (upper case). Core type numbers are never
 | `3D42677C` | multiply/divide | engine 5.4 | implemented |
 | `A58AF9AA` | hysteresis quantiser | engine 5.3 | implemented |
 | `0DBF7FAB` | hysteresis table | engine 5.2 | implemented |
-| `A0CE482E` | weighted mean | engine 5 | planned |
+| `A0CE482E` | weighted mean | engine 5.6 | implemented |
 | `0D24F500` | variable-setpoint PID | controller 6 | implemented |
 | `54C09C3D` | EWMA filter | engine 5.5 | implemented |
 | `B34C9310`, `7C2D76F2` | PID cores (types 1, 2) | controller 7 | planned |

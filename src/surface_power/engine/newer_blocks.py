@@ -215,3 +215,29 @@ class Ewma(Block):
         self.y = x if dt >= self.tau else (dt / self.tau) * (x - self.y) + self.y
         self.last_ms = now
         self.write(clamp(self.y, self.max, self.min))
+
+
+@register("weighted_mean")
+class WeightedMean(Block):
+    """Weighted mean of the inputs plus an offset, clamped (spec engine 5.6)."""
+
+    def parse(self, p):
+        k = len(self.inputs)
+        p.count(k + 5)
+        self.max, self.min, self.default = p.real(0, "max"), p.real(1, "min"), p.real(2, "default")
+        self.offset, self.strict = p.real(3, "offset"), p.int(4, "strict") != 0
+        self.weights = p.reals(5, k, "weight")
+        if not (self.min <= self.max and self.min <= self.default <= self.max):
+            raise p.fail("needs min <= default <= max")
+
+    def run(self, ctx):
+        if not self.outputs:
+            return
+        self.write(self.default)
+        if not self.strict and not all(s.valid for s in self.inputs):
+            return
+        total = sum(self.weights)
+        m = self.default
+        if self.inputs and total != 0:
+            m = sum(w * s.value for w, s in zip(self.weights, self.inputs)) / total + self.offset
+        self.write(clamp(m, self.max, self.min))

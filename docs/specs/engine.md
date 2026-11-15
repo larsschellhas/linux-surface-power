@@ -214,9 +214,17 @@ Time-based exponential smoothing.
 - **Core 3.204.23** (Pro 10) has no `Δt ≥ τ` rule; there `y` overshoots `x` when `Δt > τ`. We always apply the rule (DH-9).
 - **Reset:** the state is kept on resume [H, as 5.1].
 
-### 5.6 Planned
-These are described from the survey (`../research/04-smf-device-survey.md`). Their exact semantics will be read from the code and added here before they are implemented.
-- **Weighted mean (`A0CE482E`):** a weighted mean plus an offset, clamped.
+### 5.6 Weighted mean (`A0CE482E`)
+Read from core 3.140 (SB3), the core of the only blob that uses it (SB3 13") [C].
+- **Inputs/outputs:** k inputs, 1 output.
+- **Parameters:** `max, min, default, offset, strict, weight[0..k-1]`. There are `k + 5` columns.
+- **Checks:** `min ≤ max`, `min ≤ default ≤ max`.
+- **Result:**
+  - The block first writes `default`.
+  - If an input is invalid and `strict == 0`, it stops there: the output is `default`.
+  - Otherwise `m = Σ weight[j]·x[j] / Σ weight[j] + offset`; with `strict ≠ 0`, invalid inputs take part with their last value, as in 4.3.
+  - If `Σ weight[j] = 0` (or there are no inputs), `m = default`.
+  - The output is `clamp(m, max, min)`.
 
 ## 6. Numeric tolerances (FR-E7)
 - **Deterministic results:** the same blob and the same input sequence give bit-identical results on one platform (AC-E9).

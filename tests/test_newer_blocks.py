@@ -336,5 +336,28 @@ class VariablePidTest(unittest.TestCase):
         self.assertEqual(len(graph.unsupported), 1)
 
 
+class WeightedMeanTest(unittest.TestCase):
+    def test_mean_with_offset_and_clamp(self):
+        _, eng = single(G["weighted_mean"], [X, Y], [100, 0, 50, 2, 0, 1, 3])
+        self.assertEqual(run(eng, {X: 10, Y: 30}), 27)          # (10 + 90) / 4 + 2
+        self.assertEqual(run(eng, {X: 200, Y: 200}), 100)
+
+    def test_invalid_input(self):
+        _, eng = single(G["weighted_mean"], [X, Y], [100, 0, 50, 0, 0, 1, 1])
+        self.assertEqual(run(eng, {X: 10, Y: None}), 50)        # strict 0: default
+        _, eng = single(G["weighted_mean"], [X, Y], [100, 0, 50, 0, 1, 1, 1])
+        self.assertEqual(run(eng, {X: 10, Y: 30}), 20)
+        self.assertEqual(run(eng, {X: 20, Y: None}), 25)        # strict 1: Y keeps 30
+
+    def test_zero_weights_give_default(self):
+        _, eng = single(G["weighted_mean"], [X, Y], [100, 0, 50, 0, 0, 0, 0])
+        self.assertEqual(run(eng, {X: 10, Y: 30}), 50)
+
+    def test_checks(self):
+        for params in ([0, 100, 50, 0, 0, 1, 1], [100, 0, 101, 0, 0, 1, 1], [100, 0, 50, 0, 0, 1]):
+            with self.subTest(params=params), self.assertRaises(BlobError):
+                single(G["weighted_mean"], [X, Y], params)
+
+
 if __name__ == "__main__":
     unittest.main()
