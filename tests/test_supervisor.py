@@ -46,6 +46,20 @@ class DetectTest(unittest.TestCase):
         self.assertTrue(d.supported)
         self.assertIsNone(supervisor.find_profile(d))
 
+    def test_profile_by_sku(self):
+        self.fs.write("sys/class/dmi/id/product_name", "Surface Laptop 4")
+        self.fs.write("sys/class/dmi/id/product_sku", "Surface_Laptop_4_1958:1959")
+        p = supervisor.find_profile(supervisor.detect(self.fs.root))
+        self.assertEqual((p.file, p.variant), ("surface-laptop-4-amd.toml", "classic"))
+        self.fs.write("sys/class/dmi/id/product_sku", "Surface_Laptop_4_1950:1951")   # Intel: no profile, direct
+        self.assertIsNone(supervisor.find_profile(supervisor.detect(self.fs.root)))
+
+    def test_shipped_profiles_load(self):
+        names = {p.file for p in supervisor.load_profiles()}
+        self.assertLessEqual({"surface-book-3.toml", "surface-pro-8.toml", "surface-go-3.toml", "surface-laptop-go.toml",
+                              "surface-laptop-studio.toml", "surface-laptop-3-amd.toml", "surface-laptop-4-amd.toml"}, names)
+        self.assertTrue(all(p.variant == "classic" for p in supervisor.load_profiles()))
+
 
 class SnapshotTest(unittest.TestCase):
     def setUp(self):

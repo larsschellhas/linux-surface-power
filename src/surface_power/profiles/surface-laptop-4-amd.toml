@@ -1,0 +1,16 @@
+# Device profile: Surface Laptop 4 AMD (13" and 15"). Spec supervisor 6. Holds no limit values (G-2): those come from the device's blob.
+# Matched by SKU: the SKUs linux-surface's ACPI irq quirk matches. Not validated on a device yet.
+tested = false
+
+[match]
+sku = ["Surface_Laptop_4_1952:1953", "Surface_Laptop_4_1958:1959"]
+
+[blob]
+source = "efivar"
+
+[engine]
+variant = "classic"     # the driver package ships SMF core 3.78 (docs/research/09 3)
+
+[outputs]
+pl3 = false
+pl4 = false

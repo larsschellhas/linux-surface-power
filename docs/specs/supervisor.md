@@ -81,7 +81,7 @@ the blob's controllers that are temperatures; the CPU channel is the `coretemp` 
 ## 6. Device profiles (FR-D3)
 A profile is a small TOML file in `profiles/`. It holds no limit values (G-2). Fields:
 - **Match:**
-  - `match.product_name` and optionally `match.sku`;
+  - `match.product_name` and/or `match.sku` (one SKU or a list; the device's DMI `product_sku` must be one of them). At least one is needed;
   - `blob.source`: `efivar` or a file path (form C devices).
 - **Engine and I/O:**
   - `engine.variant`: `classic` or `direct`;

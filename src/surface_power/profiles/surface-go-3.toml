@@ -1,0 +1,16 @@
+# Device profile: Surface Go 3. Spec supervisor 6. Holds no limit values (G-2): those come from the device's blob.
+# Matched by the product name as matched by the kernel (acpi/battery.c, intel/hid.c). Not validated on a device yet.
+tested = false
+
+[match]
+product_name = "Surface Go 3"
+
+[blob]
+source = "efivar"
+
+[engine]
+variant = "classic"     # the driver package ships SMF core 3.137 (docs/research/09 3)
+
+[outputs]
+pl3 = false
+pl4 = false

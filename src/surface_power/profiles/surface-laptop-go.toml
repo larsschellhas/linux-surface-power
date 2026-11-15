@@ -1,0 +1,16 @@
+# Device profile: Surface Laptop Go (1st generation). Spec supervisor 6. Holds no limit values (G-2): those come from the device's blob.
+# Matched by SKU: SMBIOS SKU from the Surface driver-pack catalog. Not validated on a device yet.
+tested = false
+
+[match]
+sku = ["Surface_Laptop_Go_1943"]
+
+[blob]
+source = "efivar"
+
+[engine]
+variant = "classic"     # the driver package ships SMF core 3.140 (docs/research/09 3)
+
+[outputs]
+pl3 = false
+pl4 = false

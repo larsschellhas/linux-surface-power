@@ -83,8 +83,8 @@ class Profile:
     """A device profile (spec supervisor 6). Holds no limit values."""
 
     file: str
-    product: str
-    sku: str | None
+    product: str | None          # DMI product_name; None matches any
+    sku: tuple[str, ...] | None  # DMI product_sku, any of these; None matches any
     variant: str
     tested: bool
     blob_source: str = "efivar"
@@ -101,7 +101,14 @@ def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
         with open(path, "rb") as f:
             d = tomllib.load(f)
         m, e, o = d.get("match", {}), d.get("engine", {}), d.get("outputs", {})
-        out.append(Profile(os.path.basename(path), m["product_name"], m.get("sku"), e.get("variant", "direct"),
+        sku = m.get("sku")
+        if isinstance(sku, str):
+            sku = (sku,)
+        elif sku is not None:
+            sku = tuple(sku)
+        if m.get("product_name") is None and sku is None:
+            raise ValueError(f"profile {os.path.basename(path)}: needs match.product_name or match.sku")
+        out.append(Profile(os.path.basename(path), m.get("product_name"), sku, e.get("variant", "direct"),
                            bool(d.get("tested", False)), d.get("blob", {}).get("source", "efivar"),
                            bool(o.get("pl3", False)), bool(o.get("pl4", False)), dict(o.get("narrow", {})),
                            d.get("inputs", {}).get("panel_max_nits"), bool(o.get("dgpu_clock_cap", False))))
@@ -110,7 +117,7 @@ def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
 
 def find_profile(device: Device, directory: str = PROFILE_DIR) -> Profile | None:
     for p in load_profiles(directory):
-        if p.product == device.product and (p.sku is None or p.sku == device.sku):
+        if (p.product is None or p.product == device.product) and (p.sku is None or device.sku in p.sku):
             return p
     return None
 

@@ -44,11 +44,26 @@ The variant follows the core in the device's driver package (`../specs/engine.md
 | `classic` | Book 3, Laptop Go 1 (3.140); Pro 8, Go 3, Laptop Studio 1 (3.137); Laptop 4 AMD (3.78); Laptop 3 AMD (2.51 [H: the state machine of 2.51 was not compared]) |
 | `direct` | Laptop Go 2 (3.159); Pro 9, Laptop 5 (3.180); Go 4, Laptop Go 3 (3.202); Laptop Studio 2 (3.204.2); Pro 10 (3.204.23); Laptop 6 (3.205.6); Pro 10 5G (3.205.11); Laptop 7 Intel, Pro 11 Intel (3.205.14); Pro 7+, Laptop 4 Intel (3.205.17); Laptop 7 5G (3.205.23); arm64: Pro 9 5G (3.181), Laptop 7 / Pro 11 Snapdragon (3.205.8), Laptop 13" / Pro 12" 1st Ed. (3.205.17) |
 
-- Without a device profile the daemon uses `direct`. Profiles with `classic` exist for the Book 3, Pro 8 and Laptop Studio, whose DMI
-  product names are known from the kernel's `surface_gpe` driver.
-- For Laptop Go 1, Go 3, Laptop 3 AMD and Laptop 4 AMD the DMI names are not confirmed yet; tester reports will show them.
-- The arm64 cores were not read separately. Their type numbers match x64 [C]; that their GUID tables and block behaviour match too is
-  [H].
+- Without a device profile the daemon uses `direct`. Every `classic` device has a profile (untested):
+  - Book 3, Pro 8, Laptop Studio and Go 3 by product name, as the kernel matches them (`surface_gpe`, `acpi/battery.c`,
+    `intel/hid.c`);
+  - Laptop Go 1, Laptop 3 AMD and Laptop 4 AMD by SKU. The SKUs come from a public catalogue of the Surface driver packs (OSDeploy
+    `surface.json`, `SystemId`). They agree with the SKUs the kernel and linux-surface match for the Laptop 3/4, and with the SB3 15"
+    here (`Surface_Book_3_1899`) [M].
+  - Laptop 4 Intel shares its product name with the AMD model, so the AMD profile must match by SKU.
+
+### 3.1 The arm64 cores [C]
+The three arm64 cores (3.181, 3.205.8, 3.205.17) were checked separately:
+- **GUID → type:** the same as in the x64 core of the same generation. 3.181 has one extra type (`061C64E3`) that no blob uses.
+- **3.205.8 and 3.205.17:** every block's run function carries the same source line numbers in its assertions as the x64 cores of the
+  same source generation (3.205.6 / 3.205.11 and 3.205.17). They are built from the same source file.
+  - Spot check: EWMA in 3.205.8 has the `Δt ≥ τ` rule.
+- **3.181** (Pro 9 5G) has no assertions yet. Each run function was matched to its 3.180 x64 counterpart by a normalised code comparison.
+  - The three newer blocks the Pro 9 5G blob uses were then read in full: conditional table, hysteresis table and quantiser. They
+    behave as specified, with the same tolerance of 0.001.
+  - The quantiser truncates instead of rounding down; after clamping the argument is never negative, so both give the same result.
+- **Not checked:** whether the arm64 compiler contracts multiply-adds into fused operations. That can change the last bit of a result,
+  not the behaviour [H].
 
 ## 4. Inputs the newer blobs need [C, blob text; Linux sources H]
 
@@ -80,5 +95,5 @@ stage writes:
 - The SB3 and all other blobs settle in one run.
 
 The scheduler runs an instance only when an input changes or the timer runs, so a device with steady inputs would keep the first-run
-value. On Windows, inputs arrive one by one at boot, which gives several runs [H]. Whether to repeat the first run until the outputs
-settle is open (a deviation choice, not made yet).
+value. On Windows, inputs arrive one by one at boot, which gives several runs [H]. Repeating the first run until the outputs
+settle is noted as idea I-12 (`../requirements/ideas.md`).
