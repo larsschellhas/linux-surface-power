@@ -168,10 +168,25 @@ A step switch: band `i` spans `[down[i], up[i]]` and gives `y[i]`. Neighbouring 
   - In the last two cases the block stores `x`; in all cases the output becomes the new last result.
 - **Reset:** the state is kept on resume [H, as 5.1].
 
-### 5.3 Planned
+### 5.3 Hysteresis quantiser (`A58AF9AA`)
+Quantises the input to steps of `step` above `min`, with a hysteresis of one step.
+- **Inputs/outputs:** reads the first input `x`; 1 output.
+- **Parameters:** `max, min, step, unused, default`. The fourth column is read but not used [C].
+- **Checks:** `step > 0`, `min ≤ max`, `min ≤ default ≤ max`.
+- **State:** the band `[lo, hi]`, initially `[max − step, max]`, and the result, initially `default`.
+- **Result:**
+  - not `inputs_ok` → `default`; the state stays.
+  - Otherwise, with `c = clamp(x, max, min)` and `q(v) = floor((v − min)/step)·step + min`:
+    1. If `|lo − hi| ≠ step` exactly, the band is set to `[q(c), q(c) + step]`.
+    2. **Falling** (`c < lo`): the band becomes `[q(c), min(q(c) + step, max)]`; the result is `min(new hi, old lo)`.
+    3. **Rising** (`c > hi`): the band becomes `[q(c), q(c) + step]`; the result is `max(new lo, old hi)`.
+    4. **Inside** the band: the result stays if it equals `lo` or `hi`; otherwise it becomes `q(c)`. The band stays.
+    5. Then: if `c ≤ min`, the band is `[min, min + step]` and the result is `min`; else if `c ≥ max`, the band is `[q(max), max]` and the result is `max`.
+- **Reset:** the state is kept on resume [H, as 5.1].
+
+### 5.4 Planned
 These are described from the survey (`../research/04-smf-device-survey.md`). Their exact semantics will be read from the code and added here before they are implemented.
 - **Multiply/divide (`3D42677C`):** the product of the inputs, each optionally inverted, then clamped.
-- **Hysteresis quantiser (`A58AF9AA`):** clamp, round down to a step, with a hysteresis of one step.
 - **Weighted mean (`A0CE482E`):** a weighted mean plus an offset, clamped.
 - **EWMA (`54C09C3D`):**
   - Parameters: `max, min, tau_ms, default`. Update: `y += (Δt/τ)·(x − y)`.

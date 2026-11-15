@@ -1,5 +1,8 @@
 """Blocks of newer blobs (spec engine 5). Same conventions as blocks.py."""
+import math
+
 from .blocks import Block
+from .helpers import clamp
 from .registry import register
 
 TOLERANCE = 0.001  # the core's tolerance for "equal" comparisons [C]
@@ -103,3 +106,52 @@ class HysteresisTable(Block):
         if store:
             self.last_x = x
         self.write(self.last_y)
+
+
+@register("hysteresis_quantiser")
+class HysteresisQuantiser(Block):
+    """Quantise to steps above min with a hysteresis of one step (spec engine 5.3)."""
+
+    def parse(self, p):
+        p.count(5)
+        self.max, self.min, self.step = p.real(0, "max"), p.real(1, "min"), p.real(2, "step")
+        p.real(3, "unused")
+        self.default = p.real(4, "default")
+        if self.step <= 0:
+            raise p.fail("step must be positive")
+        if not (self.min <= self.max and self.min <= self.default <= self.max):
+            raise p.fail("needs min <= default <= max")
+        self.lo, self.hi, self.out = self.max - self.step, self.max, self.default
+
+    def _q(self, v: float) -> float:
+        return math.floor((v - self.min) / self.step) * self.step + self.min
+
+    def run(self, ctx):
+        if not self.outputs:
+            return
+        if not self.inputs_ok():
+            self.write(self.default)
+            return
+        c, s = clamp(self.inputs[0].value, self.max, self.min), self.step
+        out = self.out
+        width = abs(self.lo - self.hi)
+        if width < s or width > s:
+            self.lo = self._q(c)
+            self.hi = self.lo + s
+        old_lo, old_hi = self.lo, self.hi
+        if c < old_lo:
+            self.lo = self._q(c)
+            self.hi = min(self.lo + s, self.max)
+            out = min(self.hi, old_lo)
+        elif c > old_hi:
+            self.lo = self._q(c)
+            self.hi = self.lo + s
+            out = max(self.lo, old_hi)
+        elif out != old_lo and out != old_hi:
+            out = self._q(c)
+        if c <= self.min:
+            self.lo, self.hi, out = self.min, self.min + s, self.min
+        elif c >= self.max:
+            self.lo, self.hi, out = self._q(self.max), self.max, self.max
+        self.out = out
+        self.write(out)

@@ -129,5 +129,28 @@ class HysteresisTableTest(unittest.TestCase):
                 single(G["hysteresis_table"], [X], params)
 
 
+class HysteresisQuantiserTest(unittest.TestCase):
+    PARAMS = [100, 0, 10, 0, 5]   # max, min, step, unused, default
+
+    def setUp(self):
+        _, self.eng = single(G["hysteresis_quantiser"], [X], self.PARAMS)
+
+    def test_trace(self):
+        trace = [(33, 40), (35, 40), (41, 40), (52, 50), (47, 50), (38, 40), (150, 100), (95, 100), (-5, 0),
+                 (None, 5), (33, 30)]
+        for x, out in trace:
+            with self.subTest(x=x):
+                self.assertEqual(run(self.eng, {X: x}), out)
+
+    def test_invalid_first_gives_default(self):
+        self.assertEqual(run(self.eng, {X: None}), 5)
+
+    def test_checks(self):
+        for params in ([100, 0, 0, 0, 5], [100, 0, -1, 0, 5], [0, 100, 10, 0, 5], [100, 0, 10, 0, 101],
+                       [100, 0, 10, 0, -1], [100, 0, 10, 5]):
+            with self.subTest(params=params), self.assertRaises(BlobError):
+                single(G["hysteresis_quantiser"], [X], params)
+
+
 if __name__ == "__main__":
     unittest.main()
