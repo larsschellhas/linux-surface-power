@@ -136,7 +136,8 @@ def build_graph(parsed: ParsedBlob, variant: str = "classic") -> Graph:
             if not block.supported:
                 skipped.append((line, f"{cls.kind}: controller mode {block.mode} is not implemented"))
                 continue
-            controllers[line.id] = block
+            if not isinstance(block, _pid.VariablePid):   # has its one set inline
+                controllers[line.id] = block
         built.append((index, block))
 
     for s in set_lines:

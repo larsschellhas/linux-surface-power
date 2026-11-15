@@ -271,5 +271,70 @@ class DynamicParameterTest(unittest.TestCase):
         self.assertEqual(len(graph.unsupported), 1)
 
 
+class VariablePidTest(unittest.TestCase):
+    # N, U_max, U_min, W, K_e, K_d, K_m, deadband, dW_on, off hysteresis, U_on, U_off
+    PARAMS = [2, 100, 10, 50, 1, 0, 0, 0, 5, 5, 80, 90]
+    E = (TEMP, 505)
+
+    def setUp(self):
+        self.graph, self.eng = single(G["variable_pid"], [X, Y], self.PARAMS)
+
+    def at(self, values, timer=True):
+        self.eng.set_inputs({ref(*k): v for k, v in values.items()})
+        self.eng.evaluate(1, timer=timer, now_ms=0)
+        return self.eng.node(1)
+
+    def test_setpoint_from_input_or_default(self):
+        self.assertEqual(self.at({X: 40, Y: None}), 90)       # W = 50 (default): below W - dW_on -> U_off
+        self.assertEqual(self.at({X: 52}), 80)                # x >= W: ACTIVE with U_on, no increment (direct)
+        self.assertEqual(self.at({X: 52}), 78)                # law step: e = 50 - 52
+        self.assertEqual(self.at({X: 52, Y: 60}), 86)         # W from input 2: e = 60 - 52
+        self.assertEqual(self.at({X: None}), 90)              # x invalid -> OFF, U_off
+
+    def test_async_run_does_no_step(self):
+        self.at({X: 52, Y: None})
+        self.assertEqual(self.at({X: 53}, timer=False), 80)
+
+    def test_enable_input(self):
+        graph, eng = single(G["variable_pid"], [X, Y, self.E], self.PARAMS)
+        eng.set_inputs({ref(*X): 52, ref(*Y): 50, ref(*self.E): 1})
+        eng.evaluate(1, timer=True, now_ms=0)
+        self.assertEqual(eng.node(1), 90)
+        eng.set_inputs({ref(*self.E): 2})
+        eng.evaluate(1, timer=True, now_ms=0)
+        self.assertEqual(eng.node(1), 80)
+
+    def test_is_supported_and_counts_as_controller(self):
+        self.assertEqual(self.graph.unsupported, [])
+        self.assertEqual(len(self.graph.controllers), 1)
+
+    def test_parameter_sets_do_not_attach(self):
+        b = BlobBuilder()
+        b.line(G["variable_pid"], 1, [X, Y], [(VN, 1)], self.PARAMS)
+        b.line(G["pid_parameter_set"], 2, [], [], [1, 0, 0, 90, 100, 10, 80, 50, 5, 1, 0, 0])
+        graph, _ = build(b)
+        self.assertTrue(any("unknown controller id 1" in w for _, w in graph.warnings))
+
+    def test_checks(self):
+        bad = {
+            "negative gain": [2, 100, 10, 50, -1, 0, 0, 0, 5, 5, 80, 90],
+            "hysteresis 0": [2, 100, 10, 50, 1, 0, 0, 0, 5, 0, 80, 90],
+            "deadband too large": [2, 100, 10, 50, 1, 0, 0, 10, 5, 5, 80, 90],
+            "U_on > U_off": [2, 100, 10, 50, 1, 0, 0, 0, 5, 5, 95, 90],
+            "U_off > U_max": [2, 100, 10, 50, 1, 0, 0, 0, 5, 5, 80, 110],
+            "mode 0 column": [2, 100, 10, 50, 1, 0, 0, 0, 5, 5, 80, 90, 0],
+            "count": [2, 100, 10, 50, 1, 0, 0, 0, 5, 5, 80],
+        }
+        for name, params in bad.items():
+            with self.subTest(name), self.assertRaises(BlobError):
+                single(G["variable_pid"], [X, Y], params)
+        with self.assertRaises(BlobError):
+            single(G["variable_pid"], [X], self.PARAMS)
+
+    def test_positional_modes_are_unsupported(self):
+        graph, _ = single(G["variable_pid"], [X, Y], self.PARAMS + [1])
+        self.assertEqual(len(graph.unsupported), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

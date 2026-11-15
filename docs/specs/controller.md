@@ -137,10 +137,22 @@ On reset, the controller is set as follows:
 
 Note: the research summary said "counters at 0". That holds for the type-1 controller core, not for this block.
 
-## 6. Planned (phase 5)
-- **Single-set PID (`0D24F500`):**
-  - Parameters: `N, U_max, U_min, W_default, K_e, K_d, K_m, deadband, dW_on, hyst_off, U_on, field11`.
-  - Input 2 is the setpoint: it replaces `W` when valid. Input 3 is an enable: `round_half_up ≠ 2 ⇒ OFF`.
-  - It uses the same state machine as above.
-  - Checks: gains ≥ 0, `U_min ≤ U_on ≤ U_max`, `deadband < hyst_off + dW_on`, `hyst_off > 0`.
+## 6. Variable-setpoint PID (`0D24F500`)
+Read from cores 3.204.23 to 3.205.23 [C]. It runs the same controller core as the PID with sets (4.3 – 4.5), with one parameter set given inline and the setpoint taken from an input.
+- **Inputs/outputs:** `x`, `W`, optionally `enable`; 1 output.
+- **Parameters:** `N, U_max, U_min, W_default, K_e, K_d, K_m, deadband, dW_on, hyst_off, U_on, U_off`, optionally `mode` (13 columns). `N` is limited to 2 … 300 as in 3.
+- **Checks** (skipped with expressions, `engine.md` 3.6):
+  - `K_e, K_d, K_m, dW_on, deadband ≥ 0`, `hyst_off > 0`;
+  - `deadband < hyst_off + dW_on`;
+  - `U_min ≤ U_on ≤ U_off ≤ U_max`;
+  - a `mode` column must be 1 or 2 (the positional forms, not implemented: such a line is unsupported, as in 4.6). With `mode = 1`, `N = 2`.
+- **One evaluation:**
+  1. `x` invalid → OFF, output `U_off`; `U` itself is kept.
+  2. With three inputs, `round_half_up(enable) ≠ 2` → the same OFF. The enable value is used even when it is invalid [C].
+  3. `W` = the value of input 2 if it is valid, otherwise `W_default`. A new `W` does not shift the error history (unlike a set change, 4.1).
+  4. Divider count, state machine, law and timer request as in 4.2 – 4.5, always in the `direct` variant: the block exists only in cores from 3.204 on.
+- **Reset:** as in 5 [H: the core shares the controller structure; its resume path for this block was not read].
+- **Inputs other than 2 or 3** are rejected [D].
+
+## 7. Planned
 - **PID cores `B34C9310` (type 1) and `7C2D76F2` (type 2):** used by the core internally and by some blobs directly. To be read before implementation.

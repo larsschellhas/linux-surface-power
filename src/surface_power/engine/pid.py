@@ -9,7 +9,7 @@ The controller runs a state machine OFF (0) -> READY (1) -> ACTIVE (2). In ACTIV
 (divider + 1)-th timer run. Two variants exist, selected by core version: "classic" (cores <= 3.140, e.g. the SB3) and "direct"
 (cores >= 3.159). They differ in the state machine and in the first law step.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ..loader.errors import BlobError
 from .blocks import Block, Params
@@ -225,6 +225,10 @@ class PidWithSets(Block):
             self.state = OFF
             self.write(self.sets[self.cur].u_off)  # U itself is kept [C]
             return
+        self._advance(ctx, x.value)
+
+    def _advance(self, ctx, x: float) -> None:
+        """Divider count, state machine, output and timer request (shared with the variable-setpoint PID)."""
         step = False
         wants_timer = False
         if self.state == ACTIVE:
@@ -237,9 +241,9 @@ class PidWithSets(Block):
                     step = True
         prev = self.state
         if self.variant == "classic":
-            self._machine_classic(x.value, step)
+            self._machine_classic(x, step)
         else:
-            self._machine_direct(x.value, step)
+            self._machine_direct(x, step)
         self.write(self.u)
         if self.state == OFF:
             wants_timer = False
@@ -258,3 +262,67 @@ class PidWithSets(Block):
         p = self.sets[self.cur] if self.sets else None
         extra = f", set {self.cur}, W {p.w:g}" if p else ""
         return f"pid id {self.line.id}: {STATE_NAMES.get(self.state, self.state)}, U {self.u:g}{extra}"
+
+
+@register("variable_pid")
+class VariablePid(PidWithSets):
+    """PID with one parameter set and the setpoint from input 2 (spec controller 6). Inputs: x, W, optional enable.
+
+    It runs the same controller core as the PID with sets, always in the direct variant: the block exists only in cores
+    from 3.204 on [C]."""
+
+    def check_shape(self, n_in, n_out):
+        if n_in not in (2, 3):
+            raise BlobError(f"{self.kind}: needs 2 or 3 inputs (x, setpoint, optional enable), has {n_in}", self.line.line)
+
+    def parse(self, p: Params):
+        p.count(12, 13)
+        self.n = min(max(p.int(0, "N"), 2), 300)
+        u_max, u_min, w = p.real(1, "U_max"), p.real(2, "U_min"), p.real(3, "W")
+        k_e, k_d, k_m = p.real(4, "K_e"), p.real(5, "K_d"), p.real(6, "K_m")
+        self.deadband, dw_on, self.hyst_off = p.real(7, "deadband"), p.real(8, "dW_on"), p.real(9, "off hysteresis")
+        u_on, u_off = p.real(10, "U_on"), p.real(11, "U_off")
+        self.mode = 0
+        if len(p.fields) == 13:
+            self.mode = p.int(12, "mode")
+            if self.mode not in (1, 2):
+                raise p.fail("mode column, if present, must be 1 or 2")
+            if self.mode == 1:
+                self.n = 2
+        if p.checks:
+            if min(k_e, k_d, k_m, dw_on, self.deadband) < 0 or self.hyst_off <= 0:
+                raise p.fail("gains, dW_on and deadband must not be negative, off hysteresis must be positive")
+            if not self.deadband < self.hyst_off + dw_on:
+                raise p.fail("needs deadband < off hysteresis + dW_on")
+            if not (u_min <= u_on <= u_off <= u_max):
+                raise p.fail("needs U_min <= U_on <= U_off <= U_max")
+        self.w_default = w
+        self.sets = [ParameterSet(self.line.line, 0, 0, u_off, u_max, u_min, u_on, w, dw_on, k_e, k_d, k_m)]
+        self.n_sets, self.default_set, self.cur = 1, 0, 0
+        self.variant = "direct"
+        self.state = OFF
+        self.u = 0.0
+        self.buf = [0.0] * self.n
+        self.counter = 0
+
+    def finish(self) -> None:
+        pass
+
+    def _off(self) -> None:
+        self.state = OFF
+        self.write(self.sets[0].u_off)   # U itself is kept [C]
+
+    def run(self, ctx):
+        if not self.outputs:
+            return
+        x, w = self.inputs[0], self.inputs[1]
+        if not x.valid:
+            self._off()
+            return
+        if len(self.inputs) == 3 and round_half_up(self.inputs[2].value) != 2:
+            self._off()                  # the enable is read even when invalid [C]
+            return
+        target = w.value if w.valid else self.w_default
+        if target != self.sets[0].w:
+            self.sets[0] = replace(self.sets[0], w=target)   # no history shift, unlike a set change [C]
+        self._advance(ctx, x.value)
