@@ -79,6 +79,15 @@ def _reaches(start: AlgorithmLine, lines: list[AlgorithmLine]) -> list[ChannelRe
     return sorted(found)
 
 
+def outputs_reached_by(ref: ChannelRef, lines: list[AlgorithmLine]) -> list[ChannelRef]:
+    """Device outputs that a device input `ref` can influence, directly or through internal nodes."""
+    found: set[ChannelRef] = set()
+    for ln in lines:
+        if ref in ln.inputs:
+            found.update(_reaches(ln, lines))
+    return sorted(found)
+
+
 def build_graph(parsed: ParsedBlob, variant: str = "classic") -> Graph:
     """Build the block graph. Raises BlobError (with the line number) for any line a supported block cannot accept."""
     if variant not in _pid.VARIANTS:

@@ -36,7 +36,12 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
    - No profile, but SMF and a blob: this is an "untested SMF device". The default is dry-run (FR-D3); `--control` overrides it.
    - No SMF or no blob: idle, with a clear message (FR-D2).
 4. **Blob check:** the blob is loaded and checked (`blob-format.md`). Any error leads to idle with the error (G-4).
-5. **Conflicts:** if thermald is active (`systemctl is-active thermald`, or its D-Bus name), the daemon refuses to start (FR-S6). systemd `Conflicts=` normally prevents this.
+5. **Missing inputs:** the daemon reports every input the blob reads but this system never provides. Each one is checked against the outputs it can reach, directly or through internal nodes:
+   - **It reaches only log-only outputs:** allowed. On the SB3 these are the base sensors 605/609, which reach only the dGPU limit and the thermal-policy outputs. Their controllers stay OFF.
+   - **It reaches a limit that Linux writes:** control is not allowed, only dry-run, and the reason is logged. Otherwise the blob would run on a fallback that is meant for a lost sensor, not for normal operation.
+   - **Documented deviation with a Windows fallback:** never blocks control. This is the case for the display brightness (DV-3).
+   - **Gets a Linux target later:** once an output gets one (e.g. a dGPU stand-in), its inputs become required automatically.
+6. **Conflicts:** if thermald is active (`systemctl is-active thermald`, or its D-Bus name), the daemon refuses to start (FR-S6). systemd `Conflicts=` normally prevents this.
 
 ## 3. Snapshot and restore (FR-S1, FR-S2)
 - **Contents:** before the first write, the supervisor saves every value it may write:

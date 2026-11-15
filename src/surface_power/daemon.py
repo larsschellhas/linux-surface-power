@@ -22,11 +22,14 @@ from . import monitor, supervisor
 from .adapters import inputs as inp
 from .adapters.outputs import OutputStage
 from .engine.engine import Engine
-from .engine.graph import build_graph
+from .engine.graph import build_graph, outputs_reached_by
 from .engine.pid import STATE_NAMES
 from .engine.scheduler import Scheduler
 from .loader.errors import BlobError
 from .loader.model import ChannelRef
+
+# Inputs whose absence is a documented deviation with a Windows fallback (spec deviations): they never block control.
+ACCEPTED_ABSENT = frozenset({ChannelRef(inp.STATE, 41)})  # display brightness, DV-3
 from .loader.source import EFIVAR, NoBlob, load
 
 LIMITS_GUID = "0B7B5350-BB8C-4459-8D4A-A75C57073801"
@@ -127,6 +130,19 @@ class Daemon:
         kw = dict(narrow=p.narrow if p else None, pl3=p.pl3 if p else False, pl4=p.pl4 if p else False)
         self.outputs = OutputStage(root, self.graph.output_ranges, dry_run=(self.mode != "control"), **kw)
         self.preview = OutputStage(root, self.graph.output_ranges, dry_run=True, **kw)
+
+        # Inputs this system never provides (spec supervisor 2). They are fine as long as they only reach log-only outputs
+        # (SB3: base sensors 605/609 -> dGPU limit). If one reaches a limit that Linux writes, the blob would run on a
+        # fallback the designers did not intend for normal operation: then control is not allowed, only dry-run.
+        self.mode_reason = ""
+        lines = self.loaded.parsed.algorithms
+        blocking = {ref: [o for o in outputs_reached_by(ref, lines) if o in self.outputs.targets]
+                    for ref in self.reader.unavailable if ref not in ACCEPTED_ABSENT}
+        blocking = {ref: outs for ref, outs in blocking.items() if outs}
+        if blocking and self.mode == "control":
+            self.mode_reason = "; ".join(f"input {r} missing, reaches {', '.join(map(str, o))}" for r, o in sorted(blocking.items()))
+            self.mode = self.state = "dry-run"
+            self.outputs.dry_run = True
         self.snapshot = None
         if self.mode == "control":
             files = [t.path for t in self.outputs.targets.values()]
@@ -149,6 +165,8 @@ class Daemon:
                            f"{len(self.loaded.parsed.algorithms)} lines, variant {variant}, mode {self.mode}")
         for ref in self.reader.unavailable:
             self.log("warning", f"input {ref} unavailable on this system; it stays invalid")
+        if self.mode_reason:
+            self.log("warning", f"dry-run only: {self.mode_reason}")
         for note in self.outputs.notes:
             self.log("info", note)
 

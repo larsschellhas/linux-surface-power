@@ -14,7 +14,7 @@ PL1 = "sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw"
 PL2 = "sys/class/powercap/intel-rapl:0/constraint_1_power_limit_uw"
 
 
-def blob_text(absent_sensor=False):
+def blob_text(absent_sensor=False, absent_on_written=False):
     b = BlobBuilder()
     b.input_channel(TEMP, 509, 3681, 2731)
     b.output_channel(LIMITS, 51, 25000, 31000, 7500)
@@ -31,6 +31,9 @@ def blob_text(absent_sensor=False):
         b.line(G["pid_sets"], 10, [(TEMP, 609), (SYSTEM, 1)], [(VN, 10)], [20, 1, 15, 4, 0], divider=1)
         b.line(G["pid_parameter_set"], 10, [], [], [10, 0, 7, 50000, 50001, 20000, 40000, 3181, 10, 40, 100, 0.4])
         b.line(G["pass_through"], 11, [(VN, 10)], [(LIMITS, 201)], [50000], stage=1)
+    if absent_on_written:
+        # TEMP/608 is not provided either, but here it feeds psys PL1, which is written on Linux.
+        b.line(G["pass_through"], 12, [(TEMP, 608)], [(LIMITS, 54)], [45000], stage=1)
     return b.text()
 
 
@@ -109,6 +112,18 @@ class DaemonTest(unittest.TestCase):
         for t in range(0, 70000, 1000):
             d.cycle(t)
         self.assertEqual(d.state, "control")
+        d.stop()
+
+    def test_absent_input_on_a_written_output_forces_dry_run(self):
+        """An input missing from the start that reaches a written limit: no control, only dry-run (spec supervisor 2)."""
+        with open(self.blob, "w") as f:
+            f.write(blob_text(absent_sensor=True, absent_on_written=True))
+        d = self.start("--control")
+        self.assertIn(daemon.ChannelRef(LIMITS, 54), d.outputs.targets)    # psys PL1 has a Linux target
+        self.assertEqual(d.mode, "dry-run")
+        d.cycle(0)
+        self.assertEqual(self.fs.read(PL1), "30000000")                     # nothing written
+        self.assertIn("2E8B14C2/608", d.mode_reason)
         d.stop()
 
     def test_lost_controller_input_is_an_emergency(self):
