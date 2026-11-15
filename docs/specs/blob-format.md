@@ -193,7 +193,7 @@ Blocks are looked up by algorithm GUID (upper case). Core type numbers are never
 | `2DB3B9EE` | window comparator | engine 4.7 | implemented |
 | `9E2A7FED` | PID with parameter sets | controller | implemented |
 | `83F47D50` | parameter set (data only) | controller | implemented |
-| `76536F66` | conditional table | engine 5 | planned (phase 5) |
+| `76536F66` | conditional table | engine 5.1 | implemented |
 | `3D42677C` | multiply/divide | engine 5 | planned |
 | `A58AF9AA` | hysteresis quantiser | engine 5 | planned |
 | `0DBF7FAB` | hysteresis table | engine 5 | planned |

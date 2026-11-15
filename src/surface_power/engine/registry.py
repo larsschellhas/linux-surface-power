@@ -15,6 +15,13 @@ GUIDS = {
     "window_comparator": "2DB3B9EE-1148-477A-8217-B0CF0720BA37",
     "pid_sets": "9E2A7FED-9508-4006-9279-D3C6954F4B85",
     "pid_parameter_set": "83F47D50-2C46-49DB-A4A9-6D2AA48A1929",
+    "conditional_table": "76536F66-9D41-4393-89BF-C1C3B0E49BDE",
+    "multiply_divide": "3D42677C-7F4B-4BA1-B191-81E0462FDB34",
+    "hysteresis_quantiser": "A58AF9AA-6B1D-42A1-B695-32AA86E1653A",
+    "hysteresis_table": "0DBF7FAB-21C8-4D04-B569-90DD277DABF1",
+    "weighted_mean": "A0CE482E-3CC8-4F4C-9C72-3A4C6AF8A3AE",
+    "variable_pid": "0D24F500-A940-4AC2-89DA-4D4D3FFBC851",
+    "ewma": "54C09C3D-A06D-48FC-8A64-D090D9E1981E",
 }
 
 # Interface GUID of internal nodes (VN<n>).

@@ -135,8 +135,23 @@ Parameters are listed in blob column order, after the channel references. Each b
     - kind 0: never.
 
 ## 5. Blocks of newer blobs (phase 5)
-These are described from the survey (`../research/04-smf-device-survey.md`). Their exact semantics will be read from the code and added here before they are implemented. Until then the loader treats them as unknown (`blob-format.md` 7).
-- **Conditional table (`76536F66`):** the first row where every input lies in its `[lo, hi]` gives `y`; otherwise the last value.
+Read from the newer cores (3.140 to 3.205.23, x64) [C] unless marked otherwise. Blocks that are not specified here yet are still treated as unknown by the loader (`blob-format.md` 7).
+
+### 5.1 Conditional table (`76536F66`)
+- **Inputs/outputs:** k inputs, 1 output.
+- **Parameters:** `N, default`, then for each input `j` in order `lo[j][0..N-1], hi[j][0..N-1]`, then `y[0..N-1]`. There are `2 + 2·N·k + N` columns; `N` must be > 0.
+- **Check:** `lo[j][i] ≤ hi[j][i]` for every row and input.
+- **Row match:** row `i` matches if every input `j` matches its cell:
+  - if `|lo − hi| < 0.001`: `|x_j − hi| < 0.001`;
+  - otherwise `lo ≤ x_j ≤ hi`.
+- **Result:**
+  - the first matching row `i` gives `y[i]`, and the block remembers it;
+  - if no row matches, the output is the remembered value, initially `default`.
+- **Validity:** the block does not check its inputs; it runs whenever it has an output [C]. An invalid input takes part with its last value, as in add/subtract/scale (4.3) [H: the core reads the input's stored value; how that value behaves while the input is invalid was not traced].
+- **Reset:** the remembered value is kept on resume (3.4) [H: no reset path for this block was seen].
+
+### 5.2 Planned
+These are described from the survey (`../research/04-smf-device-survey.md`). Their exact semantics will be read from the code and added here before they are implemented.
 - **Multiply/divide (`3D42677C`):** the product of the inputs, each optionally inverted, then clamped.
 - **Hysteresis quantiser (`A58AF9AA`):** clamp, round down to a step, with a hysteresis of one step.
 - **Hysteresis table (`0DBF7FAB`):** a step switch with separate up and down thresholds.

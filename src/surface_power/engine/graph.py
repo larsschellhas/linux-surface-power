@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from ..loader.errors import BlobError
 from ..loader.model import AlgorithmLine, ChannelRef, InputChannel, OutputChannel, ParsedBlob
 from . import blocks as _blocks  # noqa: F401  (registers the stateless blocks)
+from . import newer_blocks as _newer_blocks  # noqa: F401  (registers the blocks of newer blobs)
 from . import pid as _pid
 from .blocks import Block
 from .registry import BLOCKS, name_of
