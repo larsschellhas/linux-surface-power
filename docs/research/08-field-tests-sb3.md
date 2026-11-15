@@ -77,3 +77,22 @@ Setup:
   - Not tested: system suspend/resume and driver reload. A reboot clears the cap.
 - **Consequence:** a dGPU stand-in would regulate the measured dGPU power to the blob's output 201 by moving the clock cap. It is kept as a backup concept (I-4), opt-in under G-3.
   - Sampling must not wake the GPU: NVML queries do. So it should only run while `power/runtime_status` is already `active`.
+
+## dGPU stand-in in control mode (DO-1, 15.11.2026)
+Run: Best performance on the Surface PSU, CPU + dGPU load for 10 min, then 3 min idle, with `--dgpu-clock-cap`.
+- **Target:** output 201 was 50.0 W throughout.
+  - The base skin loop (sensor 609) went READY at 47.2 °C with 57 W. That is above the 50 W table value, so the table bound.
+  - The base peaked at 47.5 °C and cooled again while its fans ran.
+- **Regulation:**
+  - Within 20 s the cap went to 1350 MHz.
+  - Last 5 min of load: dGPU power 48.0–50.7 W (mean 49.2 W; Windows 49.6 W), cap 1290–1305 MHz.
+  - The CPU side was unchanged: skin 48.2 °C, system power 32.1 W, steps 0.38–0.50 W.
+- **Idle:** the cap stayed (1305 MHz), and the GPU went to D3cold. The stand-in did not keep it awake.
+- **Stop:** the cap was released. Under load afterwards the GPU ran at 1590 MHz and 63.5 W.
+- **dGPU limit in the blob for all states** (base cool, Surface PSU):
+  - Recommended and Better/Best performance, on AC and on battery: 50 W. Exception: Recommended on battery, 40 W.
+  - Battery saver: 35 W.
+  - The same for every posture. No state allows more than 50 W.
+- **Open:** on Windows, the NVIDIA limit read 65 W with only USB-C connected (`02`).
+  - The blob gives 50 W when only the base input power is changed to 65 W.
+  - [H] With USB-C only, other inputs change too, or Windows sets no limit in that case. This needs a Windows trace.

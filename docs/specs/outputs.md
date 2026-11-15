@@ -38,7 +38,7 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 | | 55 | psys PL2 | `intel-rapl:1/constraint_1_power_limit_uw` |
 | | 59 | PL3 | MSR 0x615, see 4 |
 | | 70 | battery mode | log-only |
-| | 201 | dGPU limit | log-only (FR-O5): `nvidia-smi -pl` is not supported on the SB3 GPU [M] |
+| | 201 | dGPU limit | log-only (FR-O5): `nvidia-smi -pl` is not supported on the SB3 GPU [M]. Opt-in stand-in: clock cap (6, DO-1) |
 | | 205 | system budget (Laptop Studio 2) | log-only |
 | `110DF2A4` | 1 – 3 | Windows thermal policy (hot, critical, min power) | log-only |
 | other | – | fan, WTMF and so on (L3/L4) | log-only (FR-O6, FR-O7) |
@@ -54,3 +54,37 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 
 ## 5. Log-only outputs
 Log-only outputs are computed, published in the status file and the time series, and never written (AC-O2).
+
+## 6. dGPU stand-in through a clock cap (opt-in, DO-1, idea I-4)
+Windows limits the dGPU power. On Linux, the SB3's NVIDIA driver refuses a power limit, and Dynamic Boost is not
+supported (`08-field-tests-sb3.md`). A cap on the graphics clock (`nvidia-smi -lgc`, NVML `SetGpuLockedClocks`) works.
+This stand-in uses that cap to regulate the **measured** dGPU power to the blob's output 201. It restores the Windows
+*behaviour* (G-1) with a different *mechanism*, so it is a named deviation (DO-1). It is enabled per device profile
+(`[outputs] dgpu_clock_cap = true`). It is on in the SB3 profile: without it the Linux driver lets the dGPU draw 65 W,
+while no Windows state in the SB3 blob allows more than 50 W.
+
+- **Never wake the GPU.** Every NVML session opens the GPU and restarts its idle timer.
+  - The stand-in therefore only opens NVML while another process already has an NVIDIA device node open (`/proc/<pid>/fd` → `/dev/nvidia*`). That process keeps the GPU awake anyway.
+  - If only the daemon itself has it open, that does not count.
+  - `power/runtime_usage` turned out not to be a reliable indicator [M]: it read 2 with a CUDA client once and 1 another time.
+  - Monitoring tools that hold the device open (e.g. GNOME Resources) count as clients. The GPU does not sleep while they run, with or without the stand-in.
+- **Cap persistence:** a cap set while the GPU is awake stays in force across D3cold [M]. While no client runs, the stand-in does nothing and keeps its last cap.
+- **Control law [D], once per sample (every 2 s, while a client runs).** The blob gives only the target. On Windows, the NVIDIA driver enforces the limit with its own internal loop, so there is no Windows model for these parameters. They were chosen from the SB3 clock-cap measurement:
+  - Inputs: the measured power `P` (NVML power usage, W) and the target `T` (output 201, W).
+  - If `P > T + 0.5 W`: lower the cap by `k · (P − T)`, at least one step.
+  - If `P < T − 2 W` and the GPU runs at the cap (clock ≥ cap − 30 MHz): raise the cap by one step of 15 MHz.
+  - Otherwise: hold.
+  - `k = 20 MHz/W`, from the SB3 measurement: about 10 MHz/W between 900 and 1300 MHz, doubled for a fast first approach.
+  - The cap stays within the supported clock range. It is rounded to 15 MHz steps.
+  - If `T` is at least the GPU's own default power limit, the cap is released.
+- **Release:** the cap is removed when:
+  - the daemon stops;
+  - it enters emergency, yields or pauses for sleep;
+  - the profile option is off;
+  - the target is invalid.
+  The original state (no cap) is the firmware value.
+- **Missing inputs:** with the stand-in on, the dGPU limit counts as a written output, so its inputs are required (`supervisor.md` 2.5).
+  - If one is missing, only the stand-in is switched off, with a warning. The other limits are still controlled.
+  - Example: the SB3 without the base sensor nodes, as with current kernels.
+- **Dry-run:** computes and logs the cap it would set, sets nothing, and still only samples under the rule above.
+- **Failures:** an NVML error disables the stand-in for the rest of the run and is logged once. Examples: no library, no permission, unsupported call.

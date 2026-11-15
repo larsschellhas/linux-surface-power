@@ -34,3 +34,9 @@ SMF is listed here. Intended improvements are opt-in and off by default; none ex
 | DS-2 | Emergency rules (`supervisor.md` 4) | on |
 | DS-3 | Yielding to foreign changes (`supervisor.md` 5) | on |
 | DS-4 | Firmware values before suspend | on |
+
+## 4. Stand-ins (a different mechanism for Windows behaviour)
+
+| ID | Stand-in | For | Default |
+|---|---|---|---|
+| DO-1 | dGPU clock cap regulated to the measured dGPU power (`outputs.md` 6) | output 201, which has no Linux power-limit target (DV-5) | per profile option `dgpu_clock_cap`; on for the SB3 (parity: 50 W instead of the driver's 65 W) |

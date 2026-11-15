@@ -14,7 +14,7 @@ PL1 = "sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw"
 PL2 = "sys/class/powercap/intel-rapl:0/constraint_1_power_limit_uw"
 
 
-def blob_text(absent_sensor=False, absent_on_written=False):
+def blob_text(absent_sensor=False, absent_on_written=False, extra=()):
     b = BlobBuilder()
     b.input_channel(TEMP, 509, 3681, 2731)
     b.output_channel(LIMITS, 51, 25000, 31000, 7500)
@@ -31,6 +31,8 @@ def blob_text(absent_sensor=False, absent_on_written=False):
         b.line(G["pid_sets"], 10, [(TEMP, 609), (SYSTEM, 1)], [(VN, 10)], [20, 1, 15, 4, 0], divider=1)
         b.line(G["pid_parameter_set"], 10, [], [], [10, 0, 7, 50000, 50001, 20000, 40000, 3181, 10, 40, 100, 0.4])
         b.line(G["pass_through"], 11, [(VN, 10)], [(LIMITS, 201)], [50000], stage=1)
+    for line in extra:
+        b.algorithms.append(line)
     if absent_on_written:
         # TEMP/608 is not provided either, but here it feeds psys PL1, which is written on Linux.
         b.line(G["pass_through"], 12, [(TEMP, 608)], [(LIMITS, 54)], [45000], stage=1)
@@ -112,6 +114,9 @@ class DaemonTest(unittest.TestCase):
         for t in range(0, 70000, 1000):
             d.cycle(t)
         self.assertEqual(d.state, "control")
+        # The SB3 profile enables the dGPU stand-in, but its input is missing: only the stand-in goes off.
+        self.assertIsNone(d.dgpu)
+        self.assertIn("2E8B14C2/609", d.dgpu_note)
         d.stop()
 
     def test_absent_input_on_a_written_output_forces_dry_run(self):
@@ -147,6 +152,35 @@ class DaemonTest(unittest.TestCase):
         d.after_resume(2000)
         d.cycle(2000)
         self.assertEqual(self.fs.read(PL1), "25000000")
+        d.stop()
+
+    def test_dgpu_stand_in(self):
+        """DO-1 (spec outputs 6): opt-in clock cap on the blob's dGPU limit; released on stop and in emergency."""
+        from test_gpu import PCI, FakeNvml
+        b = BlobBuilder()
+        b.line(G["lookup_table"], 20, [(SYSTEM, 1)], [(LIMITS, 201)], [6, 50000, 50000, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6,
+                                                                     50000, 50000, 50000, 50000, 50000, 50000])
+        with open(self.blob, "w") as f:
+            f.write(blob_text(extra=b.algorithms))                       # dGPU limit 201 = 50 W in every slider state
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/vendor", "0x10de")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/class", "0x030200")
+        self.fs.link_raw("proc/4242/fd/7", "/dev/nvidia0")             # another client keeps the GPU awake
+        nvml = FakeNvml()
+        d = self.start("--control", "--dgpu-clock-cap")
+        d.dgpu.factory = lambda pci: nvml
+        d.cycle(0)
+        self.assertEqual(nvml.cap, 1260)
+        self.assertEqual(self.status()["dgpu"]["cap_mhz"], 1260)
+        os.remove(self.fs.path("sys/class/hwmon/hwmon2/temp9_input"))   # skin sensor lost -> emergency after 60 s
+        for t in range(2000, 64000, 2000):
+            d.cycle(t)
+        self.assertEqual(d.state, "emergency")
+        self.assertIsNone(nvml.cap)
+        d.stop()
+
+    def test_no_dgpu_stand_in_without_a_dgpu_output(self):
+        d = self.start("--control")
+        self.assertIsNone(d.dgpu)
         d.stop()
 
     def test_missing_ssam_cdev_is_reported(self):

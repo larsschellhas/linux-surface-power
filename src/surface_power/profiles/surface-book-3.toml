@@ -13,3 +13,6 @@ variant = "classic"     # the SB3 driver package ships SMF core 3.140
 [outputs]
 pl3 = false
 pl4 = false
+# dGPU stand-in (DO-1): restores the Windows dGPU limit (50 W on the Surface PSU) through a clock cap.
+# On by default for parity (G-1); without it the Linux driver lets the dGPU draw 65 W.
+dgpu_clock_cap = true

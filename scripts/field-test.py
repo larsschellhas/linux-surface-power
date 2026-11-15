@@ -97,7 +97,8 @@ class Probe:
         cpu = rd(self.cpu_path) if self.cpu_path else None
         lim = lambda d, c: int(rd(f"{RAPL}/{d}/constraint_{c}_power_limit_uw") or 0) / 1e6
         base = rd(self.base_path) if self.base_path else None
-        r = {"skin_c": int(skin) / 1000 if skin else None, "base_c": int(base) / 1000 if base else None,
+        rs = rd(f"/sys/bus/pci/devices/0000:02:00.0/power/runtime_status")
+        r = {"skin_c": int(skin) / 1000 if skin else None, "base_c": int(base) / 1000 if base else None, "gpu_rpm": rs,
              "cpu_c": int(cpu) / 1000 if cpu else None,
              "pkg_w": self._power_w("pkg"), "sys_w": self._power_w("sys"),
              "pl1_w": lim("intel-rapl:0", 0), "pl2_w": lim("intel-rapl:0", 1),
@@ -109,6 +110,10 @@ class Probe:
             r["slider"] = st.get("slider", {}).get("state")
             for c in st.get("controllers", []):
                 r[f"ctl{c['line']}"] = f"{c['state']}/set{c['set']}/u{c['u_w']}"
+            g = st.get("dgpu")
+            if g:   # from the daemon's own samples; the script itself never queries the GPU (that would keep it awake)
+                r.update(dgpu_target_w=g["target_w"], dgpu_cap_mhz=g["cap_mhz"], dgpu_power_w=g["power_w"],
+                         dgpu_clock_mhz=g["clock_mhz"], dgpu_error=g["error"])
         except (OSError, ValueError):
             r["state"] = None
         return r
@@ -122,6 +127,7 @@ def main() -> int:
     ap.add_argument("--start-skin", type=float, default=42.0, help="start the load once I_VTS1 is at most this (°C)")
     ap.add_argument("--gpu", action="store_true", help="add NVIDIA GPU load (AC-L3)")
     ap.add_argument("--battery", action="store_true", help="expect to run on battery (AC-L2)")
+    ap.add_argument("--dgpu-clock-cap", action="store_true", help="enable the dGPU clock-cap stand-in (DO-1)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
 
@@ -148,8 +154,9 @@ def main() -> int:
         if thermald_was_active:
             subprocess.run(["systemctl", "stop", "thermald"], check=True)
         env = dict(os.environ, PYTHONPATH=os.path.join(REPO, "src"))
+        extra = ["--dgpu-clock-cap"] if a.dgpu_clock_cap else []
         daemon = subprocess.Popen([sys.executable, "-m", "surface_power.daemon", "--control", "--run-dir", run_dir,
-                                   "--state-dir", state_dir], env=env,
+                                   "--state-dir", state_dir, *extra], env=env,
                                   stdout=open(os.path.join(a.out, "daemon.log"), "w"), stderr=subprocess.STDOUT)
         say(f"profile {a.profile}, AC {ac_online()}, thermald stopped: {thermald_was_active}, daemon pid {daemon.pid}")
         time.sleep(3)

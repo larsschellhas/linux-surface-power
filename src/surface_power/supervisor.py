@@ -92,6 +92,7 @@ class Profile:
     pl4: bool = False
     narrow: dict = field(default_factory=dict)
     panel_max_nits: float | None = None
+    dgpu_clock_cap: bool = False      # opt-in stand-in DO-1 (spec outputs 6)
 
 
 def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
@@ -103,7 +104,7 @@ def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
         out.append(Profile(os.path.basename(path), m["product_name"], m.get("sku"), e.get("variant", "direct"),
                            bool(d.get("tested", False)), d.get("blob", {}).get("source", "efivar"),
                            bool(o.get("pl3", False)), bool(o.get("pl4", False)), dict(o.get("narrow", {})),
-                           d.get("inputs", {}).get("panel_max_nits")))
+                           d.get("inputs", {}).get("panel_max_nits"), bool(o.get("dgpu_clock_cap", False))))
     return out
 
 

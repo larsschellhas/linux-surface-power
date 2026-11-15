@@ -20,6 +20,7 @@ import time
 
 from . import monitor, supervisor
 from .adapters import inputs as inp
+from .adapters.gpu import ClockCapStandIn
 from .adapters.outputs import OutputStage
 from .engine.engine import Engine
 from .engine.graph import build_graph, outputs_reached_by
@@ -33,6 +34,7 @@ ACCEPTED_ABSENT = frozenset({ChannelRef(inp.STATE, 41)})  # display brightness, 
 from .loader.source import EFIVAR, NoBlob, load
 
 LIMITS_GUID = "0B7B5350-BB8C-4459-8D4A-A75C57073801"
+DGPU = ChannelRef(LIMITS_GUID, 201)    # dGPU limit; written only through the opt-in stand-in (DO-1)
 OUTPUT_NAMES = {51: "PL1", 52: "PL2", 53: "PL4", 54: "psys PL1", 55: "psys PL2", 59: "PL3", 70: "battery mode", 201: "dGPU"}
 
 
@@ -55,6 +57,8 @@ def parse_args(argv=None):
     ap.add_argument("--root", default="/", help=argparse.SUPPRESS)          # fake sysfs root for tests
     ap.add_argument("--run-dir", default="/run/surface-power")
     ap.add_argument("--state-dir", default="/var/lib/surface-power")
+    ap.add_argument("--dgpu-clock-cap", action="store_true",
+                    help="enable the dGPU clock-cap stand-in (deviation DO-1) even if the profile does not")
     ap.add_argument("--no-ec", action="store_true", help="do not send EC requests (platform power data stays invalid)")
     return ap.parse_args(argv)
 
@@ -133,18 +137,36 @@ class Daemon:
         self.outputs = OutputStage(root, self.graph.output_ranges, dry_run=(self.mode != "control"), **kw)
         self.preview = OutputStage(root, self.graph.output_ranges, dry_run=True, **kw)
 
+        # dGPU stand-in (DO-1, per profile): with it, the dGPU limit counts as a written output.
+        self.dgpu = None
+        self.dgpu_note = ""
+        written = set(self.outputs.targets)
+        if (args.dgpu_clock_cap or (p and p.dgpu_clock_cap)) and DGPU in self.graph.outputs:
+            self.dgpu = ClockCapStandIn(root, dry_run=(self.mode != "control"))
+            written.add(DGPU)
+
         # Inputs this system never provides (spec supervisor 2). They are fine as long as they only reach log-only outputs
         # (SB3: base sensors 605/609 -> dGPU limit). If one reaches a limit that Linux writes, the blob would run on a
         # fallback the designers did not intend for normal operation: then control is not allowed, only dry-run.
         self.mode_reason = ""
         lines = self.loaded.parsed.algorithms
-        blocking = {ref: [o for o in outputs_reached_by(ref, lines) if o in self.outputs.targets]
+        blocking = {ref: [o for o in outputs_reached_by(ref, lines) if o in written]
                     for ref in self.reader.unavailable if ref not in ACCEPTED_ABSENT}
         blocking = {ref: outs for ref, outs in blocking.items() if outs}
+        # A missing input of the dGPU limit only switches the stand-in off; the other limits are still controlled
+        # (SB3 without the base sensor nodes: no dGPU parity, but CPU and psys as on Windows).
+        if self.dgpu and any(DGPU in outs for outs in blocking.values()):
+            missing = sorted(str(r) for r, outs in blocking.items() if DGPU in outs)
+            self.dgpu_note = f"dGPU stand-in off: input {', '.join(missing)} missing"
+            self.dgpu = None
+            blocking = {r: [o for o in outs if o != DGPU] for r, outs in blocking.items()}
+            blocking = {r: outs for r, outs in blocking.items() if outs}
         if blocking and self.mode == "control":
             self.mode_reason = "; ".join(f"input {r} missing, reaches {', '.join(map(str, o))}" for r, o in sorted(blocking.items()))
             self.mode = self.state = "dry-run"
             self.outputs.dry_run = True
+            if self.dgpu:
+                self.dgpu.dry_run = True
         self.snapshot = None
         if self.mode == "control":
             files = [t.path for t in self.outputs.targets.values()]
@@ -169,6 +191,8 @@ class Daemon:
             self.log("warning", f"input {ref} unavailable on this system; it stays invalid")
         if self.mode_reason:
             self.log("warning", f"dry-run only: {self.mode_reason}")
+        if self.dgpu_note:
+            self.log("warning", self.dgpu_note)
         # The EC power data come through the SSAM debug device for now (NFR-11). Without it they stay invalid and the
         # blob falls back (SB3: psys 23/34.5 W), so say clearly what is missing.
         available = getattr(self.platform.transport, "available", None)
@@ -252,6 +276,11 @@ class Daemon:
             self.results = self.outputs.apply(rounded)
         else:
             self.results = self.preview.apply(rounded)
+        if self.dgpu:
+            if self.state in ("control", "dry-run"):
+                self.dgpu.step(now_ms, rounded[DGPU] / 1000 if DGPU in rounded else None)
+            else:
+                self.dgpu.release()                 # emergency, yielded: firmware state = no cap
 
         self._log_changes()
         for r in runs:
@@ -293,6 +322,8 @@ class Daemon:
             "inputs": [{"channel": str(r), "value": v, "valid": v is not None} for r, v in sorted(self.values.items())],
             "events": list(self.journal.events),
         }
+        if self.dgpu:
+            status["dgpu"] = self.dgpu.status()
         monitor.write_status(self.args.run_dir, status)
 
     def _output_status(self, ref: ChannelRef, value: int, target: str) -> dict:
@@ -308,6 +339,8 @@ class Daemon:
 
     # --- sleep, stop ---
     def before_sleep(self) -> None:
+        if self.dgpu:
+            self.dgpu.release()
         self.before_pause = self.state
         self._enter("paused", "system goes to sleep")
 
@@ -322,6 +355,8 @@ class Daemon:
             self.outputs.forget()
 
     def stop(self) -> None:
+        if self.dgpu:
+            self.dgpu.release()
         if self.snapshot:
             errors = self.snapshot.restore()
             for e in errors:

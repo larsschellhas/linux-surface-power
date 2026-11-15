@@ -68,6 +68,11 @@ class FakeSys:
         os.makedirs(os.path.dirname(self.path(rel)), exist_ok=True)
         os.symlink(self.path(target_rel), self.path(rel))
 
+    def link_raw(self, rel: str, target: str) -> None:
+        """Symlink `rel` -> the literal `target` (e.g. "/dev/nvidia0" in a fake /proc/<pid>/fd)."""
+        os.makedirs(os.path.dirname(self.path(rel)), exist_ok=True)
+        os.symlink(target, self.path(rel))
+
     def add_base_sensors(self, celsius: float = 30.0) -> None:
         """Second surface_thermal for the SB3 base (KIP, below the base hub), as with the EC module v0.3."""
         labels = [f"I_RTS{i}" for i in range(1, 9)] + ["I_VTS1"]
