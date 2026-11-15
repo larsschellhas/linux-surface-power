@@ -4,7 +4,8 @@ Common pattern, as in the Windows core: a block first writes a fallback value to
 allow. Blocks write only their first output. A block without outputs does nothing.
 """
 from ..loader.errors import BlobError
-from ..loader.model import AlgorithmLine
+from ..loader.expr import Expression, Unavailable
+from ..loader.model import AlgorithmLine, ChannelRef
 from ..loader.numbers import atoi, real
 from .helpers import clamp, round_half_up
 from .registry import register
@@ -14,8 +15,10 @@ from .slots import RunContext, Slot
 class Params:
     """Reads the parameter fields of one line, with errors that name the line."""
 
-    def __init__(self, line: AlgorithmLine, kind: str):
-        self.line, self.kind, self.fields = line, kind, line.params
+    def __init__(self, line: AlgorithmLine, kind: str, fields: list[str] | None = None, checks: bool = True):
+        self.line, self.kind = line, kind
+        self.fields = line.params if fields is None else fields
+        self.checks = checks   # False for lines with expressions: the core skips its order checks then [C]
 
     def fail(self, message: str) -> BlobError:
         return BlobError(f"{self.kind}: {message}", self.line.line)
@@ -47,14 +50,50 @@ class Block:
 
     kind = "block"
     guid = ""
+    dynamic_ok = False   # True for blocks whose handling of expressions with channels was read from the core (engine 3.6)
 
-    def __init__(self, line: AlgorithmLine, inputs: list[Slot], outputs: list[Slot], variant: str = "classic"):
+    def __init__(self, line: AlgorithmLine, inputs: list[Slot], outputs: list[Slot], variant: str = "classic",
+                 refs: dict[ChannelRef, Slot] | None = None):
         self.line = line
         self.inputs = inputs
         self.outputs = outputs
         self.variant = variant
         self.check_shape(len(inputs), len(outputs))
-        self.parse(Params(line, self.kind))
+        # Parameters with channel references (engine 3.6): compiled once, evaluated before every run.
+        self.exprs: dict[int, Expression] = {}
+        if line.dynamic:
+            for i, text in enumerate(line.params):
+                if text.startswith("(") and "{" in text:
+                    try:
+                        self.exprs[i] = Expression(text)
+                    except BlobError as e:
+                        raise BlobError(e.message, line.line) from None
+        self.refs = refs or {}
+        self.parse(Params(line, self.kind, self._fields(None), checks=not self.exprs))
+
+    def _fields(self, get) -> list[str]:
+        """Parameter fields with the expressions evaluated. With `get` None (at load), expressions count as 0."""
+        fields = list(self.line.params)
+        for i, e in self.exprs.items():
+            fields[i] = "0" if get is None else repr(e.value(get))
+        return fields
+
+    def _lookup(self, ref: ChannelRef) -> float | None:
+        slot = self.refs.get(ref)
+        return slot.value if slot is not None and slot.valid else None
+
+    def execute(self, ctx: RunContext) -> None:
+        """One run. With expressions, they are evaluated first; if one cannot be (a channel without a valid value, or a
+        division by zero), the block writes nothing in this run [C for missing or invalid channels, H for division]."""
+        if self.exprs:
+            if not self.outputs:
+                return
+            try:
+                fields = self._fields(self._lookup)
+            except (Unavailable, BlobError):
+                return
+            self.parse(Params(self.line, self.kind, fields, checks=False))
+        self.run(ctx)
 
     # --- to override ---
     def check_shape(self, n_in: int, n_out: int) -> None:
@@ -92,6 +131,8 @@ def _one_input(n_in: int, kind: str, line: AlgorithmLine) -> None:
 class LookupTable(Block):
     """x in [lo_i, hi_i] -> y_i (first match); below lo_0 or in a gap -> `below`; above hi_{N-1} -> `above` (spec engine 4.1)."""
 
+    dynamic_ok = True
+
     def check_shape(self, n_in, n_out):
         _one_input(n_in, self.kind, self.line)
 
@@ -105,7 +146,7 @@ class LookupTable(Block):
         self.lo = p.reals(3, n, "lo")
         self.hi = p.reals(3 + n, n, "hi")
         self.y = p.reals(3 + 2 * n, n, "y")
-        for i in range(n):
+        for i in range(n if p.checks else 0):
             if self.hi[i] < self.lo[i]:
                 raise p.fail(f"interval {i}: hi < lo")
             if i < n - 1 and self.lo[i + 1] < self.hi[i]:

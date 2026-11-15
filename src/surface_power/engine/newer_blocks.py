@@ -161,12 +161,14 @@ class HysteresisQuantiser(Block):
 class MultiplyDivide(Block):
     """Product of the inputs, each optionally inverted, clamped; default if any input is invalid (spec engine 5.4)."""
 
+    dynamic_ok = True
+
     def parse(self, p):
         k = len(self.inputs)
         p.count(k + 3)
         self.default, self.max, self.min = p.real(0, "default"), p.real(1, "max"), p.real(2, "min")
         self.invert = [p.int(3 + j, f"invert[{j}]") != 0 for j in range(k)]
-        if not (self.min <= self.max and self.min <= self.default <= self.max):
+        if p.checks and not (self.min <= self.max and self.min <= self.default <= self.max):
             raise p.fail("needs min <= default <= max")
 
     def run(self, ctx):

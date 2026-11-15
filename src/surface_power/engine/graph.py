@@ -80,6 +80,18 @@ def _reaches(start: AlgorithmLine, lines: list[AlgorithmLine]) -> list[ChannelRe
     return sorted(found)
 
 
+def _expression_refs(line: AlgorithmLine) -> list[ChannelRef]:
+    from ..loader.expr import Expression
+    refs = []
+    for text in line.params:
+        if text.startswith("(") and "{" in text:
+            try:
+                refs.extend(Expression(text).refs)
+            except BlobError as e:
+                raise BlobError(e.message, line.line) from None
+    return refs
+
+
 def outputs_reached_by(ref: ChannelRef, lines: list[AlgorithmLine]) -> list[ChannelRef]:
     """Device outputs that a device input `ref` can influence, directly or through internal nodes."""
     found: set[ChannelRef] = set()
@@ -110,10 +122,13 @@ def build_graph(parsed: ParsedBlob, variant: str = "classic") -> Graph:
         if cls is None:
             skipped.append((line, f"unknown algorithm {line.guid} ({name_of(line.guid)})"))
             continue
+        refs = None
         if line.dynamic:
-            skipped.append((line, f"{cls.kind}: parameter expression with channel references (not implemented yet)"))
-            continue
-        block = cls(line, ins, outs, variant)
+            if not cls.dynamic_ok:
+                skipped.append((line, f"{cls.kind}: parameter expression with channel references (not implemented for this block)"))
+                continue
+            refs = {r: _slot(g, r, as_output=False) for r in _expression_refs(line)}
+        block = cls(line, ins, outs, variant, refs)
         if isinstance(block, _pid.ParameterSetLine):
             set_lines.append(block)
             continue

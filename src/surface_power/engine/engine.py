@@ -40,7 +40,7 @@ class Engine:
         """One evaluation run of an instance: all its blocks, by stage, then file order."""
         ctx = RunContext(timer, now_ms)
         for block in self.graph.order.get(instance, ()):
-            block.run(ctx)
+            block.execute(ctx)
         return RunResult(instance, timer, ctx.active, self.outputs())
 
     def reset(self) -> None:

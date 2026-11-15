@@ -227,5 +227,49 @@ class EwmaTest(unittest.TestCase):
                 single(G["ewma"], [X], params)
 
 
+class DynamicParameterTest(unittest.TestCase):
+    """Parameters with channel references, evaluated on every run (spec engine 3.6)."""
+
+    def lookup_blob(self, ref_text):
+        b = BlobBuilder()
+        # N=1, below 100, above 50, band [W+30, W+45] -> 50; W is VN2, written later in the same run.
+        b.line(G["lookup_table"], 1, [X], [(VN, 1)], [1, 100, 50, f"({ref_text}+30)", f"({ref_text}+45)", 50])
+        b.line(G["pass_through"], 2, [Y], [(VN, 2)], [0], stage=1)
+        return build(b)
+
+    def test_bounds_follow_the_node(self):
+        graph, eng = self.lookup_blob(f"{{{VN}}}_2")
+        self.assertTrue(graph.usable_for_control)
+        self.assertEqual(graph.unsupported, [])
+        # First run: VN2 is still 0, so the band is [30, 45].
+        self.assertEqual(run(eng, {X: 40, Y: 3000}), 50)
+        # From now on VN2 = 3000: the band is [3030, 3045].
+        self.assertEqual(run(eng, {X: 40, Y: 3000}), 100)
+        self.assertEqual(run(eng, {X: 3040, Y: 3000}), 50)
+        self.assertEqual(run(eng, {X: 3050, Y: 3000}), 50)     # above the band
+        self.assertEqual(run(eng, {X: 3010, Y: 3000}), 100)
+
+    def test_invalid_channel_skips_the_block(self):
+        graph, eng = self.lookup_blob(f"{{{TEMP}}}_505")
+        self.assertIn(ref(TEMP, 505), graph.inputs)
+        self.assertEqual(run(eng, {X: 40, Y: 0}), 0)            # 505 invalid: nothing written, VN1 stays 0
+        eng.set_inputs({ref(TEMP, 505): 10})
+        self.assertEqual(run(eng, {X: 45}), 50)
+        eng.set_inputs({ref(TEMP, 505): None})
+        self.assertEqual(run(eng, {X: 0}), 50)                  # skipped again: keeps 50, not the 'below' 100
+
+    def test_division_by_zero_at_run_time_skips(self):
+        b = BlobBuilder()
+        b.line(G["multiply_divide"], 1, [X], [(VN, 1)], [f"(100/{{{VN}}}_2)", 1000, 0, 0])
+        graph, eng = build(b)
+        self.assertEqual(run(eng, {X: None}), 0)                # default is 100/0: the block is skipped
+
+    def test_other_blocks_stay_unsupported(self):
+        b = BlobBuilder()
+        b.line(G["conditional_table"], 1, [X], [(VN, 1)], [1, f"({{{VN}}}_2)", 0, 9, 5])
+        graph, _ = build(b)
+        self.assertEqual(len(graph.unsupported), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

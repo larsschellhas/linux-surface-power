@@ -76,7 +76,8 @@ The preprocessor processes the text line by line:
   ```
   expr   := term (('+' | '-') term)*
   term   := factor (('*' | '/') factor)*
-  factor := number | '(' expr ')' | '-' factor
+  factor := number | channel | '(' expr ')' | '-' factor
+  channel := '{' GUID '}_' digits
   number := digits ['.' digits] [('e'|'E') ['+'|'-'] digits]
   ```
 - **Evaluator:** a recursive-descent evaluator over this grammar; Python `eval` is never used. Division by zero and any other token are errors.
@@ -84,7 +85,7 @@ The preprocessor processes the text line by line:
   - Contrary to the earlier survey, some blobs do this. Laptop 7 Intel, Pro 11 Intel and the macro-source blobs use for example `({FB805E77-…}_208+30)` as table bounds.
 - **Our handling:**
   - A constant expression is evaluated once at load time.
-  - An expression with braced channel references is kept as text and marks its line as *dynamic*. Dynamic lines are not implemented yet (phase 5); `blob-format.md` 7 applies to them like to an unknown GUID.
+  - An expression with braced channel references is kept as text and marks its line as *dynamic*. It is compiled once and evaluated in every run (`engine.md` 3.6). For blocks without that support, `blob-format.md` 7 applies to the line like to an unknown GUID.
   - Any other content (names, operators outside the grammar) is a parse error.
 
 ### 4.3 Numbers

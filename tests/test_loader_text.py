@@ -48,6 +48,18 @@ class ExprTest(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(BlobError):
                 expr.evaluate(bad)
 
+    def test_channel_references(self):
+        vn = "FB805E77-616E-4EA8-BAC1-6859A6C2D4B1"
+        e = expr.Expression(f"({{{vn.lower()}}}_208+30*2)")
+        self.assertEqual([(r.guid, r.channel) for r in e.refs], [(vn, 208)])
+        self.assertEqual(e.value(lambda ref: 3000.0), 3060)
+        with self.assertRaises(expr.Unavailable):
+            e.value(lambda ref: None)
+        with self.assertRaises(BlobError):
+            expr.evaluate(f"({{{vn}}}_208+30)")            # constant evaluation refuses channels
+        with self.assertRaises(BlobError):
+            expr.Expression(f"(100/{{{vn}}}_2)").value(lambda ref: 0.0)
+
 
 class NumbersTest(unittest.TestCase):
     def test_atoi_like_c(self):

@@ -65,6 +65,14 @@ The `Scheduler` drives evaluations from a monotonic time in ms that the caller p
 
 The device profile gives the default from the core version in the device's driver package. Cores 3.141 – 3.158 are not known and use `classic` [H].
 
+### 3.6 Parameters with channel references
+From core 3.204.23 a parameter may be an expression that reads channels, e.g. `({VN208}+30)` (`blob-format.md` 4.2). The core keeps such expressions and evaluates them in every run of the block, before the block computes [C, read for the lookup table, conditional table, multiply/divide, hysteresis table and quantiser, EWMA].
+- **Order:** the block evaluates its expressions first. A channel written by a later stage gives its value from the previous run, as for inputs (3.1).
+- **Missing value:** if a referenced channel is unknown or invalid, the block writes nothing in this run, not even its fallback value [C]. A division by zero is handled the same way [H].
+- **Checks:** with expressions, the core skips the block's order checks, at load and at run time [C for the lookup table and multiply/divide].
+- **Triggers:** a referenced channel does not count as an input of the block for asynchronous runs (3.3) [H].
+- **Implemented for:** the lookup table (4.1) and multiply/divide (5.4), the only blocks whose handling was read in full and whose parameters carry no state. The known blobs use expressions with channels only in lookup tables. For any other block, a line with such an expression stays unsupported (`blob-format.md` 7).
+
 ## 4. Blocks used by all SMF x64 blobs up to 2023
 
 Parameters are listed in blob column order, after the channel references. Each block first writes a value to its outputs, then may overwrite it; the description gives the final result.
