@@ -49,6 +49,15 @@ class InputsTest(unittest.TestCase):
         self.fs.write("sys/class/hwmon/hwmon2/temp9_input", "garbage")
         self.assertIsNone(t.read(0)[ref(TEMP, 509)])
 
+    def test_base_temperatures(self):
+        """With the base sensors (TMP on KIP), the second surface_thermal maps to 601-609; the display part stays 501-509."""
+        self.fs.add_base_sensors(40.0)
+        self.fs.write("sys/class/hwmon/hwmon2/temp9_input", 48000)
+        v = inputs.HwmonTemperatures(self.fs.root).read(0)
+        self.assertEqual(v[ref(TEMP, 509)], 3211)
+        self.assertEqual(v[ref(TEMP, 609)], 3131)
+        self.assertEqual(v[ref(TEMP, 605)], 3131)
+
     def test_slider_mapping(self):
         s = inputs.SliderState(self.fs.root)
         cases = [("low-power", 1, 1), ("low-power", 0, 7), ("balanced", 1, 1), ("balanced", 0, 2),

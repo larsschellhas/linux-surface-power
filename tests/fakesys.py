@@ -19,6 +19,7 @@ class FakeSys:
             self.write(f"sys/class/hwmon/hwmon2/temp{i}_label", label)
             self.write(f"sys/class/hwmon/hwmon2/temp{i}_input", 30000)
         self.write("sys/class/hwmon/hwmon2/name", "surface_thermal")
+        self.link("sys/class/hwmon/hwmon2/device", "sys/devices/platform/MSHW0117:00/serial0-0/01:03:01:00:02")
         self.write("sys/class/hwmon/hwmon8/name", "coretemp")
         self.write("sys/class/hwmon/hwmon8/temp1_label", "Package id 0")
         self.write("sys/class/hwmon/hwmon8/temp1_input", 50000)
@@ -60,6 +61,21 @@ class FakeSys:
     def read(self, rel: str) -> str:
         with open(self.path(rel)) as f:
             return f.read().strip()
+
+    def link(self, rel: str, target_rel: str) -> None:
+        """Symlink `rel` -> `target_rel` (both relative to the root); creates the target directory."""
+        os.makedirs(self.path(target_rel), exist_ok=True)
+        os.makedirs(os.path.dirname(self.path(rel)), exist_ok=True)
+        os.symlink(self.path(target_rel), self.path(rel))
+
+    def add_base_sensors(self, celsius: float = 30.0) -> None:
+        """Second surface_thermal for the SB3 base (KIP, below the base hub), as with the EC module v0.3."""
+        labels = [f"I_RTS{i}" for i in range(1, 9)] + ["I_VTS1"]
+        for i, label in enumerate(labels, start=1):
+            self.write(f"sys/class/hwmon/hwmon10/temp{i}_label", label)
+            self.write(f"sys/class/hwmon/hwmon10/temp{i}_input", int(celsius * 1000))
+        self.write("sys/class/hwmon/hwmon10/name", "surface_thermal")
+        self.link("sys/class/hwmon/hwmon10/device", "sys/devices/platform/MSHW0117:00/00:00:01:11:00/01:03:02:00:02")
 
     def cleanup(self):
         self.tmp.cleanup()

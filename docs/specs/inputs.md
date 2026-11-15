@@ -13,7 +13,7 @@ Version 0.1, 14.11.2026. Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC
 | Interface | Channel | Meaning | Linux source | Conversion |
 |---|---|---|---|---|
 | `2E8B14C2` temperature | 501 – 599 | SAM sensor `iid = ch − 500` | hwmon `surface_thermal`, `temp<iid>_input` (on the SB3 `temp9` is labelled `I_VTS1` = channel 509 [M]) | `0.1 K = 2731 + m°C / 100` |
-| | 601 – 699 | KIP (base) sensor `iid = ch − 600` | not available on Linux yet (SB3) → invalid | |
+| | 601 – 699 | KIP (base) sensor `iid = ch − 600` | hwmon `surface_thermal` whose SSAM device is `01:03:02:00:02` (target KIP, below the base hub). On the SB3 this needs the registry node and a `surface_temp` match entry for KIP (both not upstream yet, tested 15.11.2026 [M]); otherwise invalid | 0.1 K |
 | | 101, 102 | GPU, CPU temperature | 102: hwmon `coretemp` "Package id 0"; 101: not provided | as above |
 | `2DD6960F` system state | 1 | slider state 1 – 10 | `platform_profile` × AC/battery (section 3) | integer |
 | `28B7BD85` power tracker | 1 / 101 | charge level of battery 1 / 2 in % | `power_supply` `BAT1` / `BAT2` `capacity` [M: BAT1 is the display part at 8.0 V, BAT2 the base at 12.6 V] | % |

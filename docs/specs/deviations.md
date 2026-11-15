@@ -8,7 +8,7 @@ SMF is listed here. Intended improvements are opt-in and off by default; none ex
 | ID | Difference | Effect | Default |
 |---|---|---|---|
 | DV-1 | Temperatures are polled every second. Windows reads them only when the EC trip point (42 °C on the SB3) is exceeded, and holds the last value below it. | None for control: every controller is OFF far above 42 °C. Below the trip point, Linux sees current values where Windows holds an old one. | always |
-| DV-2 | KIP/base temperatures (600 + iid) are not available on the SB3. | The dGPU skin loop reads an invalid input. That output is log-only anyway. | always |
+| DV-2 | KIP/base temperatures (600 + iid) are not available on the SB3 with current kernels. They need a registry node and a `surface_temp` match entry for KIP (prototype works, 15.11.2026). | Without them, the dGPU skin loop reads an invalid input. That output is log-only anyway. | until the kernel patches land |
 | DV-3 | Display brightness in nits is not available. | PL4 uses 3 W display power (the Windows fallback without a value). At most ~3 W difference in PL4. | channel invalid; optional profile value |
 | DV-4 | Slider states 8 – 10 (game mode, mixed reality, service flag) do not exist on Linux. Low-power on AC maps to Recommended. | Linux never selects these states. | fixed mapping (OD-4) |
 | DV-5 | The dGPU limit, WTMF and fan outputs have no Linux target. | Computed and logged only. | log-only |

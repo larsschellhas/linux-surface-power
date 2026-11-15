@@ -58,15 +58,34 @@ def _hwmon_dirs(root: str, name: str) -> list[str]:
     return out
 
 
+# Channel base per SSAM target of a `surface_thermal` device (spec inputs 2): SAM (display part) 500 + iid, KIP (base) 600 + iid.
+THERMAL_CHANNEL_BASE = {1: 500, 2: 600}
+
+
+def _ssam_target(hwmon_dir: str) -> int | None:
+    """SSAM target ID from the hwmon's device name (`01:03:<tid>:00:02`); None if there is no SSAM device link."""
+    parts = os.path.basename(os.path.realpath(os.path.join(hwmon_dir, "device"))).split(":")
+    if len(parts) == 5:
+        try:
+            return int(parts[2], 16)
+        except ValueError:
+            return None
+    return None
+
+
 class HwmonTemperatures(Source):
-    """SAM sensors 501-599 from hwmon `surface_thermal` (temp<iid>_input), CPU package 102 from `coretemp`."""
+    """SAM sensors 501-509 and KIP (base) sensors 601-609 from hwmon `surface_thermal` (temp<iid>_input),
+    CPU package 102 from `coretemp`. Without an SSAM device link, a `surface_thermal` counts as SAM."""
 
     def __init__(self, root: str = "/"):
         self.paths: dict[ChannelRef, str] = {}
         for d in _hwmon_dirs(root, "surface_thermal"):
+            base = THERMAL_CHANNEL_BASE.get(_ssam_target(d) or 1)
+            if base is None:
+                continue                        # a target we do not know: not mapped
             for p in glob.glob(os.path.join(d, "temp*_input")):
                 iid = int(os.path.basename(p)[4:-len("_input")])
-                self.paths[ChannelRef(TEMP, 500 + iid)] = p
+                self.paths[ChannelRef(TEMP, base + iid)] = p
         for d in _hwmon_dirs(root, "coretemp"):
             for lab in glob.glob(os.path.join(d, "temp*_label")):
                 if _read(lab) == "Package id 0":
