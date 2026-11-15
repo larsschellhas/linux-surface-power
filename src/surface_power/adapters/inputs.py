@@ -221,6 +221,10 @@ class CdevTransport:
     def __init__(self, path: str = SSAM_CDEV):
         self.path = path
 
+    def available(self) -> bool:
+        """False if the device node is missing (module surface_aggregator_cdev not loaded)."""
+        return os.path.exists(self.path)
+
     def request(self, tid: int, cid: int, iid: int = 1) -> bytes | None:
         import ctypes
         import fcntl
@@ -263,7 +267,7 @@ class PlatformPower(Source):
 
     def __init__(self, root: str = "/", transport=None):
         self.root = root
-        self.transport = transport if transport is not None else CdevTransport()
+        self.transport = transport if transport is not None else CdevTransport(os.path.join(root, SSAM_CDEV.lstrip("/")))
         self.channels = {ChannelRef(POWER, base + ch) for base in (0, 100) for *_, ch in self.FIELDS} | {ChannelRef(POWER, 7)}
         self.values: dict[ChannelRef, float | None] = {ref: None for ref in self.channels}
         self.next_ms: int | None = None

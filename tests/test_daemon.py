@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from fakesys import FakeSys
-from helpers import LIMITS, SYSTEM, TEMP, VN, BlobBuilder, G
+from helpers import LIMITS, POWER, SYSTEM, TEMP, VN, BlobBuilder, G
 
 from surface_power import daemon, monitor
 
@@ -147,6 +147,19 @@ class DaemonTest(unittest.TestCase):
         d.after_resume(2000)
         d.cycle(2000)
         self.assertEqual(self.fs.read(PL1), "25000000")
+        d.stop()
+
+    def test_missing_ssam_cdev_is_reported(self):
+        """Without the SSAM debug device the EC power data stay invalid; the daemon must say so at start (NFR-11)."""
+        b = BlobBuilder()
+        b.line(G["pass_through"], 1, [(POWER, 8)], [(LIMITS, 201)], [50000], stage=1)   # reads the available input power
+        with open(self.blob, "w") as f:
+            f.write(b.text())
+        out = io.StringIO()
+        args = ["--root", self.fs.root, "--blob", self.blob, "--run-dir", self.run.name, "--state-dir", self.state.name,
+                "--dry-run"]
+        d = daemon.Daemon(daemon.parse_args(args), monitor.Journal(stream=out))
+        self.assertIn("surface_aggregator_cdev", out.getvalue())
         d.stop()
 
     def test_control_refuses_while_thermald_runs(self):
