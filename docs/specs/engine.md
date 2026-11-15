@@ -150,11 +150,28 @@ Read from the newer cores (3.140 to 3.205.23, x64) [C] unless marked otherwise. 
 - **Validity:** the block does not check its inputs; it runs whenever it has an output [C]. An invalid input takes part with its last value, as in add/subtract/scale (4.3) [H: the core reads the input's stored value; how that value behaves while the input is invalid was not traced].
 - **Reset:** the remembered value is kept on resume (3.4) [H: no reset path for this block was seen].
 
-### 5.2 Planned
+### 5.2 Hysteresis table (`0DBF7FAB`)
+A step switch: band `i` spans `[down[i], up[i]]` and gives `y[i]`. Neighbouring bands overlap; inside an overlap the output holds.
+- **Inputs/outputs:** reads the first input `x`; 1 output.
+- **Parameters:** `N, below, above`, then `N` pairs `down[i], up[i]`, then `y[0..N-1]`. There are `3N + 3` columns; `N` must be > 0. Let `L = down[0]` and `H = up[N−1]`.
+- **Checks:**
+  - `down[i] ≤ up[i]`;
+  - `down[i] ≥ L` and `up[i] ≤ H`;
+  - for `i ≥ 1`: `down[i] ≥ down[i−1]` and `down[i] ≤ up[i−1]`.
+- **State:** the last `x` (initially 0) and the last result (initially `below`).
+- **Result,** only when `inputs_ok`. Otherwise the block writes nothing and the output keeps its value [C].
+  - `x > H` → `above`; `x < L` → `below`. Both store `x`.
+  - Otherwise, if `|x − last x| < 0.001` → the last result.
+  - Otherwise, if `down[i+1] < x < up[i]` for some `i < N−1` (strictly inside an overlap) → the last result; `x` is not stored.
+  - Otherwise, if `x` fell (`x < last x`): the first `i` with `x ≤ down[i]` gives `below` for `i = 0`, else `y[i−1]`; if there is none, `y[N−1]`.
+  - Otherwise (`x` rose): the last `i` with `x ≥ up[i]` gives `above` for `i = N−1`, else `y[i+1]`; if there is none, `y[0]`.
+  - In the last two cases the block stores `x`; in all cases the output becomes the new last result.
+- **Reset:** the state is kept on resume [H, as 5.1].
+
+### 5.3 Planned
 These are described from the survey (`../research/04-smf-device-survey.md`). Their exact semantics will be read from the code and added here before they are implemented.
 - **Multiply/divide (`3D42677C`):** the product of the inputs, each optionally inverted, then clamped.
 - **Hysteresis quantiser (`A58AF9AA`):** clamp, round down to a step, with a hysteresis of one step.
-- **Hysteresis table (`0DBF7FAB`):** a step switch with separate up and down thresholds.
 - **Weighted mean (`A0CE482E`):** a weighted mean plus an offset, clamped.
 - **EWMA (`54C09C3D`):**
   - Parameters: `max, min, tau_ms, default`. Update: `y += (Δt/τ)·(x − y)`.

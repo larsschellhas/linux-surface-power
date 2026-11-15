@@ -51,3 +51,55 @@ class ConditionalTable(Block):
                 self.last = self.y[i]
                 break
         self.write(self.last)
+
+
+@register("hysteresis_table")
+class HysteresisTable(Block):
+    """Step switch over overlapping bands [down[i], up[i]] -> y[i]; holds inside overlaps (spec engine 5.2)."""
+
+    def parse(self, p):
+        n = p.int(0, "N")
+        if n <= 0:
+            raise p.fail("N must be positive")
+        p.count(3 * n + 3)
+        self.below, self.above = p.real(1, "below"), p.real(2, "above")
+        self.down = [p.real(3 + 2 * i, f"down[{i}]") for i in range(n)]
+        self.up = [p.real(4 + 2 * i, f"up[{i}]") for i in range(n)]
+        self.y = p.reals(3 + 2 * n, n, "y")
+        lo, hi = self.down[0], self.up[-1]
+        for i in range(n):
+            if self.down[i] > self.up[i]:
+                raise p.fail(f"band {i}: down > up")
+            if self.down[i] < lo or self.up[i] > hi:
+                raise p.fail(f"band {i}: outside [down[0], up[N-1]]")
+            if i and (self.down[i] < self.down[i - 1] or self.down[i] > self.up[i - 1]):
+                raise p.fail(f"band {i}: must start inside band {i - 1}")
+        self.last_x, self.last_y = 0.0, self.below
+
+    def _result(self, x: float) -> tuple[float, bool]:
+        """(new result, whether x is stored) as in the core."""
+        n = len(self.y)
+        if x > self.up[-1]:
+            return self.above, True
+        if x < self.down[0]:
+            return self.below, True
+        if near(x, self.last_x) or any(self.down[i + 1] < x < self.up[i] for i in range(n - 1)):
+            return self.last_y, False
+        if x < self.last_x:
+            for i in range(n):
+                if x <= self.down[i]:
+                    return (self.below if i == 0 else self.y[i - 1]), True
+            return self.y[-1], True
+        for i in range(n - 1, -1, -1):
+            if x >= self.up[i]:
+                return (self.above if i == n - 1 else self.y[i + 1]), True
+        return self.y[0], True
+
+    def run(self, ctx):
+        if not self.outputs or not self.inputs_ok():
+            return  # the core writes nothing then [C]
+        x = self.inputs[0].value
+        self.last_y, store = self._result(x)
+        if store:
+            self.last_x = x
+        self.write(self.last_y)

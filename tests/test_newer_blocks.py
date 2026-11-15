@@ -80,5 +80,54 @@ class ConditionalTableTest(unittest.TestCase):
         self.assertEqual(graph.unsupported, [])
 
 
+class HysteresisTableTest(unittest.TestCase):
+    # 3 bands: [10, 20] -> 1, [15, 30] -> 2, [25, 40] -> 3; below 10 -> 0, above 40 -> 9.
+    PARAMS = [3, 0, 9, 10, 20, 15, 30, 25, 40, 1, 2, 3]
+
+    def setUp(self):
+        _, self.eng = single(G["hysteresis_table"], [X], self.PARAMS)
+
+    def seq(self, xs):
+        return [run(self.eng, {X: x}) for x in xs]
+
+    def test_rising_and_falling(self):
+        self.assertEqual(self.seq([12, 19, 20, 22, 30, 35, 40, 41]), [1, 1, 2, 2, 3, 3, 9, 9])
+        self.assertEqual(self.seq([36, 26, 25, 24, 15, 14, 10, 9]), [3, 3, 2, 2, 1, 1, 0, 0])
+
+    def test_overlap_holds(self):
+        self.assertEqual(self.seq([12, 17, 18]), [1, 1, 1])     # 17, 18 lie inside the overlap (15, 20)
+        self.assertEqual(self.seq([22, 17, 16]), [2, 2, 2])
+
+    def test_first_value_below_the_bands(self):
+        self.assertEqual(self.seq([5]), [0])
+
+    def test_first_value_inside_rises_from_zero(self):
+        self.assertEqual(self.seq([22]), [2])                   # last x starts at 0, so 22 counts as rising past up[0]
+
+    def test_same_value_holds(self):
+        self.assertEqual(self.seq([22, 22.0005]), [2, 2])
+
+    def test_invalid_input_writes_nothing(self):
+        graph, eng = single(G["hysteresis_table"], [X], self.PARAMS)
+        eng.set_inputs({ref(*X): None})
+        eng.evaluate(1, timer=False, now_ms=0)
+        self.assertEqual(eng.node(1), 0)
+        self.assertEqual(run(eng, {X: 35}), 3)
+        self.assertEqual(run(eng, {X: None}), 3)
+
+    def test_checks(self):
+        cases = {
+            "down > up": [1, 0, 9, 5, 4, 1],
+            "down below L": [2, 0, 9, 10, 20, 5, 30, 1, 2],
+            "up above H": [2, 0, 9, 10, 50, 15, 30, 1, 2],
+            "gap between bands": [2, 0, 9, 10, 20, 25, 30, 1, 2],
+            "count": [2, 0, 9, 10, 20, 15, 30, 1],
+            "N = 0": [0, 0, 9],
+        }
+        for name, params in cases.items():
+            with self.subTest(name), self.assertRaises(BlobError):
+                single(G["hysteresis_table"], [X], params)
+
+
 if __name__ == "__main__":
     unittest.main()
