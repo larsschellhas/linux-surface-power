@@ -11,7 +11,7 @@ SMF is listed here. Intended improvements are opt-in and off by default; none ex
 | DV-2 | KIP/base temperatures (600 + iid) are not available on the SB3 with current kernels. They need a registry node and a `surface_temp` match entry for KIP (prototype works, 15.11.2026). | Without them, the dGPU skin loop reads an invalid input. That output is log-only anyway. | until the kernel patches land |
 | DV-3 | Display brightness in nits is not available. | PL4 uses 3 W display power (the Windows fallback without a value). At most ~3 W difference in PL4. | channel invalid; optional profile value |
 | DV-4 | Slider states 8 – 10 (game mode, mixed reality, service flag) do not exist on Linux. Low-power on AC maps to Recommended. | Linux never selects these states. | fixed mapping (OD-4) |
-| DV-5 | The dGPU limit, WTMF and fan outputs have no Linux target. | Computed and logged only. | log-only |
+| DV-5 | The dGPU limit, WTMF and fan outputs have no Linux target. On the SB3 (GTX 1660 Ti, driver 595), `nvidia-smi -pl` is refused with or without persistence mode, and Dynamic Boost (`nvidia-powerd`) needs Ampere or newer; the driver reports it as not supported. | Computed and logged only. A clock-cap stand-in is a backup concept (I-4). | log-only |
 | DV-6 | `0x53` data comes from requests instead of EC events. | Values are fresher than on Windows (where events sometimes did not arrive). | always |
 
 ## 2. Unknown details, chosen by us

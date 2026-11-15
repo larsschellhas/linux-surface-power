@@ -54,3 +54,26 @@ Setup:
 
    Base fan behaviour under dGPU load: both base fans start after about 2 min, at a GPU temperature of 86 °C, and then run at about 2700 rpm. The NVIDIA driver reports 0 % fan.
 4. **Two `surface_thermal` devices.** With both present, a sensor must be picked by its SSAM device (`01:03:01:00:02` display part, `01:03:02:00:02` base), not by name. Both the daemon and the field-test script now do that.
+
+## dGPU limit on Linux (GTX 1660 Ti Max-Q, driver 595.99.02)
+- **Power limit (`nvidia-smi -pl`):** refused ("Changing power management limit is not supported"), with and without persistence mode.
+  - Forum reports put this restriction on notebook GPUs since about driver 530/550. NVIDIA does not document it.
+  - The notebook route on Linux is Dynamic Boost (`nvidia-powerd`). It needs Ampere or newer GPUs and SBIOS support, and the driver reports "Notebook Dynamic Boost: Not Supported" here.
+  - The SB3 ACPI tables have no SAN-based dGPU limit method either. That method exists on the SB2 and Studio 2.
+- **Clock cap (`nvidia-smi -lgc 300,<max>`):** accepted. Measured under the same CUDA + NVENC load:
+
+  | Max clock | dGPU power | Clock | GPU max |
+  |---|---|---|---|
+  | none | 62.6 W | 1512 MHz | 76 °C |
+  | 1500 MHz | 58.5 W | 1392 MHz | 87 °C |
+  | 1300 MHz | 52.5 W | 1290 MHz | 84 °C |
+  | 1100 MHz | 40.5 W | 1095 MHz | 70 °C |
+  | 900 MHz | 33.6 W | 900 MHz | 62 °C |
+
+  - The clock can be set in 15 MHz steps. At 1500 MHz the GPU ran below the cap because it reached its own 87 °C target, so power is not a fixed function of the cap.
+- **Persistence and RTD3:** RTD3 is enabled (fine-grained). Measured:
+  - A clock cap stays in force after the GPU has been in D3cold and wakes up again, without persistence mode.
+  - Persistence mode does not keep the GPU out of D3cold.
+  - Not tested: system suspend/resume and driver reload. A reboot clears the cap.
+- **Consequence:** a dGPU stand-in would regulate the measured dGPU power to the blob's output 201 by moving the clock cap. It is kept as a backup concept (I-4), opt-in under G-3.
+  - Sampling must not wake the GPU: NVML queries do. So it should only run while `power/runtime_status` is already `active`.
