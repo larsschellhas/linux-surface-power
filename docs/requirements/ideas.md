@@ -13,3 +13,5 @@ off by default (G-3), and needs its own requirement and acceptance criteria befo
 | I-6 | psys/limit choice by charger strength in balanced/low-power profiles | Avoid draining on weak chargers | Asked in kernel#117 (comment 6774217179) |
 | I-7 | Quieter fan at idle where the fan is controllable | Windows is quieter at idle than Linux in `performance` | SB3 fan is EC-owned; relevant for devices whose blob drives the fan |
 | I-8 | User-tunable comfort mode (lower skin set point) | Lap use | Must only narrow limits (FR-S7) |
+| I-9 | Start the skin controller with U = U_off instead of 0 | Windows starts with U = 0 (spec `controller.md`). If the skin is between W − ΔW − hysteresis and W + ΔW_on at boot (SB3: 45.5–47 °C), the controller goes READY without a law step and PL1 stays at the lowest value (8.5 W) until the skin leaves that band | Decided 15.11.2026: parity first, keep as optimisation potential |
+| I-10 | Run the dry-run alongside thermald | `Conflicts=thermald.service` is needed for control, but in dry-run nobody limits the skin temperature while thermald is stopped | A drop-in for dry-run installs, or a separate unit |
