@@ -27,9 +27,9 @@ Discussion upstream: [linux-surface#2383](https://github.com/linux-surface/linux
 
 ## Status
 
-- **Specs and a Python reference implementation** (`docs/specs/`, `src/`, 179 unit tests):
-  - Loader: reads all known blob forms (all 42 local blobs parse).
-  - Engine: the block types of the 2020–2023 blobs, with the PID in both core variants.
+- **Specs and a Python reference implementation** (`docs/specs/`, `src/`, 226 unit tests):
+  - Loader: reads all known blob forms; MPTF configurations (2025/26 models) are recognised and rejected.
+  - Engine: all block types of the SMF blobs from 2020 to 2025, including expressions with channel references and the variable-setpoint PID, with the PID in both core variants. All 41 SMF blobs of the local corpus build completely (`docs/research/09-newer-blobs.md`).
   - Around it: adapters, supervisor, monitoring, the daemon and tools.
 - **Surface Book 3 15": control works and matches Windows** (`docs/research/08-field-tests-sb3.md`):
   - skin held at 48 °C and ~32 W system power under 30 min of full load;
@@ -40,7 +40,8 @@ Discussion upstream: [linux-surface#2383](https://github.com/linux-surface/linux
 - **Kernel side** (submitted, not merged yet):
   - SB3 sensor and fan nodes, main and base: [kernel#190](https://github.com/linux-surface/kernel/pull/190).
   - The EC's DPTF battery data and adapter rating in sysfs: [kernel#195](https://github.com/linux-surface/kernel/pull/195). Without it, the daemon reads these values through the SSAM debug device, which needs root.
-- **Next:** the block types of the newer blobs (Pro 9 and later, Laptop 5 and later), so that those devices can be controlled too.
+- **Next:** the inputs that the newer blobs read and the daemon does not provide yet (battery current, external display, camera, dock, …).
+  Until they exist, those devices run in dry-run. The list is in `docs/research/09-newer-blobs.md` 4.
 
 ## Try it on your Surface
 

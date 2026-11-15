@@ -1,0 +1,16 @@
+# Device profile: Surface Pro 8 (Wi-Fi and LTE). Spec supervisor 6. Holds no limit values (G-2): those come from the device's blob.
+# The product name is the one the kernel's surface_gpe driver matches. Not validated on a device yet.
+tested = false
+
+[match]
+product_name = "Surface Pro 8"
+
+[blob]
+source = "efivar"
+
+[engine]
+variant = "classic"     # the driver package ships SMF core 3.137 (docs/research/04)
+
+[outputs]
+pl3 = false
+pl4 = false
