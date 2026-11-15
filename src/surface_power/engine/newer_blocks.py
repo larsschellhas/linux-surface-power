@@ -182,3 +182,34 @@ class MultiplyDivide(Block):
                 x = 1.0 / x if abs(x) >= TOLERANCE else (1000.0 if x >= 0 else -1000.0)
             product *= x
         self.write(clamp(product, self.max, self.min))
+
+
+@register("ewma")
+class Ewma(Block):
+    """Time-based exponential smoothing of the first input, clamped; default if any input is invalid (spec engine 5.5)."""
+
+    MAX_TAU_MS = 120000.0  # [C]
+
+    def parse(self, p):
+        p.count(4)
+        self.max, self.min = p.real(0, "max"), p.real(1, "min")
+        self.tau, self.default = p.real(2, "tau_ms"), p.real(3, "default")
+        if not (self.min <= self.max and self.min <= self.default <= self.max):
+            raise p.fail("needs min <= default <= max")
+        if not 0 < self.tau <= self.MAX_TAU_MS:
+            raise p.fail("tau_ms must be in (0, 120000]")
+        self.y = self.default
+        self.last_ms: int | None = None   # DH-8: the first update counts from the first run
+
+    def run(self, ctx):
+        if not self.outputs:
+            return
+        if not self.inputs_ok():
+            self.write(self.default)
+            return
+        now = int(ctx.now_ms)
+        dt = 0 if self.last_ms is None else now - self.last_ms
+        x = self.inputs[0].value
+        self.y = x if dt >= self.tau else (dt / self.tau) * (x - self.y) + self.y
+        self.last_ms = now
+        self.write(clamp(self.y, self.max, self.min))

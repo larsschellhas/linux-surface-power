@@ -199,7 +199,7 @@ Blocks are looked up by algorithm GUID (upper case). Core type numbers are never
 | `0DBF7FAB` | hysteresis table | engine 5.2 | implemented |
 | `A0CE482E` | weighted mean | engine 5 | planned |
 | `0D24F500` | single-set PID | controller 6 | planned |
-| `54C09C3D` | EWMA filter | engine 5 | planned |
+| `54C09C3D` | EWMA filter | engine 5.5 | implemented |
 | `B34C9310`, `7C2D76F2` | PID cores (types 1, 2) | controller 6 | planned |
 
 Full GUIDs are in `src/surface_power/engine/registry.py`.

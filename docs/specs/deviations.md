@@ -25,6 +25,9 @@ SMF is listed here. Intended improvements are opt-in and off by default; none ex
 | DH-5 | Input readings outside the channel range | invalid | Windows client behaviour on range errors |
 | DH-6 | Cores 3.141 – 3.158 | `classic` variant | read such a core, if one turns up |
 | DH-7 | Charge rate while charging | 0 | read the power-tracker client |
+| DH-8 | Elapsed time of the first EWMA update (engine 5.5). Windows counts it from loading the blob. | counted from the first run, so the first update keeps the default | Windows ETW trace |
+| DH-9 | EWMA in core 3.204.23 (Pro 10) has no `Δt ≥ τ` rule and overshoots after long gaps | the rule of cores ≥ 3.205.6 for all cores | differs only when a run comes more than τ after the last |
+| DH-10 | State of the newer blocks (engine 5.1 – 5.5) on resume | kept | read the core's resume path |
 
 ## 3. Safety additions (not in Windows)
 

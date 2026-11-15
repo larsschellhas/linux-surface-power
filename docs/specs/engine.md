@@ -193,13 +193,22 @@ Quantises the input to steps of `step` above `min`, with a hysteresis of one ste
   - Otherwise the product of all inputs, starting from 1. An input with `invert[j] ≠ 0` enters as `1/x`; if `|x| < 0.001` it enters as 1000 for `x ≥ 0` and −1000 for `x < 0` [C].
   - The output is `clamp(product, max, min)`.
 
-### 5.5 Planned
+### 5.5 EWMA (`54C09C3D`)
+Time-based exponential smoothing.
+- **Inputs/outputs:** k inputs, 1 output. Only the first input has an effect: the core updates once per input in the same run, and from the second input on the elapsed time is 0 [C].
+- **Parameters:** `max, min, tau_ms, default`.
+- **Checks:** `min ≤ max`, `min ≤ default ≤ max`, `0 < tau_ms ≤ 120000`.
+- **State:** the smoothed value `y`, initially `default`, and the time of the last update.
+- **Result:**
+  - not `inputs_ok` → `default`; the state stays.
+  - Otherwise, with `Δt` the whole milliseconds since the last update: `y = x` if `Δt ≥ τ` [C, from core 3.205.6], else `y += (Δt/τ)·(x − y)`. The update time becomes now. The output is `clamp(y, max, min)`.
+- **Time base:** the core uses the system time; we use the monotonic time the engine is given (`now_ms`). The core counts `Δt` of the first update from loading the blob; we count it from the first run, so the first update leaves `y = default` (DH-8).
+- **Core 3.204.23** (Pro 10) has no `Δt ≥ τ` rule; there `y` overshoots `x` when `Δt > τ`. We always apply the rule (DH-9).
+- **Reset:** the state is kept on resume [H, as 5.1].
+
+### 5.6 Planned
 These are described from the survey (`../research/04-smf-device-survey.md`). Their exact semantics will be read from the code and added here before they are implemented.
 - **Weighted mean (`A0CE482E`):** a weighted mean plus an offset, clamped.
-- **EWMA (`54C09C3D`):**
-  - Parameters: `max, min, tau_ms, default`. Update: `y += (Δt/τ)·(x − y)`.
-  - From core 3.205.6: `Δt ≥ τ ⇒ y = x` [C].
-  - It needs the time between runs; the engine passes `now_ms` to every block for this.
 
 ## 6. Numeric tolerances (FR-E7)
 - **Deterministic results:** the same blob and the same input sequence give bit-identical results on one platform (AC-E9).

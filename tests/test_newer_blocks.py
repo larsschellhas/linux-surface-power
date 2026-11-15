@@ -180,5 +180,52 @@ class MultiplyDivideTest(unittest.TestCase):
                 single(G["multiply_divide"], [X, Y], params)
 
 
+class EwmaTest(unittest.TestCase):
+    PARAMS = [1000, -1000, 5000, 10]   # max, min, tau_ms, default
+
+    def setUp(self):
+        _, self.eng = single(G["ewma"], [X], self.PARAMS)
+
+    def at(self, t, x):
+        self.eng.set_inputs({ref(*X): x})
+        self.eng.evaluate(1, timer=True, now_ms=t)
+        return self.eng.node(1)
+
+    def test_first_run_keeps_default_then_smooths(self):
+        self.assertEqual(self.at(1000, 110), 10)
+        self.assertEqual(self.at(2000, 110), 30)       # 10 + 1/5 * 100
+        self.assertEqual(self.at(4500, 110), 70)       # 30 + 1/2 * 80
+
+    def test_long_gap_takes_the_input(self):
+        self.at(0, 110)
+        self.assertEqual(self.at(5000, 110), 110)
+        self.assertEqual(self.at(20000, -50), -50)
+
+    def test_clamped_output_unclamped_state(self):
+        _, eng = single(G["ewma"], [X], [100, 0, 1000, 0])
+        for t, x, out in [(0, 500, 0), (2000, 500, 100), (2500, 0, 100)]:   # state 500 -> 250 after half a tau
+            eng.set_inputs({ref(*X): x})
+            eng.evaluate(1, timer=True, now_ms=t)
+            self.assertEqual(eng.node(1), out)
+
+    def test_invalid_gives_default_and_keeps_state(self):
+        self.at(0, 110)
+        self.at(5000, 110)
+        self.assertEqual(self.at(6000, None), 10)
+        self.assertEqual(self.at(7000, 60), 110 + 2000 / 5000 * (60 - 110))   # last update was at 5000
+
+    def test_only_first_input_counts(self):
+        _, eng = single(G["ewma"], [X, Y], self.PARAMS)
+        eng.set_inputs({ref(*X): 110, ref(*Y): -1000})
+        eng.evaluate(1, timer=True, now_ms=0)
+        eng.evaluate(1, timer=True, now_ms=10000)
+        self.assertEqual(eng.node(1), 110)
+
+    def test_checks(self):
+        for params in ([0, 100, 5000, 50], [100, 0, 5000, 101], [100, 0, 0, 50], [100, 0, 120001, 50], [100, 0, 5000]):
+            with self.subTest(params=params), self.assertRaises(BlobError):
+                single(G["ewma"], [X], params)
+
+
 if __name__ == "__main__":
     unittest.main()
