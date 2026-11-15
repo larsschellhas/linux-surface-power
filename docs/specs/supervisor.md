@@ -63,7 +63,7 @@ These do not depend on the blob. They are generous, so that Windows-parity behav
 |---|---|---|
 | Skin hot | any SAM skin channel the blob uses as a controller input ≥ 60 °C for 10 s | below 55 °C for 60 s |
 | CPU hot | package temperature ≥ 105 °C for 10 s (TjMax is 100 °C on the SB3; the hardware already throttles there) | below 95 °C for 60 s |
-| Core inputs lost | a controller input or the slider stays invalid for 60 s | valid again for 10 s |
+| Core inputs lost | a controller input or the slider stays invalid for 60 s. Inputs this system does not provide from the start (SB3: base sensors 605/609) are logged at start and do not count; their controllers stay OFF | valid again for 10 s |
 
 In emergency, firmware values are written and the engine keeps running in dry-run. The skin channels are the process values of
 the blob's controllers that are temperatures; the CPU channel is the `coretemp` package temperature.

@@ -14,7 +14,7 @@ PL1 = "sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw"
 PL2 = "sys/class/powercap/intel-rapl:0/constraint_1_power_limit_uw"
 
 
-def blob_text():
+def blob_text(absent_sensor=False):
     b = BlobBuilder()
     b.input_channel(TEMP, 509, 3681, 2731)
     b.output_channel(LIMITS, 51, 25000, 31000, 7500)
@@ -26,6 +26,11 @@ def blob_text():
     b.line(G["min_max"], 3, [(VN, 1), (VN, 2)], [(LIMITS, 51)], [30000, 8500, 15000, 0], stage=1)
     b.line(G["lookup_table"], 4, [(SYSTEM, 1)], [(LIMITS, 52)], [6, 25000, 25000, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6,
                                                                  25000, 15000, 40000, 25000, 61000, 35000])
+    if absent_sensor:
+        # A second controller on TEMP/609, which the fake system does not provide; it feeds a log-only output (dGPU 201).
+        b.line(G["pid_sets"], 10, [(TEMP, 609), (SYSTEM, 1)], [(VN, 10)], [20, 1, 15, 4, 0], divider=1)
+        b.line(G["pid_parameter_set"], 10, [], [], [10, 0, 7, 50000, 50001, 20000, 40000, 3181, 10, 40, 100, 0.4])
+        b.line(G["pass_through"], 11, [(VN, 10)], [(LIMITS, 201)], [50000], stage=1)
     return b.text()
 
 
@@ -93,6 +98,27 @@ class DaemonTest(unittest.TestCase):
         self.fs.write(PL1, 12000000)
         d.cycle(4000)
         self.assertEqual(self.fs.read(PL1), "12000000")              # then hands off
+        d.stop()
+
+    def test_absent_controller_input_is_no_emergency(self):
+        """A controller on a sensor this system never provides (SB3: base sensor 609) stays OFF; that is logged, not an emergency."""
+        with open(self.blob, "w") as f:
+            f.write(blob_text(absent_sensor=True))
+        d = self.start("--control")
+        self.assertIn(daemon.ChannelRef(TEMP, 609), d.reader.unavailable)
+        for t in range(0, 70000, 1000):
+            d.cycle(t)
+        self.assertEqual(d.state, "control")
+        d.stop()
+
+    def test_lost_controller_input_is_an_emergency(self):
+        """A sensor that was there and disappears still counts as lost after 60 s (spec supervisor 4)."""
+        d = self.start("--control")
+        d.cycle(0)
+        os.remove(self.fs.path("sys/class/hwmon/hwmon2/temp9_input"))
+        for t in range(1000, 62000, 1000):
+            d.cycle(t)
+        self.assertEqual(d.state, "emergency")
         d.stop()
 
     def test_suspend_and_resume(self):

@@ -161,11 +161,17 @@ class Daemon:
         return cols
 
     def _core_invalid(self) -> bool:
+        """True if a core input this system provides is invalid (spec supervisor 4, "core inputs lost").
+
+        Inputs that are unavailable from the start (SB3: base sensors 605/609) are logged once at start and do not count:
+        their controllers stay OFF, as on Windows when a sensor is missing. Power inputs from the EC do not count either.
+        """
         refs = [c.line.inputs[0] for c in self.graph.controllers]
         slider = ChannelRef(inp.SYSTEM, 1)
         if slider in self.graph.inputs:
             refs.append(slider)
-        return any(self.values.get(r) is None for r in refs if r.guid != inp.POWER)
+        absent = set(self.reader.unavailable)
+        return any(self.values.get(r) is None for r in refs if r.guid != inp.POWER and r not in absent)
 
     def _enter(self, state: str, reason: str) -> None:
         if state == self.state:
