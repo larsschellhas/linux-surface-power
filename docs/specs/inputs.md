@@ -73,6 +73,7 @@ The SB3 15" blob reads only posture 1, through the PL1 and dGPU posture tables. 
 - **Optional:** a device profile may give `panel_max_nits`. Then `millinits = brightness / max_brightness · panel_max_nits · 1000`. This changes PL4 by at most about 3 W.
 
 ## 6. EC requests for platform power data (FR-I4, NFR-11)
+The same payload also arrives as an EC event on some devices (surface-aggregator-module#29, values there fit the field names below).
 - **Requests:**
   - **`0x53` "TpUpdate"**: target category 0x02 (BAT), command 0x53, instance 1, with response; sent to SAM and to KIP. The 21-byte answer:
     - @0 u8 version;
