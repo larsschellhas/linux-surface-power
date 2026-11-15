@@ -52,10 +52,15 @@ def wr(path: str, value: str) -> None:
         f.write(value)
 
 
-def hwmon(name: str) -> str | None:
-    for d in glob.glob("/sys/class/hwmon/hwmon*"):
-        if rd(f"{d}/name") == name:
-            return d
+def hwmon(name: str, ssam_device: str | None = None) -> str | None:
+    """hwmon directory by name; with `ssam_device`, only the one whose device is that SSAM node (SB3: SAM and KIP both
+    register a `surface_thermal`)."""
+    for d in sorted(glob.glob("/sys/class/hwmon/hwmon*")):
+        if rd(f"{d}/name") != name:
+            continue
+        if ssam_device and os.path.basename(os.path.realpath(f"{d}/device")) != ssam_device:
+            continue
+        return d
     return None
 
 
@@ -68,9 +73,13 @@ class Probe:
 
     def __init__(self, run_dir: str):
         self.run_dir = run_dir
-        thermal, core = hwmon("surface_thermal"), hwmon("coretemp")
+        thermal, core = hwmon("surface_thermal", "01:03:01:00:02"), hwmon("coretemp")   # display part (SAM)
+        base = hwmon("surface_thermal", "01:03:02:00:02")                                 # base (KIP), if present
         self.skin_path = f"{thermal}/temp9_input" if thermal else None              # I_VTS1 (channel 509)
+        self.base_path = f"{base}/temp9_input" if base else None                    # base I_VTS1 (channel 609)
         self.cpu_path = next((p[:-6] + "_input" for p in glob.glob(f"{core}/temp*_label") if rd(p) == "Package id 0"), None) if core else None
+        if not self.skin_path:
+            raise SystemExit("display skin sensor (surface_thermal on 01:03:01:00:02) not found")
         self.domains = {"pkg": f"{RAPL}/intel-rapl:0", "sys": f"{RAPL}/intel-rapl:1"}
         self.last = {k: (int(rd(f"{p}/energy_uj") or 0), time.monotonic()) for k, p in self.domains.items()}
 
@@ -87,7 +96,9 @@ class Probe:
         skin = rd(self.skin_path) if self.skin_path else None
         cpu = rd(self.cpu_path) if self.cpu_path else None
         lim = lambda d, c: int(rd(f"{RAPL}/{d}/constraint_{c}_power_limit_uw") or 0) / 1e6
-        r = {"skin_c": int(skin) / 1000 if skin else None, "cpu_c": int(cpu) / 1000 if cpu else None,
+        base = rd(self.base_path) if self.base_path else None
+        r = {"skin_c": int(skin) / 1000 if skin else None, "base_c": int(base) / 1000 if base else None,
+             "cpu_c": int(cpu) / 1000 if cpu else None,
              "pkg_w": self._power_w("pkg"), "sys_w": self._power_w("sys"),
              "pl1_w": lim("intel-rapl:0", 0), "pl2_w": lim("intel-rapl:0", 1),
              "psys_pl1_w": lim("intel-rapl:1", 0), "psys_pl2_w": lim("intel-rapl:1", 1), "ac": int(ac_online())}
