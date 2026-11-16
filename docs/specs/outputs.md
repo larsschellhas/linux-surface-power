@@ -66,7 +66,7 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 PL4 and PL3 are computed from the EC power data on most devices. Without them the blob falls back to values far below the firmware
 value (Pro 10: PL4 20 W instead of the firmware's 45 W). While any EC input (`28B7BD85`, the `0x53` and `ARTG` fields) on the path to
 PL4 or PL3 is invalid, the output stage keeps the current value: the firmware value before the first write, the last written value
-after it. The status file reports such a channel as `held`. psys keeps the Windows behaviour (its fallback is what Windows does without
+after it. The status file reports such a channel with the target `held at firmware value (EC inputs invalid)` (or `held at last written value ...`); its `value_w` is the value that stays in place, `computed_w` the engine's value, which is not written. psys keeps the Windows behaviour (its fallback is what Windows does without
 EC data, `engine.md` 7).
 
 ## 4. PL3 through MSR (FR-O2)
@@ -202,7 +202,7 @@ Channels 302–311 (fan-on, ramp, maximum and critical temperature, PROCHOT, cha
 - **Last resort:** a reboot [H: the EC returns to its defaults at boot].
 
 ### 9.6 Dry-run and status
-Dry-run computes the frames and sends nothing. The status file shows `would send SAM FAN 0x12 (cdev)`, `kernel (platform profile)`, `kernel (suspend)`, `disabled (profile opt-in)` or `no Linux path`, and the list `fan` with the sent value and the frame (`would`, hex) per channel. `surface-power-report` prints the same kinds. With `--with-ec` it also sends the two read-only requests FAN `0x01` (instance 1, rpm) and FAN `0x13` (instance 0, system SPL).
+Dry-run computes the frames and sends nothing. The status file shows `would send SAM FAN 0x12 (cdev)`, `kernel (platform profile)`, `kernel (suspend)`, `disabled (profile opt-in)`, `needs root and surface_aggregator_cdev` (SAM machine, debug device not usable in this run) or `no Linux path` (ACPI-EC machine), and the list `fan` with the sent value and the frame (`would`, hex) per channel. `surface-power-report` prints the same kinds. With `--with-ec` it also sends the read-only request FAN `0x01` (instance 1, rpm) once, and FAN `0x13` (instance 0, system SPL) only if a blob output needs it (the Pro 9 does not answer it).
 
 ### 9.7 Test tool
 `scripts/fan-test.py` runs the safe procedure of `../research/11-fan-charging.md` 8 for one channel (or only `--probe` on any Surface). It uses the same frames as the adapter.

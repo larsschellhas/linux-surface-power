@@ -212,6 +212,20 @@ class PathsTest(unittest.TestCase):
     def stage(self, chans, **kw):
         return FanStage(self.fs.root, [ref(c) for c in chans], transport=self.t, **kw)
 
+    def test_sam_machine_without_usable_device(self):
+        """No root or no cdev module on a SAM machine: the path exists, it is not usable now; ACPI-EC machines have none."""
+        self.t = FakeTransport(root_needed=False)
+        self.t.can_write = lambda: False                       # node missing
+        st = self.stage([101])
+        self.assertEqual(st.describe(ref(101)), "no Linux path")
+        self.assertFalse(st.needs_cdev(ref(101)))
+        self.fs.write("sys/bus/surface_aggregator/devices/01:0b:01:00:01/modalias", "x")
+        st = self.stage([101])
+        self.assertIn("needs root and surface_aggregator_cdev", st.describe(ref(101)))
+        self.assertTrue(st.needs_cdev(ref(101)))
+        self.assertFalse(st.has_path(ref(101), report=True))
+        self.assertEqual(st.apply({ref(101): 50}, 0)[ref(101)].kind, "log-only")
+
     def test_kernel_path_detected(self):
         self.assertFalse(fan.kernel_path(self.fs.root).bound)
         self.bind_profile_driver(fan_hwmon=True)
@@ -473,9 +487,13 @@ class ReportProbeTest(unittest.TestCase):
         t.answers = {(5, 0x01, 1): struct.pack("<H", 2300), (5, 0x13, 0): struct.pack("<f", 21.5)}
         lines = report_tool.fan_probe(t)
         self.assertIn("rpm: 2300", lines[0])
+        self.assertNotIn("SPL", lines[0])
+        self.assertEqual(t.reads, [(5, 0x01, 1)])                 # 0x13 only if a blob output needs it
+        self.assertEqual(t.sent, [])
+        t.reads.clear()
+        lines = report_tool.fan_probe(t, want_spl=True)
         self.assertIn("system SPL: 21.5", lines[0])
         self.assertEqual(t.reads, [(5, 0x01, 1), (5, 0x13, 0)])
-        self.assertEqual(t.sent, [])
 
     def test_probe_skipped_without_the_device(self):
         t = FakeTransport(root_needed=True)

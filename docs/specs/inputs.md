@@ -85,8 +85,9 @@ The SB3 15" blob reads only posture 1, through the PL1 and dGPU posture tables. 
 ## 6. EC requests for platform power data (FR-I4, NFR-11)
 The same payload also arrives as an EC event on some devices (surface-aggregator-module#29, values there fit the field names below).
 - **Preferred source: kernel attributes.**
-  - `power_supply/BAT<n>/dptf_battery/{max_platform_power_mw, max_steady_state_power_mw, high_freq_impedance_mohm, no_load_voltage_mv, available_input_power_mw, rest_of_platform_power_mw}` come from `surface_battery`, which applies the EC event.
-  - `power_supply/ADP1/dptf_power/adapter_rating_mw` comes from `surface_charger`. It gives ENODATA while no rating is known. Each read is an EC request, so the daemon reads it when the power source changes (AC online, or a battery's available input power moves) and otherwise every 60 s.
+  - `power_supply/BAT<n>/dptf/{max_platform_power_mw, max_steady_state_power_mw, high_freq_impedance_mohm, no_load_voltage_mv, available_input_power_mw, rest_of_platform_power_mw}` come from `surface_battery`, which applies the EC event.
+  - `power_supply/ADP1/dptf/adapter_rating_mw` comes from `surface_charger`. It gives ENODATA while no rating is known. Each read is an EC request, so the daemon reads it when the power source changes (AC online, or a battery's available input power moves) and otherwise every 60 s.
+  - Older kernels (installed systems) name the groups `dptf_battery` and `dptf_power`; the daemon tries `dptf` first, then the old name. Attribute names are the same.
   - The names follow the DPTF participant ABI (`sysfs-platform-dptf`).
   - Prototype patches tested on the SB3 15" (15.11.2026 [M]). They are not upstream yet.
   - With them, these channels need neither root nor the debug device. The values match the debug-device readings exactly.
@@ -151,7 +152,7 @@ missing source keeps the device in dry-run (`supervisor.md` 2.5). None of these 
 - SSAM request, target category `0x02` (BAT), target 1 (SAM), instance 1, command `0x1A` (level) and `0x69` (flag), one-byte answer.
   The EC also sends events with the same command IDs when the values change.
 - Interim transport: the debug device (section 6), every 10 s and after resume [D]. Without the debug device the channels are
-  not provided. A kernel attribute next to `dptf_battery` is planned (OD-3).
+  not provided. A kernel attribute next to the `dptf` group is planned (OD-3).
 - [M] `0x1A` answers on the Surface Pro 9 (value 20 at 90 % charge, tester). `0x69` gives no answer there, and its blob does not read `/16`: the daemon sends only the query whose channel the blob reads.
 
 ### 8.5 Standby phase (`DEF1AB69/100`)

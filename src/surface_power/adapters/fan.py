@@ -19,7 +19,7 @@ import struct
 from dataclasses import dataclass
 
 from ..loader.model import ChannelRef, OutputChannel
-from .inputs import SSAM_CDEV, CdevTransport
+from .inputs import SSAM_CDEV, CdevTransport, sam_present
 
 FAN_GUID = "B620798F-6FB0-42EF-B9B3-D2370402E089"
 SEN_OFFSET_GUID = "A79674B4-7147-436E-874D-B69F3F14C83A"   # sensor offsets: O_SEN<n>_OFFSET = channel 500 + n (docs/research/12)
@@ -272,7 +272,7 @@ class FanStage:
             elif sp.route == "optin" and not thresholds:
                 path = "disabled"
             else:
-                path = "sam" if can else "needs-root" if needs_root else "none"
+                path = "sam" if can else "needs-root" if needs_root else "needs-cdev" if sam_present(root) else "none"
             self.chans[ref] = _Chan(sp, path)
         if any(c.path == "disabled" for c in self.chans.values()):
             self.notes.append("fan and charging temperature thresholds (302-311) stay log-only: the device profile does not set "
@@ -305,6 +305,8 @@ class FanStage:
             return f"SAM {c.spec.tc_name} 0x{c.spec.cid:02x} (cdev)"
         if c.path == "needs-root":
             return f"SAM {c.spec.tc_name} 0x{c.spec.cid:02x} (cdev, needs root)"
+        if c.path == "needs-cdev":
+            return f"SAM {c.spec.tc_name} 0x{c.spec.cid:02x} (needs root and surface_aggregator_cdev)"
         if c.path == "kernel-profile":
             return "kernel (platform profile)"
         if c.path == "kernel-suspend":
@@ -312,6 +314,11 @@ class FanStage:
         if c.path == "disabled":
             return "disabled (profile opt-in)"
         return "no Linux path"
+
+    def needs_cdev(self, ref: ChannelRef) -> bool:
+        """True if a SAM path exists but the debug device is not usable now (no root, or the module is not loaded)."""
+        c = self.chans.get(ref)
+        return c is not None and not c.off and c.path in ("needs-root", "needs-cdev")
 
     def sends(self, ref: ChannelRef) -> bool:
         """True if the daemon sends this channel itself (a SAM path, not the kernel's)."""
@@ -354,7 +361,7 @@ class FanStage:
             if c.path == "disabled":
                 out[ref] = FanResult(ref, "disabled", x, frame_for(sp, x), False)
                 continue
-            if c.path in ("none", "needs-root") or c.off:
+            if c.path in ("none", "needs-root", "needs-cdev") or c.off:
                 out[ref] = FanResult(ref, "log-only", x, None, False)
                 continue
             frame = frame_for(sp, x)

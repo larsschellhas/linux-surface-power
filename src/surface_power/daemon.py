@@ -216,9 +216,16 @@ class Daemon:
         reasons = []
         if blocking:
             reasons.append("; ".join(f"input {r} missing, reaches {', '.join(map(str, o))}" for r, o in sorted(blocking.items())))
+        self.cdev_wait = [r for r in self.unwritten if self.fan.needs_cdev(r) or self.prochot.needs_cdev(r)]
+        no_path = [r for r in self.unwritten if r not in self.cdev_wait]
+
+        def names(refs):
+            return ", ".join(OUTPUT_NAMES.get(r.channel, str(r)) if r.guid == LIMITS_GUID else str(r) for r in refs)
         if self.unwritten and not args.allow_partial_outputs:
-            reasons.append("outputs without a Linux path: " + ", ".join(
-                OUTPUT_NAMES.get(r.channel, str(r)) if r.guid == LIMITS_GUID else str(r) for r in self.unwritten))
+            if self.cdev_wait:
+                reasons.append("outputs need root and surface_aggregator_cdev: " + names(self.cdev_wait))
+            if no_path:
+                reasons.append("outputs without a Linux path: " + names(no_path))
         if reasons and self.mode == "control":
             self.mode_reason = "; ".join(reasons)
             self.mode = self.state = "dry-run"
@@ -264,6 +271,12 @@ class Daemon:
                 and any(r.guid == inp.POWER for r in self.graph.inputs)):
             self.log("warning", f"{self.platform.transport.path} missing and no kernel DPTF attributes: load the module "
                                 "surface_aggregator_cdev; until then the EC power data are invalid")
+        ec_inputs_wait = len(self.platform.cdev_channels() & set(self.graph.inputs)) + \
+            len(set(self.graph.inputs) & {inp.ChannelRef(inp.POWER, ch) for ch, _ in self.battery_ec.queries})
+        if not self.fan.transport.can_write():
+            hint = inp.cdev_hint(len(self.cdev_wait), ec_inputs_wait)
+            if hint:
+                self.log("notice", hint)
         self.writers = supervisor.limit_writers(root)
         self._warn_writers()
         for note in self.outputs.notes + self.throttle.notes + self.fan.notes + self.prochot.notes:
@@ -439,7 +452,9 @@ class Daemon:
                 return "firmware" if self.state in ("emergency", "yielded", "paused") else f"would send {what}"
             res = self.results.get(ref)
             if res is not None and res.kind == "held":
-                return "held (EC inputs invalid)"
+                t = self.outputs.targets.get(ref)
+                return ("held at firmware value" if t is None or t.last_uw is None else "held at last written value") \
+                    + " (EC inputs invalid)"
             if self.state == "control":
                 return self.outputs.kind(ref)
             if self.state in ("emergency", "yielded", "paused") and ref in self.outputs.targets:
@@ -485,7 +500,17 @@ class Daemon:
                  "target": target}
         if ref.guid == LIMITS_GUID:
             t = self.outputs.targets.get(ref)
-            entry.update(value_w=round(value / 1000, 3), hw_w=t.last_uw / 1e6 if t and t.last_uw else None)
+            res = self.results.get(ref)
+            hw_w = t.last_uw / 1e6 if t and t.last_uw else None
+            if res is not None and res.kind == "held":
+                # Nothing is written: the limit stays at the firmware value. value_w is that value, computed_w the engine's.
+                cur = t.read_uw() if t else None
+                entry.update(value_w=round(cur / 1e6, 3) if cur else None, hw_w=hw_w, computed_w=round(value / 1000, 3))
+            else:
+                # What is (control) or would be (dry-run) written: the value after clamping to the range and the hardware limits.
+                uw = getattr(res, "value_uw", None)
+                w = uw / 1e6 if uw is not None else value / 1000
+                entry.update(value_w=round(w, 3), hw_w=hw_w)
         else:
             entry["value"] = value
         return entry

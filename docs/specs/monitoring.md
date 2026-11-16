@@ -36,7 +36,8 @@ Temperatures are logged in °C, power in W. Blob units are converted for logging
 }
 ```
 - **Field values:**
-  - `target` is one of `written`, `dry-run`, `log-only`, `firmware`;
+  - `target` is one of `written`, `dry-run`, `log-only`, `firmware`, `held at firmware value (EC inputs invalid)` (also `... last written value ...`);
+  - `value_w` is what is written (control) or would be written (dry-run), after clamping; for a held channel it is the value that stays in place, and `computed_w` holds the engine value;
   - `events` holds the last 20 events.
 
 ## 3. Time series (FR-M3)

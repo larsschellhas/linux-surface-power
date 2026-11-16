@@ -28,16 +28,20 @@ MODULES = ("surface_aggregator", "surface_aggregator_cdev", "surface_temp", "sur
            "surface_charger", "surface_platform_profile")
 
 
-def fan_probe(transport) -> list[str]:
-    """Read-only probe of the fan commands (11-fan-charging.md 8.1): FAN 0x01 iid 1 (rpm) and FAN 0x13 iid 0 (system SPL)."""
+def fan_probe(transport, want_spl: bool = False) -> list[str]:
+    """Read-only probe of FAN 0x01 iid 1 (rpm), once. FAN 0x13 iid 0 (system SPL) only if a blob output needs it (`want_spl`):
+    the Pro 9 does not answer it and no blob output uses it (11-fan-charging.md 8.1)."""
     import struct
     if not transport.can_write():
         return ["fan probe: skipped (the debug device is missing or needs root)"]
     rpm = transport.read(TC_FAN, 0x01, 1)
-    spl = transport.read(TC_FAN, 0x13, 0)
-    return ["fan probe (read only): "
-            f"FAN 0x01 iid 1 rpm: {struct.unpack('<H', rpm[:2])[0] if rpm and len(rpm) >= 2 else 'no answer'}; "
-            f"FAN 0x13 iid 0 system SPL: {round(struct.unpack('<f', spl[:4])[0], 3) if spl and len(spl) >= 4 else 'no answer'}"]
+    text = ("fan probe (read only): "
+            f"FAN 0x01 iid 1 rpm: {struct.unpack('<H', rpm[:2])[0] if rpm and len(rpm) >= 2 else 'no answer'}")
+    if want_spl:
+        spl = transport.read(TC_FAN, 0x13, 0)
+        text += (f"; FAN 0x13 iid 0 system SPL: "
+                 f"{round(struct.unpack('<f', spl[:4])[0], 3) if spl and len(spl) >= 4 else 'no answer'}")
+    return [text]
 
 
 SLEEP = time.sleep
@@ -131,7 +135,7 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
     be = inp.BatteryEcState(root, transport=ec_transport)
     be.restrict(wanted)
     if not pp.needs_cdev:
-        lines.append("EC power data: kernel attributes (power_supply dptf_battery / dptf_power)")
+        lines.append("EC power data: kernel attributes (power_supply dptf group)")
         provided |= pp.channels
         via_cdev = set()
     else:
@@ -178,12 +182,13 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
                    dry_run=True, thresholds=bool(prof and prof.fan_thresholds))
     prochot = ProchotStage(root, [r for r in graph.outputs if r == BATT_MODE], transport=fan_transport, dry_run=True)
     if args.with_ec and fan.chans:                          # the fan commands are asked only if the blob has fan outputs
-        probe = fan_probe(fan.transport)
+        probe = fan_probe(fan.transport, want_spl=any(c.spec.tc == TC_FAN and c.spec.cid == 0x13 for c in fan.chans.values()))
         lines[:] = lines[:ec_pos] + probe + lines[ec_pos:]
     dgpu_ref = inp.ChannelRef("0B7B5350-BB8C-4459-8D4A-A75C57073801", 201)
     stand_in = gpu.find_nvidia_gpu(root) is not None          # the stand-in needs an NVIDIA dGPU
     lines.append("outputs:")
     missing = []
+    cdev_wait = []                      # outputs with a SAM path that is not usable in this run
     for ref in sorted(graph.outputs):
         t = stage.targets.get(ref)
         if t is not None:
@@ -202,10 +207,14 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
             kind = prochot.describe(ref)
             if not prochot.has_path(ref, report=True):
                 missing.append(ref)
+                if prochot.needs_cdev(ref):
+                    cdev_wait.append(ref)
         elif fan_handles(ref):
             kind = fan.describe(ref)
             if not fan.has_path(ref, report=True):
                 missing.append(ref)
+                if fan.needs_cdev(ref):
+                    cdev_wait.append(ref)
         elif notneeded.reason(ref, root):
             kind = "not needed on Linux: " + notneeded.reason(ref, root)
         elif ref == dgpu_ref and stand_in:
@@ -218,8 +227,19 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
         lines.append(f"  {ref}: {kind}")
     for note in stage.notes + throttle.notes + fan.notes + prochot.notes:
         lines.append(f"  note: {note}")
-    lines.append("ready for control: " + ("yes" if not missing else
-                 f"no, {len(missing)} of {len(graph.outputs)} outputs have no Linux path"))
+    if not fan.transport.can_write():
+        outs = sum(1 for r in graph.outputs if fan.needs_cdev(r) or prochot.needs_cdev(r))
+        hint = inp.cdev_hint(outs, len(via_cdev & set(graph.inputs)))
+        if hint:
+            lines.append(hint)
+    rest = len(missing) - len(cdev_wait)
+    if not missing:
+        lines.append("ready for control: yes")
+    else:
+        parts = ([f"{len(cdev_wait)} need root and surface_aggregator_cdev"] if cdev_wait else []) + \
+                ([f"{rest} have no Linux path"] if rest else [])
+        lines.append(f"ready for control: no, not ready in this run: {len(missing)} of {len(graph.outputs)} outputs "
+                     f"({', '.join(parts)})")
     print("\n".join(lines))
     return 0
 

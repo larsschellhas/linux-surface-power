@@ -190,7 +190,9 @@ class DaemonTest(unittest.TestCase):
             d.cycle(t)
         self.assertEqual(self.fs.read(PL4), "100000000")                    # firmware value kept, not the 20 W fallback
         out = {o["channel"]: o for o in self.status()["outputs"]}
-        self.assertTrue(out["0B7B5350/53"]["target"].startswith("held"))
+        self.assertEqual(out["0B7B5350/53"]["target"], "held at firmware value (EC inputs invalid)")
+        self.assertEqual(out["0B7B5350/53"]["value_w"], 100.0)              # what stays in place, not the 20 W fallback
+        self.assertEqual(out["0B7B5350/53"]["computed_w"], 20.0)
         d.stop()
 
     def test_controller_on_an_internal_node_is_no_emergency(self):

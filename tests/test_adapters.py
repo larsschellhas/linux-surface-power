@@ -139,6 +139,19 @@ class InputsTest(unittest.TestCase):
         self.fs.write("sys/class/power_supply/BAT2/dptf_battery/available_input_power_mw", 65000)   # event: base on USB-C
         self.assertEqual(pp.read(1000)[ref(POWER, 108)], 65000)
 
+    def test_platform_power_from_the_new_dptf_group(self):
+        """Kernel#195 names the groups `dptf`; it wins over the old names, which installed systems still have."""
+        self.fs.write("sys/class/power_supply/BAT1/dptf/available_input_power_mw", 73113)
+        self.fs.write("sys/class/power_supply/BAT1/dptf_battery/available_input_power_mw", 11111)
+        self.fs.write("sys/class/power_supply/ADP1/dptf/adapter_rating_mw", 120000)
+        self.fs.write("sys/class/power_supply/ADP1/dptf_power/adapter_rating_mw", 22222)
+        pp = inputs.PlatformPower(self.fs.root, transport=FakeTransport())
+        pp.restrict({ref(POWER, 8), ref(POWER, 7)})
+        v = pp.read(0)
+        self.assertEqual((v[ref(POWER, 8)], v[ref(POWER, 7)]), (73113, 120000))
+        self.assertFalse(pp.needs_cdev)
+        self.assertEqual(pp.cdev_channels(), set())
+
     def test_platform_power_adapter_rating_read_rarely(self):
         """Each read of adapter_rating_mw is an EC request: read on source changes and every 60 s, not every cycle."""
         bat = "sys/class/power_supply/BAT1/dptf_battery/available_input_power_mw"

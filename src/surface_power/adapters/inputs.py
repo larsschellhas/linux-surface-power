@@ -250,6 +250,19 @@ class Posture(Source):
 SSAM_CDEV = "/dev/surface/aggregator"
 
 
+def sam_present(root: str = "/") -> bool:
+    """True on a SAM machine: the SSAM controller registered its bus (the hub, registry and clients hang on it)."""
+    return os.path.isdir(os.path.join(root, "sys/bus/surface_aggregator/devices"))
+
+
+def cdev_hint(outputs: int, inputs: int) -> str | None:
+    """One line for the report and the daemon log: what root and the debug device would add."""
+    if not outputs and not inputs:
+        return None
+    return (f"run as root with surface_aggregator_cdev loaded: {outputs} more output{'s' if outputs != 1 else ''} and "
+            f"{inputs} EC input{'s' if inputs != 1 else ''} become available")
+
+
 class CdevTransport:
     """Requests through the SSAM debug character device. Interim (NFR-11): needs root and surface_aggregator_cdev."""
 
@@ -392,8 +405,9 @@ def ask(transport, gate: RequestGate, key: str, what: str, log, tid: int, cid: i
 class PlatformPower(Source):
     """`0x53` fields of SAM (battery 1) and KIP (battery 2) and the PSU size (spec inputs 6).
 
-    Preferred source: the kernel attributes `power_supply/BAT<n>/dptf_battery/*` (surface_battery) and
-    `power_supply/ADP1/dptf_power/adapter_rating_mw` (surface_charger). The kernel updates the battery values on the EC
+    Preferred source: the kernel attributes `power_supply/BAT<n>/dptf/*` (surface_battery) and
+    `power_supply/ADP1/dptf/adapter_rating_mw` (surface_charger); older kernels name the groups `dptf_battery` and
+    `dptf_power`, which are read as well. The kernel updates the battery values on the EC
     event, so they are read on every call; the rating costs an EC request per read and is read on source changes and
     every 60 s. Without these attributes, the values are requested through the SSAM debug
     device (interim, NFR-11): at start, on AC changes and every 60 s. The two paths can be mixed per battery.
@@ -408,6 +422,8 @@ class PlatformPower(Source):
               (17, "<I", "rest_of_platform_power_mw", 6), (13, "<I", "available_input_power_mw", 8))
     BATTERIES = ((1, "BAT1", 0), (2, "BAT2", 100))      # (SSAM target, power_supply name, channel base)
     ARTG = ChannelRef(POWER, 7)
+    BATTERY_GROUPS = ("dptf", "dptf_battery")       # new kernel name first; the old one is on installed systems
+    ADAPTER_GROUPS = ("dptf", "dptf_power")
 
     def __init__(self, root: str = "/", transport=None):
         self.root = root
@@ -441,18 +457,32 @@ class PlatformPower(Source):
         return os.path.join(self.root, "sys/class/power_supply", *parts)
 
     def _sysfs_battery(self, name: str) -> str | None:
-        d = self._psy(name, "dptf_battery")
-        return d if os.path.isdir(d) else None
+        for group in self.BATTERY_GROUPS:
+            d = self._psy(name, group)
+            if os.path.isdir(d):
+                return d
+        return None
 
     def _sysfs_artg(self) -> str | None:
-        p = self._psy("ADP1", "dptf_power", "adapter_rating_mw")
-        return p if os.path.exists(p) else None
+        for group in self.ADAPTER_GROUPS:
+            p = self._psy("ADP1", group, "adapter_rating_mw")
+            if os.path.exists(p):
+                return p
+        return None
 
     @property
     def needs_cdev(self) -> bool:
         """True if any value still has to come through the SSAM debug device."""
         return ((self._want_artg() and self._sysfs_artg() is None)
                 or any(self._sysfs_battery(n) is None for _, n, _ in self._batteries()))
+
+    def cdev_channels(self) -> set[ChannelRef]:
+        """The channels that come only through the debug device (no kernel attribute for them)."""
+        out = {ChannelRef(POWER, base + f[3]) for _, n, base in self._batteries() if self._sysfs_battery(n) is None
+               for f in self.FIELDS}
+        if self._want_artg() and self._sysfs_artg() is None:
+            out.add(self.ARTG)
+        return out
 
     def _adapter(self, v: int | None, ac: bool | None) -> int | None:
         """The adapter rating. 0 means "no adapter" and is valid on battery (the blob reads exactly 0 there). On AC it

@@ -68,6 +68,17 @@ class ReportSourcesTest(unittest.TestCase):
         self.assertIn("0B7B5350/201: no Linux path", text)     # no NVIDIA GPU in this fake system
         self.assertIn("ready for control: no", text)
 
+    def test_hint_when_root_and_cdev_would_help(self):
+        text = self.run_report()
+        self.assertIn("run as root with surface_aggregator_cdev loaded: 0 more outputs and", text)
+        self.assertNotIn("FAN 0x13", text)
+
+    def test_with_new_dptf_group(self):
+        for bat in ("BAT1", "BAT2"):
+            self.fs.write(f"sys/class/power_supply/{bat}/dptf/available_input_power_mw", 73113)
+        self.fs.write("sys/class/power_supply/ADP1/dptf/adapter_rating_mw", 120000)
+        self.assertIn("EC power data: kernel attributes", self.run_report())
+
     def test_with_kernel_attributes_and_gpu(self):
         for bat in ("BAT1", "BAT2"):
             self.fs.write(f"sys/class/power_supply/{bat}/dptf_battery/available_input_power_mw", 73113)

@@ -205,6 +205,22 @@ class BatteryModeTest(unittest.TestCase):
         self.assertFalse(st.has_path(BATT))
         self.assertTrue(any(p == "warning" for p, _ in st.drain_events()))
 
+    def test_sam_machine_without_usable_device_says_so(self):
+        """Pro 10 without root or cdev: the machine has SAM, the debug device is only not usable now."""
+        self.fs.write("sys/bus/surface_aggregator/devices/01:0b:01:00:01/modalias", "x")
+        st = self.stage(_Rec(can=False))
+        self.assertFalse(st.has_path(BATT, report=True))
+        self.assertTrue(st.needs_cdev(BATT))
+        self.assertTrue(any("needs root and surface_aggregator_cdev" in n for n in st.notes))
+        self.assertFalse(any("DPHT" in n for n in st.notes))
+        self.assertIn("surface_aggregator_cdev", st.describe(BATT))
+        self.assertEqual(st.apply({BATT: 1}, 0)[BATT].kind, "log-only")
+
+    def test_acpi_ec_machine_keeps_the_dpht_text(self):
+        st = self.stage(_Rec(can=False))
+        self.assertFalse(st.needs_cdev(BATT))
+        self.assertTrue(any("DPHT" in n for n in st.notes))
+
     def test_no_path(self):
         self.assertFalse(self.stage(_Rec(can=False)).has_path(BATT))          # no debug device (ACPI-EC machines)
         st = self.stage(_Rec(can=False, root=True))

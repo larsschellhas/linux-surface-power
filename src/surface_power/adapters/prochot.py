@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from ..loader.model import ChannelRef
 from .fan import TC_TMP, Frame, send_frame
-from .inputs import SSAM_CDEV, CdevTransport
+from .inputs import SSAM_CDEV, CdevTransport, sam_present
 from .notneeded import cpu_vendor
 
 LIMITS = "0B7B5350-BB8C-4459-8D4A-A75C57073801"
@@ -63,7 +63,11 @@ class ProchotStage:
             self.path = "sam"
         elif getattr(self.transport, "needs_root", lambda: False)():
             self.path = "needs-root"
-        if self.path == "none":
+        elif sam_present(root):
+            self.path = "needs-cdev"
+        if self.path == "needs-cdev":
+            self.notes.append(f"{BATT_MODE}: needs root and surface_aggregator_cdev (debug device not available)")
+        elif self.path == "none":
             self.notes.append(f"{BATT_MODE}: no SSAM debug device; Windows sends the request through the ACPI method DPHT on "
                               "ACPI-EC machines, which user space cannot call: no Linux path")
         else:
@@ -78,6 +82,9 @@ class ProchotStage:
             return False
         return self.path == "sam" or (report and self.path == "needs-root")
 
+    def needs_cdev(self, ref: ChannelRef) -> bool:
+        return ref in self.refs and not self.off and self.path in ("needs-root", "needs-cdev")
+
     def sends(self, ref: ChannelRef) -> bool:
         return ref in self.refs and self.path == "sam" and not self.off
 
@@ -88,6 +95,8 @@ class ProchotStage:
             return "SAM TMP 0x1b (cdev)"
         if self.path == "needs-root":
             return "SAM TMP 0x1b (cdev, needs root)"
+        if self.path == "needs-cdev":
+            return "SAM TMP 0x1b (needs root and surface_aggregator_cdev)"
         return "no Linux path"
 
     def drain_events(self) -> list[tuple[str, str]]:
@@ -102,7 +111,7 @@ class ProchotStage:
             x = int(round(values[ref]))
             if x != ACTIVE:
                 self.sent, self.last_try, self.would = False, None, None      # the next 1 is a new episode
-                out[ref] = ProchotResult(ref, "idle" if self.path in ("sam", "needs-root") else "log-only", x, None, False)
+                out[ref] = ProchotResult(ref, "idle" if self.path in ("sam", "needs-root", "needs-cdev") else "log-only", x, None, False)
                 continue
             if self.path != "sam" or self.off:
                 out[ref] = ProchotResult(ref, "log-only", x, FRAME, False)
