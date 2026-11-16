@@ -36,16 +36,13 @@ flowchart LR
     B(["SMF blob<br/>90 lines, 8 block types"])
     subgraph OUT0["written"]
         O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_SYS_AVG<br/>O_SYS_MAX; 201 dGPU power limit"]
+        O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
     end
     B --> OUT0
-    subgraph OUT1["optional (profile)"]
+    subgraph OUT1["logged only"]
         O1_0B7B5350["<b>power limits</b><br/>O_CPU_PEAK; O_SYS_PEAK"]
     end
     B --> OUT1
-    subgraph OUT2["logged only"]
-        O2_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
-    end
-    B --> OUT2
 ```
 
 ## Readiness
@@ -56,7 +53,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 17 of 17 |
-| Outputs written by Linux | 5 of 9 (not written: `0B7B5350/53`, `0B7B5350/59`, `110DF2A4/1`, `110DF2A4/2`) |
+| Outputs written by Linux | 7 of 9 (not written: `0B7B5350/53`, `0B7B5350/59`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -87,10 +84,10 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|---|---|---|---|
 | `0B7B5350/51` | O_CPU_AVG | PL1, package long-term | powercap `package-0/long_term` | written | 25000 / 31000 / 7500 |
 | `0B7B5350/52` | O_CPU_MAX | PL2, package short-term | powercap `package-0/short_term` | written | 46000 / 62000 / 15000 |
-| `0B7B5350/53` | O_CPU_PEAK | PL4, package peak | powercap `package-0/peak_power` | optional (profile) | 101000 / 130000 / 15000 |
+| `0B7B5350/53` | O_CPU_PEAK | PL4, package peak | powercap `package-0/peak_power` (automatic, held without EC data) | logged only | 101000 / 130000 / 15000 |
 | `0B7B5350/54` | O_SYS_AVG | psys PL1, platform long-term | powercap `psys/long_term` | written | – |
 | `0B7B5350/55` | O_SYS_MAX | psys PL2, platform short-term | powercap `psys/short_term` | written | – |
-| `0B7B5350/59` | O_SYS_PEAK | PL3, platform peak with duty cycle | MSR `0x615` | optional (profile) | – |
+| `0B7B5350/59` | O_SYS_PEAK | PL3, platform peak with duty cycle | MSR `0x615` (root; held without EC data) | logged only | – |
 | `0B7B5350/201` | – | dGPU power limit | clock-cap stand-in (DO-1, profile) | written | 65000 / 71000 / 15000 |
-| `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | candidate: hibernate | logged only | – |
-| `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | candidate: power off | logged only | – |
+| `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
+| `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |

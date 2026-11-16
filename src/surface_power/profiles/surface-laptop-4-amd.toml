@@ -12,5 +12,4 @@ source = "efivar"
 variant = "classic"     # the driver package ships SMF core 3.78 (docs/research/09 3)
 
 [outputs]
-pl3 = false
-pl4 = false
+# pl3 / pl4: automatic (PL4 where powercap reports a value, PL3 where the MSR is writable); set false to switch off.

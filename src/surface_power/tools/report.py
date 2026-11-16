@@ -12,6 +12,7 @@ import sys
 from .. import supervisor
 from ..adapters import gpu
 from ..adapters import inputs as inp
+from ..adapters.actions import ThermalActions
 from ..adapters.outputs import OutputStage
 from ..engine.graph import build_graph
 from ..loader import container, parser
@@ -91,18 +92,30 @@ def main(argv=None) -> int:
             continue
         state = "provided" if ref in provided else "needs the debug device" if ref in via_cdev else "not available"
         lines.append(f"  {ref}: {state}")
-    stage = OutputStage(root, graph.output_ranges, dry_run=True)
+    stage = OutputStage(root, graph.output_ranges, dry_run=True, pl3=prof.pl3 if prof else None,
+                        pl4=prof.pl4 if prof else None)
     dgpu_ref = inp.ChannelRef("0B7B5350-BB8C-4459-8D4A-A75C57073801", 201)
     stand_in = gpu.find_nvidia_gpu(root) is not None          # the stand-in needs an NVIDIA dGPU
     lines.append("outputs:")
+    missing = []
     for ref in sorted(graph.outputs):
-        if ref in stage.targets:
-            kind = "writable (powercap)"
+        t = stage.targets.get(ref)
+        if t is not None:
+            kind = "writable (MSR, needs root)" if t.name == "pl3" else "writable (powercap)"
+        elif ref in ThermalActions.channels:
+            kind = "thermal action (hibernate / power off)"
         elif ref == dgpu_ref and stand_in:
             kind = "clock-cap stand-in (DO-1)" + ("" if prof and prof.dgpu_clock_cap else ", off in this profile")
+            if not (prof and prof.dgpu_clock_cap):
+                missing.append(ref)
         else:
-            kind = "log-only"
+            kind = "no Linux path (logged only)"
+            missing.append(ref)
         lines.append(f"  {ref}: {kind}")
+    for note in stage.notes:
+        lines.append(f"  note: {note}")
+    lines.append("ready for control: " + ("yes" if not missing else
+                 f"no, {len(missing)} of {len(graph.outputs)} outputs have no Linux path"))
     print("\n".join(lines))
     return 0
 

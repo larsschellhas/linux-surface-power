@@ -3,7 +3,7 @@
 
 Sequence:
   1. Checks (root, AC state as requested), sets the platform profile, stops thermald.
-  2. Starts surface-powerd from this checkout with --control and its own run/state directories in OUT.
+  2. Starts surface-powerd from this checkout with --control --allow-partial-outputs and its own run/state directories in OUT.
   3. Cool-down: waits until the skin sensor is at most --start-skin °C (at most 15 min).
   4. Load for --load-min minutes (CPU: x265 encode; with --gpu also a CUDA filter + NVENC on the NVIDIA GPU), then --idle-min idle.
   5. Logs one row per second to OUT/field-test.csv. The daemon's own series and status are in OUT/state and OUT/run.
@@ -155,7 +155,9 @@ def main() -> int:
             subprocess.run(["systemctl", "stop", "thermald"], check=True)
         env = dict(os.environ, PYTHONPATH=os.path.join(REPO, "src"))
         extra = ["--dgpu-clock-cap"] if a.dgpu_clock_cap else []
-        daemon = subprocess.Popen([sys.executable, "-m", "surface_power.daemon", "--control", "--run-dir", run_dir,
+        # Field tests control even with outputs that have no Linux path yet (spec supervisor 2.6), to measure the rest.
+        daemon = subprocess.Popen([sys.executable, "-m", "surface_power.daemon", "--control", "--allow-partial-outputs",
+                                   "--run-dir", run_dir,
                                    "--state-dir", state_dir, *extra], env=env,
                                   stdout=open(os.path.join(a.out, "daemon.log"), "w"), stderr=subprocess.STDOUT)
         say(f"profile {a.profile}, AC {ac_online()}, thermald stopped: {thermald_was_active}, daemon pid {daemon.pid}")

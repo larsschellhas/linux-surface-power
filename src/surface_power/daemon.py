@@ -20,6 +20,7 @@ import time
 
 from . import monitor, supervisor
 from .adapters import inputs as inp
+from .adapters.actions import ThermalActions
 from .adapters.gpu import ClockCapStandIn
 from .adapters.outputs import OutputStage
 from .engine.engine import Engine
@@ -60,6 +61,8 @@ def parse_args(argv=None):
     ap.add_argument("--state-dir", default="/var/lib/surface-power")
     ap.add_argument("--dgpu-clock-cap", action="store_true",
                     help="enable the dGPU clock-cap stand-in (deviation DO-1) even if the profile does not")
+    ap.add_argument("--allow-partial-outputs", action="store_true",
+                    help="control even if some outputs of the blob have no Linux path (field tests only)")
     ap.add_argument("--no-ec", action="store_true", help="do not send EC requests (platform power data stays invalid)")
     return ap.parse_args(argv)
 
@@ -138,7 +141,7 @@ class Daemon:
 
         # Outputs.
         p = self.profile
-        kw = dict(narrow=p.narrow if p else None, pl3=p.pl3 if p else False, pl4=p.pl4 if p else False)
+        kw = dict(narrow=p.narrow if p else None, pl3=p.pl3 if p else None, pl4=p.pl4 if p else None)
         self.outputs = OutputStage(root, self.graph.output_ranges, dry_run=(self.mode != "control"), **kw)
         self.preview = OutputStage(root, self.graph.output_ranges, dry_run=True, **kw)
 
@@ -146,6 +149,15 @@ class Daemon:
         self.dgpu = None
         self.dgpu_note = ""
         written = set(self.outputs.targets)
+        # Thermal-policy actions (hibernate / power off, spec outputs 7): handled wherever the blob has them.
+        self.actions = ThermalActions()
+        written |= self.actions.channels & set(self.graph.outputs)
+        # PL4 and PL3 keep their value while an EC input on their path is invalid: their fallback would be far below the
+        # firmware value (Pro 10: PL4 20 W instead of 45 W) [D].
+        lines_ = self.loaded.parsed.algorithms
+        ec_inputs = [r for r in self.graph.inputs if r.guid == inp.POWER and r.channel % 100 not in (1, 10, 12, 13, 16)]
+        self.ec_guard = {out: [r for r in ec_inputs if out in outputs_reached_by(r, lines_)]
+                         for out in (ChannelRef(LIMITS_GUID, 53), ChannelRef(LIMITS_GUID, 59)) if out in self.outputs.targets}
         if (args.dgpu_clock_cap or (p and p.dgpu_clock_cap)) and DGPU in self.graph.outputs:
             self.dgpu = ClockCapStandIn(root, dry_run=(self.mode != "control"))
             written.add(DGPU)
@@ -166,17 +178,26 @@ class Daemon:
             self.dgpu = None
             blocking = {r: [o for o in outs if o != DGPU] for r, outs in blocking.items()}
             blocking = {r: outs for r, outs in blocking.items() if outs}
-        if blocking and self.mode == "control":
-            self.mode_reason = "; ".join(f"input {r} missing, reaches {', '.join(map(str, o))}" for r, o in sorted(blocking.items()))
+        # Every output must have a Linux path before the blob may control (spec supervisor 2.6) [D].
+        if not self.dgpu:
+            written.discard(DGPU)
+        self.unwritten = sorted(set(self.graph.outputs) - written)
+        reasons = []
+        if blocking:
+            reasons.append("; ".join(f"input {r} missing, reaches {', '.join(map(str, o))}" for r, o in sorted(blocking.items())))
+        if self.unwritten and not args.allow_partial_outputs:
+            reasons.append("outputs without a Linux path: " + ", ".join(
+                OUTPUT_NAMES.get(r.channel, str(r)) if r.guid == LIMITS_GUID else str(r) for r in self.unwritten))
+        if reasons and self.mode == "control":
+            self.mode_reason = "; ".join(reasons)
             self.mode = self.state = "dry-run"
             self.outputs.dry_run = True
             if self.dgpu:
                 self.dgpu.dry_run = True
         self.snapshot = None
         if self.mode == "control":
-            files = [t.path for t in self.outputs.targets.values()]
-            files += sorted({os.path.join(os.path.dirname(f), "constraint_0_time_window_us") for f in files})
-            self.snapshot, inherited = supervisor.Snapshot.take(args.run_dir, [f for f in files if os.path.exists(f)])
+            keys = [k for k in self.outputs.snapshot_keys() if k.startswith("msr:") or os.path.exists(k)]
+            self.snapshot, inherited = supervisor.Snapshot.take(args.run_dir, keys)
             if inherited:
                 self.log("warning", "kept the firmware snapshot of a predecessor that did not stop cleanly")
 
@@ -280,10 +301,13 @@ class Daemon:
                 self.log("warning", f"limit changed by another process: {names}")
                 if self.foreign.record(now_ms):
                     self._enter("yielded", "three foreign changes within 60 s")
+        hold = frozenset(out for out, refs in self.ec_guard.items() if any(self.values.get(r) is None for r in refs))
         if self.state == "control":
-            self.results = self.outputs.apply(rounded)
+            self.results = self.outputs.apply(rounded, hold)
         else:
-            self.results = self.preview.apply(rounded)
+            self.results = self.preview.apply(rounded, hold)
+        for prio, text in self.actions.step(now_ms, rounded, armed=(self.mode == "control")):
+            self.log(prio, text)
         if self.dgpu:
             if self.state in ("control", "dry-run"):
                 self.dgpu.step(now_ms, rounded[DGPU] / 1000 if DGPU in rounded else None)
@@ -307,6 +331,11 @@ class Daemon:
 
     def _write_status(self) -> None:
         def target(ref):
+            if ref in self.actions.channels:
+                return "thermal action" if self.mode == "control" else "thermal action (not armed)"
+            res = self.results.get(ref)
+            if res is not None and res.kind == "held":
+                return "held (EC inputs invalid)"
             if self.state == "control":
                 return self.outputs.kind(ref)
             if self.state in ("emergency", "yielded", "paused") and ref in self.outputs.targets:
@@ -332,6 +361,10 @@ class Daemon:
         }
         if self.dgpu:
             status["dgpu"] = self.dgpu.status()
+        if self.actions.channels & set(self.graph.outputs):
+            status["thermal_actions"] = self.actions.status()
+        if self.unwritten:
+            status["outputs_without_linux_path"] = [str(r) for r in self.unwritten]
         monitor.write_status(self.args.run_dir, status)
 
     def _output_status(self, ref: ChannelRef, value: int, target: str) -> dict:

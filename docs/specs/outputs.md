@@ -33,27 +33,37 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 |---|---|---|---|
 | `0B7B5350` | 51 | package PL1 | `/sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw` (`long_term`) |
 | | 52 | package PL2 | `intel-rapl:0/constraint_1_power_limit_uw` (`short_term`) |
-| | 53 | PL4 | `intel-rapl:0/constraint_2_power_limit_uw` if its name is `peak_power`, and only if enabled in the device profile. Default: log-only [D]. On the SB3 Linux reports 0 for it; what writing it does there is not verified. |
+| | 53 | PL4 | `intel-rapl:0/constraint_2_power_limit_uw` if its name is `peak_power`. Automatic: written where it reads a value above 0; a device profile can switch it on or off [D]. On the SB3 Linux reports 0 for it; what writing it does there is not verified, so the SB3 profile switches it off. While an EC input on its path is invalid, the value is held (3.1). |
 | | 54 | psys PL1 | `intel-rapl:1/constraint_0_power_limit_uw` (zone named `psys`) |
 | | 55 | psys PL2 | `intel-rapl:1/constraint_1_power_limit_uw` |
 | | 59 | PL3 | MSR 0x615, see 4 |
 | | 70 | battery mode | log-only |
 | | 201 | dGPU limit | log-only (FR-O5): `nvidia-smi -pl` is not supported on the SB3 GPU [M]. Opt-in stand-in: clock cap (6, DO-1) |
 | | 205 | system budget (Laptop Studio 2) | log-only |
-| `110DF2A4` | 1 – 3 | Windows thermal policy (hot, critical, min power) | log-only |
+| `110DF2A4` | 1, 2 | thermal policy: hibernate (`O_HOT`) and critical shutdown (`O_CRT`) requests | thermal actions (7) |
+| | 3 | minimum-power request | log-only |
 | other | – | fan, WTMF and so on (L3/L4) | log-only (FR-O6, FR-O7) |
 
 - **Zone lookup:** zones are found by name (`package-0`, `psys`), not by index. A missing zone makes its channels log-only, with one message.
 - **PL1 time window:** the daemon does not write it. It checks it against the firmware value from the snapshot and restores it if someone else changed it, because a foreign short window would change PL1's effect (`supervisor.md` 3).
 - **Enable bits:** writes never change `enabled`. A disabled zone is reported. The daemon does not enable it.
 
+### 3.1 Holding PL4 and PL3 while their EC inputs are invalid [D]
+PL4 and PL3 are computed from the EC power data on most devices. Without them the blob falls back to values far below the firmware
+value (Pro 10: PL4 20 W instead of the firmware's 45 W). While any EC input (`28B7BD85`, the `0x53` and `ARTG` fields) on the path to
+PL4 or PL3 is invalid, the output stage keeps the current value: the firmware value before the first write, the last written value
+after it. The status file reports such a channel as `held`. psys keeps the Windows behaviour (its fallback is what Windows does without
+EC data, `engine.md` 7).
+
 ## 4. PL3 through MSR (FR-O2)
 - **Encoding:** MSR 0x615 holds PL3 in power units from MSR 0x606 (`1/2^PU W`). The adapter changes only the power-limit field (bits 0–14) and keeps the time window and the enable bit as read.
 - **Availability:** this needs `/dev/cpu/0/msr` and kernel lockdown `none`. If either is missing, PL3 is log-only and reported once (AC-O1).
-- **Default:** PL3 writes are off by default [D], so that the default path needs no raw MSR access (NFR-3, NFR-11). Whether PL3 binds in normal use on the SB3 is not measured [H: it does not, because the blob value is the battery sustained power plus the available input power]. Enabling it is an option in the device profile.
+- **Default:** automatic: PL3 is written where the MSR device is writable (root, lockdown `none`). A device profile can switch it off. The SB3 profile does, until it is measured: the field tests ran without it [H: it does not bind in normal use, because the blob value is the battery sustained power plus the available input power].
+- **Snapshot:** the firmware value of MSR 0x615 is part of the snapshot (`supervisor.md` 3) and restored with the powercap values.
+- **Read-back:** the limit field is read back like a powercap file; a foreign change of the field counts as a foreign change.
 
 ## 5. Log-only outputs
-Log-only outputs are computed, published in the status file and the time series, and never written (AC-O2).
+Log-only outputs are computed, published in the status file and the time series, and never written (AC-O2). A blob with a log-only output is not allowed to control (`supervisor.md` 2.6).
 
 ## 6. dGPU stand-in through a clock cap (opt-in, DO-1, idea I-4)
 Windows limits the dGPU power. On Linux, the SB3's NVIDIA driver refuses a power limit, and Dynamic Boost is not
@@ -88,3 +98,14 @@ while no Windows state in the SB3 blob allows more than 50 W.
   - Example: the SB3 without the base sensor nodes, as with current kernels.
 - **Dry-run:** computes and logs the cap it would set, sets nothing, and still only samples under the rule above.
 - **Failures:** an NVML error disables the stand-in for the rest of the run and is logged once. Examples: no library, no permission, unsupported call.
+
+## 7. Thermal actions (`110DF2A4/1`, `/2`) [C for the meaning, D for the Linux action]
+- **Windows:** the Surface thermal-policy driver turns `O_HOT` = 2 into the "hibernate" flag and `O_CRT` = 2 into the "critical" flag of
+  the thermal zone `TPOL`; Windows then hibernates or shuts down (`../research/10-outputs.md`).
+- **Linux:** a request that holds for 5 s (one evaluation of the 5000 ms instance) starts once:
+  - `O_CRT`: `systemctl poweroff`;
+  - `O_HOT`: `systemctl hibernate`, and `systemctl suspend` if hibernation fails (it is not set up on many systems, e.g. the SB3 here).
+  The critical request wins; no hibernate is started on the way to a shutdown. The action re-arms when the request is gone.
+- **Armed only in control mode.** In dry-run the request is logged as a warning. The notifier shows a notification in both cases
+  (`monitoring.md` 4).
+- These two outputs count as written for the control rule (`supervisor.md` 2.6).

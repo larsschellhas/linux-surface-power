@@ -7,7 +7,7 @@ import os
 import sys
 from collections import deque
 
-PRIORITY = {"error": 3, "warning": 4, "notice": 5, "info": 6, "debug": 7}
+PRIORITY = {"crit": 2, "error": 3, "warning": 4, "notice": 5, "info": 6, "debug": 7}
 
 
 class Journal:

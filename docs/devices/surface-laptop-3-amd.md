@@ -30,12 +30,12 @@ flowchart LR
     end
     IN1 --> B
     B(["SMF blob<br/>33 lines, 8 block types"])
-    subgraph OUT0["no Linux path"]
-        O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK"]
+    subgraph OUT0["written"]
+        O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
     end
     B --> OUT0
-    subgraph OUT1["logged only"]
-        O1_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
+    subgraph OUT1["no Linux path"]
+        O1_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK"]
     end
     B --> OUT1
 ```
@@ -48,7 +48,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 9 of 9 |
-| Outputs written by Linux | 0 of 5 (not written: `0B7B5350/51`, `0B7B5350/52`, `0B7B5350/53`, `110DF2A4/1`, `110DF2A4/2`) |
+| Outputs written by Linux | 2 of 5 (not written: `0B7B5350/51`, `0B7B5350/52`, `0B7B5350/53`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -72,5 +72,5 @@ A device can be controlled only when every output of its blob is written: a blob
 | `0B7B5350/51` | O_CPU_AVG | PL1, package long-term | none on AMD (Intel RAPL only) | no Linux path | 15000 / 30000 / 4000 |
 | `0B7B5350/52` | O_CPU_MAX | PL2, package short-term | none on AMD (Intel RAPL only) | no Linux path | 30000 / 35000 / 4000 |
 | `0B7B5350/53` | O_CPU_PEAK | PL4, package peak | none on AMD (Intel RAPL only) | no Linux path | 70000 / 70000 / 5000 |
-| `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | candidate: hibernate | logged only | – |
-| `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | candidate: power off | logged only | – |
+| `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
+| `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |

@@ -1,7 +1,7 @@
 """surface-power-notify: desktop notifications from status.json, run as a user unit (FR-M5, spec monitoring 4).
 
-Notifies on: entering emergency or yielded, return to control, and the battery discharging on AC for more than 60 s (the charger
-is too weak). The same cause is notified at most once per 10 minutes.
+Notifies on: entering emergency or yielded, return to control, a hibernate or shutdown request of the blob (thermal policy), and
+the battery discharging on AC for more than 60 s (the charger is too weak). The same cause is notified at most once per 10 minutes.
 """
 import json
 import shutil
@@ -39,6 +39,11 @@ class Notifier:
             elif state == "control" and self.state in ("emergency", "yielded"):
                 out.append(("Surface power: back to normal", "Limits follow the device configuration again."))
             self.state = state
+        ta = status.get("thermal_actions") or {}
+        if ta.get("critical_active") and self._once("critical", now_ms):
+            out.append(("Surface power: critical temperature", "The device configuration requests a shutdown."))
+        elif ta.get("hot_active") and self._once("hot", now_ms):
+            out.append(("Surface power: device too hot", "The device configuration requests hibernation."))
         ac = (status.get("slider") or {}).get("ac")
         discharge = next((i.get("value") for i in status.get("inputs", []) if i.get("channel") == "28B7BD85/10"), None)
         if ac and discharge is not None and discharge > DISCHARGE_MW:

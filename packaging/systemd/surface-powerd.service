@@ -29,8 +29,9 @@ PrivateTmp=yes
 PrivateNetwork=yes
 NoNewPrivileges=yes
 RestrictAddressFamilies=AF_UNIX
-# DAC_OVERRIDE for powercap and the SSAM cdev; add CAP_SYS_RAWIO only if PL3 via MSR is enabled.
-CapabilityBoundingSet=CAP_DAC_OVERRIDE
+# DAC_OVERRIDE for powercap and the SSAM cdev; SYS_RAWIO for PL3 in MSR 0x615 (spec outputs 4). Remove SYS_RAWIO to keep PL3
+# log-only. The thermal actions (spec outputs 7) call systemctl, which talks to PID 1 over its local socket as root.
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SYS_RAWIO
 MemoryMax=100M
 
 [Install]

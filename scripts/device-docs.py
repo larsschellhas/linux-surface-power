@@ -118,18 +118,18 @@ INPUTS = {
 OUTPUTS = {
     (LIMITS, 51): ("O_CPU_AVG", "PL1, package long-term", "powercap `package-0/long_term`", "written"),
     (LIMITS, 52): ("O_CPU_MAX", "PL2, package short-term", "powercap `package-0/short_term`", "written"),
-    (LIMITS, 53): ("O_CPU_PEAK", "PL4, package peak", "powercap `package-0/peak_power`", "optional"),
+    (LIMITS, 53): ("O_CPU_PEAK", "PL4, package peak", "powercap `package-0/peak_power` (automatic, held without EC data)", "written"),
     (LIMITS, 54): ("O_SYS_AVG", "psys PL1, platform long-term", "powercap `psys/long_term`", "written"),
     (LIMITS, 55): ("O_SYS_MAX", "psys PL2, platform short-term", "powercap `psys/short_term`", "written"),
-    (LIMITS, 59): ("O_SYS_PEAK", "PL3, platform peak with duty cycle", "MSR `0x615`", "optional"),
+    (LIMITS, 59): ("O_SYS_PEAK", "PL3, platform peak with duty cycle", "MSR `0x615` (root; held without EC data)", "written"),
     (LIMITS, 64): ("", "not analysed", "–", "log"),
     (LIMITS, 70): ("O_BATT_MODE", "battery mode", "–", "log"),
     (LIMITS, 71): ("", "not analysed", "–", "log"),
     (LIMITS, 201): ("", "dGPU power limit", "clock-cap stand-in (DO-1, profile)", "optional"),
     (LIMITS, 205): ("", "GPU power controller limit (not analysed)", "–", "log"),
     (LIMITS, 208): ("", "GPU power controller limit (not analysed)", "–", "log"),
-    ("110DF2A4", 1): ("O_HOT", "hibernate request at 2 (thermal policy of zone `TPOL`)", "candidate: hibernate", "log"),
-    ("110DF2A4", 2): ("O_CRT", "critical shutdown request at 2 (thermal policy of zone `TPOL`)", "candidate: power off", "log"),
+    ("110DF2A4", 1): ("O_HOT", "hibernate request at 2 (thermal policy of zone `TPOL`)", "thermal action: hibernate, else suspend", "written"),
+    ("110DF2A4", 2): ("O_CRT", "critical shutdown request at 2 (thermal policy of zone `TPOL`)", "thermal action: power off", "written"),
     ("110DF2A4", 3): ("O_MINPWR2", "minimum-power request", "–", "log"),
     ("A79674B4", 509): ("O_SEN9_OFFSET", "offset for sensor 9", "–", "log"),
     ("CF2F6076", 61): ("", "SoC value (not analysed)", "–", "log"),
@@ -211,7 +211,16 @@ def profile_outputs(profile: str | None) -> set[int]:
         return set()
     with open(os.path.join(ROOT, "src", "surface_power", "profiles", profile), "rb") as f:
         o = tomllib.load(f).get("outputs", {})
-    return {c for c, k in ((53, "pl4"), (59, "pl3"), (201, "dgpu_clock_cap")) if o.get(k)}
+    return {201} if o.get("dgpu_clock_cap") else set()
+
+
+def profile_disabled(profile: str | None) -> set[int]:
+    """Limit channels a device profile switches off (pl4 = false, pl3 = false)."""
+    if not profile:
+        return set()
+    with open(os.path.join(ROOT, "src", "surface_power", "profiles", profile), "rb") as f:
+        o = tomllib.load(f).get("outputs", {})
+    return {c for c, k in ((53, "pl4"), (59, "pl3")) if o.get(k) is False}
 
 
 def mermaid_label(items: list[str], per_line: int = 3) -> str:
@@ -258,10 +267,14 @@ def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[
 
     enabled = profile_outputs(profile)
 
+    disabled = profile_disabled(profile)
+
     def out_status(r):
         st = output_info(r, platform)[3]
         if st == "optional" and r.channel in enabled and g8(r.guid) == LIMITS:
             return "written"
+        if st == "written" and g8(r.guid) == LIMITS and r.channel in disabled:
+            return "log"
         return st
 
     # Diagram: every input and output, grouped by status and interface.

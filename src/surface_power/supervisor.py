@@ -8,6 +8,7 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 
+from .adapters import msr
 from .loader.model import ChannelRef
 
 PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles")
@@ -88,8 +89,8 @@ class Profile:
     variant: str
     tested: bool
     blob_source: str = "efivar"
-    pl3: bool = False
-    pl4: bool = False
+    pl3: bool | None = None          # None: automatic (spec outputs 3, 4)
+    pl4: bool | None = None
     narrow: dict = field(default_factory=dict)
     panel_max_nits: float | None = None
     dgpu_clock_cap: bool = False      # opt-in stand-in DO-1 (spec outputs 6)
@@ -110,7 +111,7 @@ def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
             raise ValueError(f"profile {os.path.basename(path)}: needs match.product_name or match.sku")
         out.append(Profile(os.path.basename(path), m.get("product_name"), sku, e.get("variant", "direct"),
                            bool(d.get("tested", False)), d.get("blob", {}).get("source", "efivar"),
-                           bool(o.get("pl3", False)), bool(o.get("pl4", False)), dict(o.get("narrow", {})),
+                           o.get("pl3"), o.get("pl4"), dict(o.get("narrow", {})),
                            d.get("inputs", {}).get("panel_max_nits"), bool(o.get("dgpu_clock_cap", False))))
     return out
 
@@ -123,6 +124,15 @@ def find_profile(device: Device, directory: str = PROFILE_DIR) -> Profile | None
 
 
 # --- snapshot and restore (spec supervisor 3) ---
+
+def _read_any(key: str) -> str | None:
+    """A powercap file's text, or an MSR's value as hex for an `msr:` key."""
+    m = msr.parse_key(key)
+    if m:
+        v = msr.read_dev(*m)
+        return None if v is None else f"{v:#018x}"
+    return _read(key)
+
 
 class Snapshot:
     """Firmware values of every file we may write, saved before the first write (atomic JSON in the run directory)."""
@@ -140,7 +150,7 @@ class Snapshot:
             snap = cls.load(path)
             if snap is not None:
                 return snap, True
-        values = {f: v for f in files if (v := _read(f)) is not None}
+        values = {f: v for f in files if (v := _read_any(f)) is not None}
         os.makedirs(run_dir, exist_ok=True)
         tmp = path + ".tmp"
         with open(tmp, "w") as fh:
@@ -166,7 +176,12 @@ class Snapshot:
         errors = []
         for p in self.order():
             want = self.values[p]
-            if _read(p) == want:
+            if _read_any(p) == want:
+                continue
+            m = msr.parse_key(p)
+            if m:
+                if not msr.write_dev(m[0], m[1], int(want, 16)):
+                    errors.append(f"{p}: MSR write failed")
                 continue
             try:
                 with open(p, "w") as fh:

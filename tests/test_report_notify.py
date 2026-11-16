@@ -65,7 +65,8 @@ class ReportSourcesTest(unittest.TestCase):
         text = self.run_report()
         self.assertIn("EC power data: debug device only", text)
         self.assertIn("28B7BD85/8: needs the debug device", text)
-        self.assertIn("0B7B5350/201: log-only", text)          # no NVIDIA GPU in this fake system
+        self.assertIn("0B7B5350/201: no Linux path", text)     # no NVIDIA GPU in this fake system
+        self.assertIn("ready for control: no", text)
 
     def test_with_kernel_attributes_and_gpu(self):
         for bat in ("BAT1", "BAT2"):
@@ -99,6 +100,14 @@ class NotifyTest(unittest.TestCase):
             self.assertEqual(n.update(st, t), [])
         self.assertEqual(len(n.update(st, 61000)), 1)
         self.assertEqual(n.update(st, 120000), [])          # not again within 10 minutes
+
+    def test_thermal_requests(self):
+        n = notify.Notifier()
+        st = {"state": "control", "thermal_actions": {"hot_active": True, "critical_active": False}}
+        self.assertIn("too hot", n.update(st, 0)[0][0])
+        st["thermal_actions"]["critical_active"] = True
+        self.assertIn("critical", n.update(st, 1000)[0][0])
+        self.assertEqual(n.update(st, 2000), [])
 
 
 if __name__ == "__main__":

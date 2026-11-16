@@ -51,4 +51,5 @@ Temperatures are logged in °C, power in W. Blob units are converted for logging
   - entering emergency or yielded;
   - return to control;
   - battery discharging while on AC for more than 60 s (the charger is too weak).
+  - a hibernate or critical-shutdown request of the blob (`thermal_actions` in the status file, `outputs.md` 7).
 - **Repeats:** no notification more than once per 10 minutes for the same cause.

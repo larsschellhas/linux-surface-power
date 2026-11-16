@@ -115,7 +115,7 @@ class DaemonTest(unittest.TestCase):
         """A controller on a sensor this system never provides (SB3: base sensor 609) stays OFF; that is logged, not an emergency."""
         with open(self.blob, "w") as f:
             f.write(blob_text(absent_sensor=True))
-        d = self.start("--control")
+        d = self.start("--control", "--allow-partial-outputs")     # the dGPU limit loses its stand-in here
         self.assertIn(daemon.ChannelRef(TEMP, 609), d.reader.unavailable)
         for t in range(0, 70000, 1000):
             d.cycle(t)
@@ -145,6 +145,52 @@ class DaemonTest(unittest.TestCase):
         for t in range(1000, 62000, 1000):
             d.cycle(t)
         self.assertEqual(d.state, "emergency")
+        d.stop()
+
+    def test_output_without_linux_path_forces_dry_run(self):
+        """Control only when every output has a Linux path (spec supervisor 2.6): PL4 off, and an unknown output."""
+        self.fs.write("sys/class/powercap/intel-rapl:0/constraint_2_power_limit_uw", 0)
+        with open(self.blob, "w") as f:
+            f.write(blob_text(extra=["1,0,0,026CCFCC-A52A-4DB1-8B49-D2BAAFCAD329,30,1,1,2DD6960F-7CB9-4BB8-82BF-97FA5D8BD767,1,"
+                                     "B620798F-6FB0-42EF-B9B3-D2370402E089,201,4"]))
+        d = self.start("--control")
+        self.assertEqual(d.mode, "dry-run")
+        self.assertIn("B620798F", d.mode_reason)
+        d.stop()
+        d = self.start("--control", "--allow-partial-outputs")
+        self.assertEqual(d.mode, "control")
+        d.stop()
+
+    def test_thermal_actions_fire_only_in_control(self):
+        """A blob that requests hibernate (O_HOT = 2): control runs the action once, dry-run only logs it."""
+        hot = ["1,0,0,026CCFCC-A52A-4DB1-8B49-D2BAAFCAD329,31,1,1,99999999-9999-9999-9999-999999999999,1,"
+               "110DF2A4-5995-473C-92FD-3CAC40EE2E6C,1,2"]          # placeholder input -> the default 2
+        with open(self.blob, "w") as f:
+            f.write(blob_text(extra=hot))
+        for flag, expected in (("--control", ["systemctl hibernate"]), ("--dry-run", [])):
+            calls = []
+            d = self.start(flag)
+            d.actions.runner = lambda cmd: (calls.append(" ".join(cmd)), True)[1]
+            for t in range(0, 12000, 1000):
+                d.cycle(t)
+            self.assertEqual(calls, expected, flag)
+            self.assertIn("thermal_actions", self.status())
+            d.stop()
+
+    def test_pl4_is_held_while_its_ec_input_is_invalid(self):
+        """PL4 from the available input power: without EC data (--no-ec) it keeps the firmware value (spec outputs 3.1)."""
+        pl4 = ["1,0,0,026CCFCC-A52A-4DB1-8B49-D2BAAFCAD329,32,1,1,28B7BD85-B4CD-49F1-B02B-F84E5AA09889,8,"
+               "0B7B5350-BB8C-4459-8D4A-A75C57073801,53,20000"]
+        with open(self.blob, "w") as f:
+            f.write(blob_text(extra=pl4))
+        PL4 = "sys/class/powercap/intel-rapl:0/constraint_2_power_limit_uw"
+        self.fs.write("sys/class/dmi/id/product_name", "Surface Pro 10 for Business")     # no profile: PL4 automatic
+        d = self.start("--control", "--allow-partial-outputs")
+        for t in range(0, 6000, 1000):
+            d.cycle(t)
+        self.assertEqual(self.fs.read(PL4), "100000000")                    # firmware value kept, not the 20 W fallback
+        out = {o["channel"]: o for o in self.status()["outputs"]}
+        self.assertTrue(out["0B7B5350/53"]["target"].startswith("held"))
         d.stop()
 
     def test_controller_on_an_internal_node_is_no_emergency(self):

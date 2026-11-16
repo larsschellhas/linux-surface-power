@@ -316,11 +316,11 @@ class OutputsTest(unittest.TestCase):
         self.assertEqual(st.targets[ref(LIMITS, 51)].path.split("/")[-2:],
                          ["intel-rapl:0", "constraint_0_power_limit_uw"])
         self.assertEqual(st.targets[ref(LIMITS, 54)].path.split("/")[-2:], ["intel-rapl:1", "constraint_0_power_limit_uw"])
-        self.assertEqual(st.kind(ref(LIMITS, 53)), "log-only")       # PL4 is off by default
-        st4 = self.stage(pl4=True)
-        self.assertEqual(st4.targets[ref(LIMITS, 53)].path.split("/")[-1], "constraint_2_power_limit_uw")
+        # PL4 is automatic: written where peak_power reports a value (the fake tree has 100 W).
+        self.assertEqual(st.targets[ref(LIMITS, 53)].path.split("/")[-1], "constraint_2_power_limit_uw")
+        self.assertEqual(self.stage(pl4=False).kind(ref(LIMITS, 53)), "log-only")       # off in the profile
         self.assertEqual(st.kind(ref(LIMITS, 201)), "log-only")
-        self.assertEqual(st.kind(ref(LIMITS, 59)), "log-only")       # PL3 is off by default
+        self.assertEqual(st.kind(ref(LIMITS, 59)), "log-only")       # PL3: no MSR device in the fake tree
 
     def test_write_clamped_and_only_on_change(self):
         st = self.stage()
@@ -372,7 +372,108 @@ class OutputsTest(unittest.TestCase):
     def test_pl3_without_msr_is_skipped(self):
         st = self.stage(pl3=True)
         self.assertEqual(st.kind(ref(LIMITS, 59)), "log-only")       # no /dev/cpu/0/msr in the fake tree
-        self.assertIn("PL3", " ".join(st.notes))
+        self.assertIn("pl3", " ".join(st.notes))
+
+    def test_pl4_reading_zero_is_log_only_unless_the_profile_enables_it(self):
+        self.fs.write("sys/class/powercap/intel-rapl:0/constraint_2_power_limit_uw", 0)      # as on the SB3
+        self.assertEqual(self.stage().kind(ref(LIMITS, 53)), "log-only")
+        self.assertIn("peak_power reads 0", " ".join(self.stage().notes))
+        self.assertEqual(self.stage(pl4=True).kind(ref(LIMITS, 53)), "written")
+
+    def _msr(self, pl3_raw):
+        """A fake MSR device: 0x606 with power unit 3 (1/8 W), 0x615 as given."""
+        import struct
+        dev = self.fs.path("dev/cpu/0/msr")
+        os.makedirs(os.path.dirname(dev), exist_ok=True)
+        with open(dev, "wb") as f:
+            f.write(bytes(0x620))
+        with open(dev, "r+b") as f:
+            f.seek(0x606); f.write(struct.pack("<Q", 0x000A0E03))
+            f.seek(0x615); f.write(struct.pack("<Q", pl3_raw))
+        return dev
+
+    def _read_pl3(self, dev):
+        import struct
+        with open(dev, "rb") as f:
+            f.seek(0x615)
+            return struct.unpack("<Q", f.read(8))[0]
+
+    def test_pl3_through_msr_keeps_window_and_enable(self):
+        self.ranges[ref(LIMITS, 59)] = OutputChannel(1, ref(LIMITS, 59), 65000, 101000, 20000)
+        dev = self._msr(0x0012_8000 | 400)                 # enabled, some time-window bits, 50 W
+        st = self.stage()
+        self.assertEqual(st.kind(ref(LIMITS, 59)), "written")
+        self.assertEqual(st.targets[ref(LIMITS, 59)].read_uw(), 50_000_000)
+        st.apply({ref(LIMITS, 59): 72500})
+        raw = self._read_pl3(dev)
+        self.assertEqual(raw & 0x7FFF, 580)                 # 72.5 W in 1/8 W
+        self.assertEqual(raw & ~0x7FFF, 0x0012_8000)        # window and enable bit untouched
+        self.assertEqual(self.stage(pl3=False).kind(ref(LIMITS, 59)), "log-only")
+
+    def test_failed_msr_write_turns_pl3_log_only(self):
+        self.ranges[ref(LIMITS, 59)] = OutputChannel(1, ref(LIMITS, 59), 65000, 101000, 20000)
+        dev = self._msr(0x8000 | 400)
+        st = self.stage()
+        os.chmod(dev, 0o444)                                  # e.g. CAP_SYS_RAWIO missing at write time
+        res = st.apply({ref(LIMITS, 59): 90000})
+        self.assertEqual(res[ref(LIMITS, 59)].kind, "log-only")
+        self.assertEqual(st.kind(ref(LIMITS, 59)), "log-only")
+        self.assertIn("write failed", " ".join(st.notes))
+
+    def test_msr_snapshot_restores_the_register(self):
+        from surface_power import supervisor
+        self.ranges[ref(LIMITS, 59)] = OutputChannel(1, ref(LIMITS, 59), 65000, 101000, 20000)
+        dev = self._msr(0x8000 | 400)
+        st = self.stage()
+        snap, _ = supervisor.Snapshot.take(self.fs.path("run"), st.snapshot_keys())
+        st.apply({ref(LIMITS, 59): 90000})
+        self.assertNotEqual(self._read_pl3(dev), 0x8000 | 400)
+        self.assertEqual(snap.restore(), [])
+        self.assertEqual(self._read_pl3(dev), 0x8000 | 400)
+
+    def test_held_value_is_not_written(self):
+        st = self.stage()
+        before = self.fs.read("sys/class/powercap/intel-rapl:0/constraint_2_power_limit_uw")
+        res = st.apply({ref(LIMITS, 53): 20000}, hold=frozenset({ref(LIMITS, 53)}))
+        self.assertEqual(res[ref(LIMITS, 53)].kind, "held")
+        self.assertEqual(self.fs.read("sys/class/powercap/intel-rapl:0/constraint_2_power_limit_uw"), before)
+
+
+class ThermalActionsTest(unittest.TestCase):
+    """O_HOT / O_CRT at 2 start hibernate / power off once, after 5 s (spec outputs 7)."""
+
+    def setUp(self):
+        from surface_power.adapters import actions
+        self.a = actions
+        self.calls = []
+        self.ok = {"systemctl hibernate": False, "systemctl suspend": True, "systemctl poweroff": True}
+        self.t = actions.ThermalActions(runner=lambda cmd: (self.calls.append(" ".join(cmd)), self.ok[" ".join(cmd)])[1])
+
+    def test_hot_falls_back_to_suspend_and_fires_once(self):
+        v = {self.a.HOT: 2, self.a.CRT: 1}
+        self.assertEqual(self.t.step(0, v, armed=True), [])
+        self.t.step(4000, v, armed=True)
+        self.assertEqual(self.calls, [])                       # not yet held for 5 s
+        ev = self.t.step(5000, v, armed=True)
+        self.assertEqual(self.calls, ["systemctl hibernate", "systemctl suspend"])
+        self.assertIn("systemctl suspend", ev[0][1])
+        self.t.step(10000, v, armed=True)
+        self.assertEqual(len(self.calls), 2)                   # once per request
+        self.t.step(11000, {self.a.HOT: 1}, armed=True)        # request gone: re-armed
+        self.t.step(12000, v, armed=True)
+        self.t.step(17000, v, armed=True)
+        self.assertEqual(len(self.calls), 4)
+
+    def test_critical_wins_and_unarmed_only_logs(self):
+        v = {self.a.HOT: 2, self.a.CRT: 2}
+        self.t.step(0, v, armed=False)
+        ev = self.t.step(5000, v, armed=False)
+        self.assertEqual(self.calls, [])
+        self.assertIn("not armed", ev[0][1])
+        t2 = self.a.ThermalActions(runner=lambda cmd: (self.calls.append(" ".join(cmd)), True)[1])
+        t2.step(0, v, armed=True)
+        t2.step(5000, v, armed=True)
+        self.assertEqual(self.calls, ["systemctl poweroff"])
 
 
 if __name__ == "__main__":
