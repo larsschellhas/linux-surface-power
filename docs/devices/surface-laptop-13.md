@@ -51,6 +51,7 @@ flowchart LR
     B(["SMF blob<br/>140 lines, 14 block types"])
     subgraph OUT0["written"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
+        O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_GFX; O_WTMF_E_CORES_C1; O_WTMF_P_CORES_C2<br/>O_WTMF_PARK"]
     end
     B --> OUT0
     subgraph OUT1["no Linux path"]
@@ -61,7 +62,7 @@ flowchart LR
         O2_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
         O2_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
         O2_87008365["<b>client-computed channels</b><br/>O_FAST_MAXIM_POLLING; O_CAMERA_AINR"]
-        O2_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_GFX; O_WTMF_E_CORES_C1; O_WTMF_P_CORES_C2<br/>O_WTMF_PARK; O_WTMF_NPU"]
+        O2_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_NPU"]
         O2_B620798F["<b>fan and charging</b><br/>O_FAN1_MAX_SONES; O_FAN1_ACTIVE_SONES; O_FAN1_PROFILE<br/>O_FAN_CS_REQUEST; O_MCU_FAN_ON_TEMP; O_MCU_FAN_RAMP_TEMP<br/>O_MCU_FAN_MAX_TEMP; O_MCU_FAN_CRITICAL_TEMP; O_MCU_PROCHOT_TEMP<br/>O_NORMAL_CHARGE_TEMP; O_SLOW_CHARGE_TEMP; O_TRICKLE_CHARGE_TEMP<br/>O_MCU_FAN_MAX_SONES"]
     end
     B --> OUT2
@@ -75,7 +76,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 18 of 23 (missing: `049E36F2/2`, `1FB53D4C/32`, `1FB53D4C/43`, `87008365/112`, `87008365/200`) |
-| Outputs written by Linux | 2 of 25 (not written: `0B7B5350/55`, `0B7B5350/70`, `110DF2A4/3`, `87008365/220`, `87008365/300`, `9BBB8910/5`, `9BBB8910/20`, `9BBB8910/21`, `9BBB8910/62`, `9BBB8910/200`, `B620798F/114`, `B620798F/124`, `B620798F/201`, `B620798F/301`, `B620798F/302`, `B620798F/304`, `B620798F/305`, `B620798F/307`, `B620798F/308`, `B620798F/309`, `B620798F/310`, `B620798F/311`, `B620798F/312`) |
+| Outputs written by Linux | 6 of 25 (not written: `0B7B5350/55`, `0B7B5350/70`, `110DF2A4/3`, `87008365/220`, `87008365/300`, `9BBB8910/200`, `B620798F/114`, `B620798F/124`, `B620798F/201`, `B620798F/301`, `B620798F/302`, `B620798F/304`, `B620798F/305`, `B620798F/307`, `B620798F/308`, `B620798F/309`, `B620798F/310`, `B620798F/311`, `B620798F/312`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -117,21 +118,21 @@ A device can be controlled only when every output of its blob is written: a blob
 | `110DF2A4/3` | O_MINPWR2 | minimum-power request | – | logged only | – |
 | `87008365/220` | O_FAST_MAXIM_POLLING | fast power-meter polling | – | logged only | – |
 | `87008365/300` | O_CAMERA_AINR | camera AI noise reduction allowed | – | logged only | – |
-| `9BBB8910/5` | O_WTMF_GFX | throttle request for the GPU, % (100 = none) | candidate: GPU maximum frequency | logged only | 100 / 100 / 0 |
-| `9BBB8910/20` | O_WTMF_E_CORES_C1 | throttle request for a CPU cluster, % (100 = none) | candidate: cpufreq `scaling_max_freq` | logged only | – |
-| `9BBB8910/21` | O_WTMF_P_CORES_C2 | throttle request for a CPU cluster, % (100 = none) | candidate: cpufreq `scaling_max_freq` | logged only | – |
-| `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor performance cap) | candidate: cpufreq cap for all CPUs | logged only | – |
+| `9BBB8910/5` | O_WTMF_GFX | throttle request for the GPU, % (100 = none) | GPU maximum frequency (i915, xe or devfreq; where the machine has one) | written | 100 / 100 / 0 |
+| `9BBB8910/20` | O_WTMF_E_CORES_C1 | throttle request for a CPU cluster, % (100 = none) | cpufreq `scaling_max_freq` of the cluster | written | – |
+| `9BBB8910/21` | O_WTMF_P_CORES_C2 | throttle request for a CPU cluster, % (100 = none) | cpufreq `scaling_max_freq` of the cluster | written | – |
+| `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |
 | `9BBB8910/200` | O_WTMF_NPU | throttle request, % (100 = none) | – | logged only | – |
-| `B620798F/114` | O_FAN1_MAX_SONES | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/124` | O_FAN1_ACTIVE_SONES | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/201` | O_FAN1_PROFILE | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/301` | O_FAN_CS_REQUEST | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/302` | O_MCU_FAN_ON_TEMP | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/304` | O_MCU_FAN_RAMP_TEMP | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/305` | O_MCU_FAN_MAX_TEMP | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/307` | O_MCU_FAN_CRITICAL_TEMP | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/308` | O_MCU_PROCHOT_TEMP | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/309` | O_NORMAL_CHARGE_TEMP | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/310` | O_SLOW_CHARGE_TEMP | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/311` | O_TRICKLE_CHARGE_TEMP | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/312` | O_MCU_FAN_MAX_SONES | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
+| `B620798F/114` | O_FAN1_MAX_SONES | fan loudness upper limit, sones (fan 1) | SAM FAN `0x15` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/124` | O_FAN1_ACTIVE_SONES | active fan loudness, sones (fan 1) | SAM FAN `0x14` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/201` | O_FAN1_PROFILE | fan profile, 1-4 (fan 1) | SAM FAN `0x0e`; kernel `surface_platform_profile` sends it from the platform profile | logged only | – |
+| `B620798F/301` | O_FAN_CS_REQUEST | fan state, 1 normal / 2 standby | SAM FAN `0x0f`; kernel suspend hooks send it | logged only | – |
+| `B620798F/302` | O_MCU_FAN_ON_TEMP | fan-on temperature, 0.1 K | SAM FAN `0x19` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/304` | O_MCU_FAN_RAMP_TEMP | fan ramp temperature, 0.1 K | SAM FAN `0x1a` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/305` | O_MCU_FAN_MAX_TEMP | fan maximum temperature, 0.1 K | SAM FAN `0x1b` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/307` | O_MCU_FAN_CRITICAL_TEMP | fan critical temperature, 0.1 K | SAM FAN `0x1d` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/308` | O_MCU_PROCHOT_TEMP | PROCHOT temperature, 0.1 K | SAM TMP `0x25` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/309` | O_NORMAL_CHARGE_TEMP | battery temperature limit for normal charge rate, 0.1 K | SAM TMP `0x26` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/310` | O_SLOW_CHARGE_TEMP | battery temperature limit for slow charge rate, 0.1 K | SAM TMP `0x27` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/311` | O_TRICKLE_CHARGE_TEMP | battery temperature limit for trickle charge, 0.1 K | SAM TMP `0x28` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/312` | O_MCU_FAN_MAX_SONES | MCU fan loudness limit, sones | SAM FAN `0x16` through the SSAM debug device (no adapter yet) | logged only | – |

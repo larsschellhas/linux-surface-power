@@ -40,14 +40,14 @@ flowchart LR
     subgraph OUT0["written"]
         O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
+        O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_PARK"]
     end
     B --> OUT0
     subgraph OUT1["logged only"]
         O1_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
         O1_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
-        O1_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_PARK"]
         O1_A79674B4["<b>sensor offsets</b><br/>O_SEN9_OFFSET"]
-        O1_B620798F["<b>fan and charging</b><br/>111 fan or charging setting for the EC; O_FAN1_PROFILE; O_FAN_CS_REQUEST"]
+        O1_B620798F["<b>fan and charging</b><br/>111 fan noise upper limit; O_FAN1_PROFILE; O_FAN_CS_REQUEST"]
         O1_CF2F6076["<b>SoC (not analysed)</b><br/>61 SoC value"]
     end
     B --> OUT1
@@ -61,7 +61,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 15 of 15 |
-| Outputs written by Linux | 8 of 16 (not written: `0B7B5350/70`, `110DF2A4/3`, `9BBB8910/62`, `A79674B4/509`, `B620798F/111`, `B620798F/201`, `B620798F/301`, `CF2F6076/61`) |
+| Outputs written by Linux | 9 of 16 (not written: `0B7B5350/70`, `110DF2A4/3`, `A79674B4/509`, `B620798F/111`, `B620798F/201`, `B620798F/301`, `CF2F6076/61`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -98,9 +98,9 @@ A device can be controlled only when every output of its blob is written: a blob
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
 | `110DF2A4/3` | O_MINPWR2 | minimum-power request | – | logged only | – |
-| `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor performance cap) | candidate: cpufreq cap for all CPUs | logged only | – |
+| `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |
 | `A79674B4/509` | O_SEN9_OFFSET | offset for sensor 9 | – | logged only | – |
-| `B620798F/111` | – | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/201` | O_FAN1_PROFILE | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/301` | O_FAN_CS_REQUEST | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
+| `B620798F/111` | – | fan noise upper limit, SPL (fan 1) | SAM FAN `0x0c` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/201` | O_FAN1_PROFILE | fan profile, 1-4 (fan 1) | SAM FAN `0x0e`; kernel `surface_platform_profile` sends it from the platform profile | logged only | – |
+| `B620798F/301` | O_FAN_CS_REQUEST | fan state, 1 normal / 2 standby | SAM FAN `0x0f`; kernel suspend hooks send it | logged only | – |
 | `CF2F6076/61` | – | SoC value (not analysed) | – | logged only | – |

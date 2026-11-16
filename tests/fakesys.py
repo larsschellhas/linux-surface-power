@@ -82,5 +82,32 @@ class FakeSys:
         self.write("sys/class/hwmon/hwmon10/name", "surface_thermal")
         self.link("sys/class/hwmon/hwmon10/device", "sys/devices/platform/MSHW0117:00/00:00:01:11:00/01:03:02:00:02")
 
+    def add_cpufreq(self, policies=((0, "0-3"), (4, "4-7")), lo=400000, hi=4000000):
+        """cpufreq policies as on a CPU with clusters; scaling_max_freq starts at the maximum."""
+        for n, cpus in policies:
+            d = f"sys/devices/system/cpu/cpufreq/policy{n}"
+            self.write(f"{d}/cpuinfo_min_freq", lo)
+            self.write(f"{d}/cpuinfo_max_freq", hi)
+            self.write(f"{d}/scaling_min_freq", lo)
+            self.write(f"{d}/scaling_max_freq", hi)
+            lst = []
+            for part in cpus.split(","):
+                a_, _, b_ = part.partition("-")
+                lst += list(range(int(a_), int(b_ or a_) + 1))
+            self.write(f"{d}/related_cpus", " ".join(map(str, lst)))
+
+    def add_i915(self, card="card0", rp0=1100, rpn=300, cur=1100):
+        d = f"sys/class/drm/{card}"
+        self.write(f"{d}/gt_RP0_freq_mhz", rp0)
+        self.write(f"{d}/gt_RPn_freq_mhz", rpn)
+        self.write(f"{d}/gt_max_freq_mhz", cur)
+        self.write(f"{d}/gt_min_freq_mhz", rpn)
+
+    def add_devfreq_gpu(self, name="3d00000.gpu", freqs=(200000000, 400000000, 600000000, 800000000)):
+        d = f"sys/class/devfreq/{name}"
+        self.write(f"{d}/available_frequencies", " ".join(map(str, freqs)))
+        self.write(f"{d}/min_freq", freqs[0])
+        self.write(f"{d}/max_freq", freqs[-1])
+
     def cleanup(self):
         self.tmp.cleanup()

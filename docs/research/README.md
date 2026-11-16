@@ -20,6 +20,7 @@ Markers used in the summaries:
 | [08-field-tests-sb3.md](08-field-tests-sb3.md) | Control mode on the SB3 15" (AC-L1 – AC-L3): results against Windows, findings, base sensors and fans |
 | [09-newer-blobs.md](09-newer-blobs.md) | Block types of the newer blobs, corpus check, core variant per device, where the inputs come from |
 | [10-outputs.md](10-outputs.md) | What the outputs do on Windows (thermal policy: throttle, hibernate, shutdown), rule for control |
+| [11-fan-charging.md](11-fan-charging.md) | The fan and charging outputs `B620798F`: channel meaning, Windows receiver, SAM commands, Linux path, safe test procedure |
 
 ## Raw material (`raw/`, local only)
 

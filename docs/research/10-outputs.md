@@ -22,16 +22,18 @@ On the SB3 15" (engine run, skin sensors 505 and 509 at the same temperature): `
 from about 56 °C up to 100 °C. The daemon's own emergency rule (skin ≥ 60 °C for 10 s) only restores the firmware limits.
 
 On Linux `O_HOT`/`O_CRT` are thermal actions since 16.11.2026: hibernate (else suspend) and power-off, armed in control mode
-(`../specs/outputs.md` 7). The throttle requests have no Linux path yet; candidates are cpufreq caps per CPU cluster and a GPU
-frequency cap [H].
+(`../specs/outputs.md` 7). The throttle requests are written as cpufreq caps per CPU policy and a GPU
+frequency cap since 16.11.2026 (`../specs/outputs.md` 8); the ACPI `OPTS` lists in the public dumps show that x86 devices have only the
+Processor Aggregator Device (`PAGD`, matched with `/62` [H]), so only the Snapdragon (arm64) devices have per-CPU, cluster and GPU requests; untested on a device.
 
 ## 3. Others
 - **Power limits (`0B7B5350`):** IHV CPU client (Intel, Qualcomm), AMD SMF driver, GPU power controller (Laptop Studio, 201–208),
   battery client (70 battery mode) [C, GUID references]. Linux writes PL1, PL2 and psys PL1/PL2 on Intel through powercap, PL4
   where powercap reports it and PL3 through MSR 0x615 (both held while their EC inputs are invalid), and the dGPU limit through the
   clock-cap stand-in.
-- **Fans and charging (`B620798F`), sensor offsets (`A79674B4`):** the SMF client passes them to the EC/MCU [C, GUID references]. The
-  EC commands are not analysed.
+- **Fans and charging (`B620798F`):** the SMF client sends each channel as one SAM command to the EC (FAN and TMP categories); the
+  commands, units and a safe test procedure are in [`11-fan-charging.md`](11-fan-charging.md). No adapter writes them yet.
+- **Sensor offsets (`A79674B4`):** passed to the EC/MCU by the SMF client [C, GUID references], commands not analysed.
 - **`CF2F6076`, `349D0E39`:** SoC-specific values for the IHV CPU client and the AMD driver, not analysed.
 - **`87008365/220, 250, 300`:** the Surface service (power-meter polling, camera noise reduction), not relevant for limits.
 

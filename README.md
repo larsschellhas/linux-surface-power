@@ -48,7 +48,7 @@ Start with [`docs/README.md`](docs/README.md): how it works, with diagrams, and 
   SMF blob now has a source for each input that reaches a limit. They are tested on a fake sysfs and partly on the SB3, not yet on the
   devices that need them.
 - **Next:** the soak test (AC-L4) on the SB3 15" with all outputs, then the outputs Linux does not write yet on other devices
-  (`docs/research/10-outputs.md`): the throttle requests and fans. Also reports from devices other than the SB3, and a kernel attribute for the
+  (`docs/research/10-outputs.md`): fans, and test reports for the throttle caps (`scripts/throttle-test.py`). Also reports from devices other than the SB3, and a kernel attribute for the
   EC's battery EWMA level and max-charge flag.
 
 ## Device overview
@@ -100,12 +100,13 @@ Notes:
 - Since 16.11.2026 Linux also writes PL4 (where powercap reports it, or where the profile switches it on), PL3 (MSR 0x615, root) and
   the thermal-policy requests: at `O_HOT` / `O_CRT` = 2 the daemon hibernates (else suspends) or powers off, as Windows does (on the
   SB3 from about 54 °C and 56 °C skin temperature). With PL3 and PL4 measured on the SB3 15", the Surface Book 3 is the first device
-  whose outputs are all written. Elsewhere still without a Linux path: the throttle requests per CPU cluster and GPU, fans and
+  whose outputs are all written. Throttle requests (`9BBB8910`) are written as cpufreq and GPU frequency caps since 16.11.2026
+  (`docs/specs/outputs.md` 8; not yet run on a device that has such an output). Elsewhere still without a Linux path: fans and
   charging, battery mode and a few SoC values (see the device pages).
 - Nothing beyond the SB3 15" has run on a device. The newer input adapters are only tested on a fake sysfs and on this SB3.
 - **AMD and Snapdragon devices:** the blob runs and every input has a source, but Linux has no write path for these limits: powercap
-  limits exist on Intel only. On Snapdragon the blobs regulate mainly through thermal throttle requests per CPU cluster and GPU; cpufreq
-  caps are the Linux candidate (not implemented). The per-device pages in [`docs/devices/`](docs/devices/README.md) list every output.
+  limits exist on Intel only. On Snapdragon the blobs regulate mainly through thermal throttle requests per CPU cluster and GPU; these now become cpufreq
+  and GPU frequency caps (implemented, untested on the device). The per-device pages in [`docs/devices/`](docs/devices/README.md) list every output.
 - Older devices (Book 2, Pro 7, Laptop 3 Intel, …) use Intel DTT, not SMF, and are out of scope.
 
 ## Try it on your Surface

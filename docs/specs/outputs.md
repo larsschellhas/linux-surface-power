@@ -40,6 +40,8 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 | | 70 | battery mode | log-only |
 | | 201 | dGPU limit | log-only (FR-O5): `nvidia-smi -pl` is not supported on the SB3 GPU [M]. Opt-in stand-in: clock cap (6, DO-1) |
 | | 205 | system budget (Laptop Studio 2) | log-only |
+| `9BBB8910` | 1–5, 20–22, 62 | throttle requests for CPUs, clusters, GPU and the aggregator device | cpufreq or GPU frequency cap (8) |
+| | 103–105, 200 | modem sensors, NPU | log-only (no Linux interface known) |
 | `110DF2A4` | 1, 2 | thermal policy: hibernate (`O_HOT`) and critical shutdown (`O_CRT`) requests | thermal actions (7) |
 | | 3 | minimum-power request | log-only |
 | other | – | fan, WTMF and so on (L3/L4) | log-only (FR-O6, FR-O7) |
@@ -114,3 +116,35 @@ while no Windows state in the SB3 blob allows more than 50 W.
 - **Armed only in control mode.** In dry-run the request is logged as a warning. The notifier shows a notification in both cases
   (`monitoring.md` 4).
 - These two outputs count as written for the control rule (`supervisor.md` 2.6).
+
+## 8. Throttle requests (`9BBB8910`) as frequency caps [C for the meaning, D for the Linux translation, H for the device mapping]
+- **Windows:** the Surface thermal-policy driver passes one passive-cooling request in percent (100 = no throttling) to each device that the ACPI method `OPTS` of the thermal zone `TPOL` (`MSHW0187`) lists, through `PoSetThermalPassiveCooling`. `9BBB8910/62` (`O_WTMF_PARK`) is the request for the processor aggregator device (`../research/10-outputs.md` 2).
+- **What `OPTS` returns** [M, public ACPI dumps of 23 products, `linux-surface/acpidumps`]:
+  - **x86 (Intel and AMD)** (Book 3, Go 3/4, Laptop 4/5/6, Laptop Go 1–3, Laptop Studio 1/2, Laptop SE, Pro 7+/8/9/10): one entry, `\_SB.PAGD`, which is an `ACPI000C` Processor Aggregator Device. Their blobs have at most `/62`. The Laptop 3 AMD dump has no `OPTS`; its blob has no `9BBB8910` output.
+  - **Pro X (SQ1, SQ2):** `CLUS.CPU4`–`CPU7`, `GPU0`.
+  - **Pro 9 5G, Dev Kit 2023:** `CLUS.CPU0`–`CPU7`, `GPU0`, `PAGD`, `MSKN` (skin sensor).
+  - **Pro 11 and Laptop 7 (Snapdragon):** `CLS0.CPU0`, `CLS1.CPU0`, `CLS2.CPU0`, `GPU0`, `AGR0` (also `ACPI000C`), `MSKN`, `CSW0`, `MJCT`, `MBJ0`.
+  - The data are in `adapters/cpufreq.py` (`OPTS`).
+- **Channel → device** [H]. The channel numbers are not `OPTS` indices (an Intel blob has `/62` for a one-entry list). The role comes from the output names in the blobs; the match with the `OPTS` entry is by name, and the aggregator device is matched with `/62` by elimination (it is the only entry without another channel):
+
+  | Channel | Name | Device | Linux target |
+  |---|---|---|---|
+  | 1–4 | `O_WTMF_CPU0`–`CPU3` | `CLUS.CPU0`–`CPU3` | `scaling_max_freq` of the cpufreq policy that contains Linux CPU n |
+  | 20, 21, 22 | `O_WTMF_E_CORES_C1`, `P_CORES_C2`, `P_CORES_C3` | `CLS0`–`CLS2` | the 1st, 2nd, 3rd cpufreq policy in numeric order |
+  | 5 | `O_WTMF_GFX` | `GPU0` | Intel i915 `gt_max_freq_mhz` (or the per-GT `rps_max_freq_mhz`), xe `freq0/max_freq`, else the devfreq device with `gpu` in its name (Adreno); NVIDIA and AMD: none |
+  | 62 | `O_WTMF_PARK` | aggregator (`PAGD`, `AGR0`) | all cpufreq policies, see below |
+  | 103–105, 200 | `O_MDM_*`, `O_WTMF_NPU` | modem sensors, NPU | none: log-only |
+
+  A channel whose target does not exist on this machine (no cpufreq, no GPU interface, fewer policies than the channel needs) is log-only. Only then it counts as without a Linux path (`supervisor.md` 2.6).
+- **Translation [D]:** cap = request % of `cpuinfo_max_freq` (GPU: of its highest frequency), clamped to [floor, baseline].
+  - **Percent of the maximum, not of the span above the minimum.** The Windows request is a duty-style value: 50 means about half of the throughput. On a CPU the throughput scales with the frequency, so the cap at *p* % of the maximum gives roughly *p* % of the throughput. The span formula `min + p·(max − min)` would give more than *p* %. The cap is a model of the Windows request, not a copy of it [H].
+  - **Floor:** 20 % of the maximum, and never below `cpuinfo_min_freq` or the user's `scaling_min_freq` (GPU: `RPn`, the minimum). No request, not even 0, takes a device lower [D].
+  - **Baseline:** the value of the file before the first write, from the snapshot (`supervisor.md` 3). A request of 100 % writes the baseline back, so a limit that the user had set before stays in force. No cap goes above it.
+  - **Rounding:** `scaling_max_freq` is written in kHz, the GPU file in its own unit (MHz, devfreq Hz). The driver rounds to its steps; the read-back value counts.
+- **Combining:** requests on the same target combine by the minimum. `/62` applies to every cpufreq policy; with a per-CPU or per-cluster request the lower value wins. A target without any request in a cycle is not touched.
+- **Rate limit:** a new cap is written only if it differs from the current value by at least 2 % of the maximum frequency, or if it is the baseline (release). The blob changes these outputs every few seconds at most, but several steps of 1 % are of no use.
+- **Failures:** a write error (not "file gone", which is a CPU that went offline and is retried) turns that target log-only for the rest of the run, with one message. In dry-run the cap is computed and published as `would` in the status file, and nothing is written. The target must exist before the output counts as written (FR-O7).
+- **Snapshot and restore:** the `scaling_max_freq` files of all policies and the GPU file are in the snapshot. They are restored on exit, crash (`reset` tool and predecessor snapshot), sleep, emergency and yield. Restoring to the baseline in an emergency leaves the protection to the firmware, as for the power limits (`supervisor.md` 4).
+- **Other writers (conflict):** `scaling_max_freq` and the GPU maximum are also written by users (`cpupower frequency-set -u`, `echo`), TLP and some desktop tools. thermald and power-profiles-daemon mostly limit through the cpufreq cooling device or `energy_performance_preference`, which does not touch `scaling_max_freq`, but they can change the effective maximum all the same. The daemon does not see such limits [H]. It detects a change of its own files: it logs a warning, writes its cap again, and three changes within 60 s make it yield like for power limits (`supervisor.md` 5). thermald is already refused at start (FR-S6).
+- **Status:** `status.json` shows the target of a throttle output as `cpufreq cap`, `GPU freq cap` (with ` (dry-run)` in dry-run, `firmware` in emergency, yielded and paused) or `no Linux path`. The list `throttle` gives, per target, the file, baseline, current value and the dry-run value. `surface-power-report` prints `writable (cpufreq cap)`, `writable (GPU freq cap)` or `no Linux path (logged only)`.
+- **Not verified:** no device in our corpus with a `9BBB8910` output other than the Intel `/62` is available to us. The SB3 15" blob has none. The cpufreq mechanism itself is the same on the SB3, so `scripts/throttle-test.py` checks the write path, the restore and the effective frequency there and on any other device (the tester needs root and stops the daemon first).

@@ -42,7 +42,7 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
    - **Documented deviation with a Windows fallback:** never blocks control. This is the case for the display brightness (DV-3).
    - **Gets a Linux target later:** once an output gets one (e.g. a dGPU stand-in), its inputs become required automatically.
 6. **Outputs without a Linux path (2.6) [D]:** control is allowed only when every output of the blob is written: a powercap or MSR
-   target, the dGPU stand-in, or a thermal action (`outputs.md`). Otherwise the blob would regulate, for example, the CPU while its fan,
+   target, the dGPU stand-in, a thermal action, or a frequency cap for a throttle request (`outputs.md`). Otherwise the blob would regulate, for example, the CPU while its fan,
    throttle or safety outputs go nowhere. The daemon then runs in dry-run and logs the outputs. `--allow-partial-outputs` overrides
    this for field tests; the status file lists the outputs in `outputs_without_linux_path`.
 7. **Conflicts:** if thermald is active (`systemctl is-active thermald`, or its D-Bus name), the daemon refuses to start (FR-S6). systemd `Conflicts=` normally prevents this.
@@ -51,7 +51,8 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
 - **Contents:** before the first write, the supervisor saves every value it may write:
   - package PL1, PL2, PL4 with their time windows;
   - psys PL1, PL2;
-  - the MSR 0x615 value, if PL3 is written (snapshot key `msr:<device>@0x615`, the full register as hex).
+  - the MSR 0x615 value, if PL3 is written (snapshot key `msr:<device>@0x615`, the full register as hex);
+  - `scaling_max_freq` of the cpufreq policies and the GPU maximum-frequency file, if throttle requests are written (`outputs.md` 8).
 
   The file is `/run/surface-power/snapshot.json`, written atomically (write a temp file, then rename).
 - **Predecessor:** if a snapshot from a crashed predecessor exists, it is kept and used as is. The current values may be the daemon's own.

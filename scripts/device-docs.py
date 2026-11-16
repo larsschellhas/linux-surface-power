@@ -179,18 +179,48 @@ def output_info(ref: ChannelRef, platform: str = "intel"):
     if g == "9BBB8910":
         ms = WTMF.get(c, "")
         if c == 62:
-            return (ms, "passive limit of zone `TPOL`, % (processor performance cap)", "candidate: cpufreq cap for all CPUs", "log")
-        if "CPU" in ms or "CORES" in ms:
-            return (ms, "throttle request for a CPU cluster, % (100 = none)", "candidate: cpufreq `scaling_max_freq`", "log")
+            return (ms, "passive limit of zone `TPOL`, % (processor aggregator device)",
+                    "cpufreq cap on all CPU policies (minimum with the other requests)", "written")
+        if c in (1, 2, 3, 4):
+            return (ms, "throttle request for one CPU, % (100 = none)", "cpufreq `scaling_max_freq` of its policy", "written")
+        if c in (20, 21, 22):
+            return (ms, "throttle request for a CPU cluster, % (100 = none)", "cpufreq `scaling_max_freq` of the cluster", "written")
         if "GFX" in ms:
-            return (ms, "throttle request for the GPU, % (100 = none)", "candidate: GPU maximum frequency", "log")
+            return (ms, "throttle request for the GPU, % (100 = none)",
+                    "GPU maximum frequency (i915, xe or devfreq; where the machine has one)", "written")
         return (ms, "throttle request, % (100 = none)", "–", "log")
     if g == "B620798F":
-        return (FANS.get(c, ""), "fan or charging setting for the EC", "candidate: EC through SAM (commands not known)", "log")
+        return (FANS.get(c, ""), *FAN_CMDS.get(c, ("fan or charging setting for the EC", "candidate: EC through SAM (command not known)")), "log")
     info = OUTPUTS.get((g, c), ("", "not analysed", "–", "log"))
     if platform != "intel" and g == LIMITS and info[3] in ("written", "optional") and c != 201:
         return (info[0], info[1], f"none on {PLATFORM_NAMES[platform]} (Intel RAPL only)", "noplat")
     return info
+
+
+# B620798F channel -> (meaning, Linux path); research/11-fan-charging.md. Not written yet: no adapter (log-only).
+def _fan(lo, hi, meaning, cmd):
+    return {c: (meaning + (f" (fan {c - lo + 1})" if hi > lo else ""), cmd) for c in range(lo, hi + 1)}
+
+
+FAN_CMDS = {
+    **_fan(101, 103, "minimum fan speed, rpm", "SAM FAN `0x0b` through the SSAM debug device (no adapter yet)"),
+    **_fan(111, 113, "fan noise upper limit, SPL", "SAM FAN `0x0c` through the SSAM debug device (no adapter yet)"),
+    **_fan(114, 116, "fan loudness upper limit, sones", "SAM FAN `0x15` through the SSAM debug device (no adapter yet)"),
+    **_fan(121, 123, "fan noise floor, SPL", "SAM FAN `0x12` through the SSAM debug device (no adapter yet)"),
+    **_fan(124, 126, "active fan loudness, sones", "SAM FAN `0x14` through the SSAM debug device (no adapter yet)"),
+    **_fan(201, 203, "fan profile, 1-4", "SAM FAN `0x0e`; kernel `surface_platform_profile` sends it from the platform profile"),
+    301: ("fan state, 1 normal / 2 standby", "SAM FAN `0x0f`; kernel suspend hooks send it"),
+    302: ("fan-on temperature, 0.1 K", "SAM FAN `0x19` through the SSAM debug device (no adapter yet)"),
+    304: ("fan ramp temperature, 0.1 K", "SAM FAN `0x1a` through the SSAM debug device (no adapter yet)"),
+    305: ("fan maximum temperature, 0.1 K", "SAM FAN `0x1b` through the SSAM debug device (no adapter yet)"),
+    306: ("maximum fan SPL", "SAM FAN `0x1c` through the SSAM debug device (no adapter yet)"),
+    307: ("fan critical temperature, 0.1 K", "SAM FAN `0x1d` through the SSAM debug device (no adapter yet)"),
+    308: ("PROCHOT temperature, 0.1 K", "SAM TMP `0x25` through the SSAM debug device (no adapter yet)"),
+    309: ("battery temperature limit for normal charge rate, 0.1 K", "SAM TMP `0x26` through the SSAM debug device (no adapter yet)"),
+    310: ("battery temperature limit for slow charge rate, 0.1 K", "SAM TMP `0x27` through the SSAM debug device (no adapter yet)"),
+    311: ("battery temperature limit for trickle charge, 0.1 K", "SAM TMP `0x28` through the SSAM debug device (no adapter yet)"),
+    312: ("MCU fan loudness limit, sones", "SAM FAN `0x16` through the SSAM debug device (no adapter yet)"),
+}
 
 
 def name(ref):

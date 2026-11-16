@@ -32,11 +32,12 @@ flowchart LR
     B(["SMF blob<br/>49 lines, 11 block types"])
     subgraph OUT0["written"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
+        O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_CPU0; O_WTMF_CPU1; O_WTMF_CPU2<br/>O_WTMF_CPU3; O_WTMF_GFX"]
     end
     B --> OUT0
     subgraph OUT1["logged only"]
         O1_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
-        O1_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_CPU0; O_WTMF_CPU1; O_WTMF_CPU2<br/>O_WTMF_CPU3; O_WTMF_GFX; O_MDM_SKIN"]
+        O1_9BBB8910["<b>thermal throttle requests</b><br/>O_MDM_SKIN"]
     end
     B --> OUT1
 ```
@@ -49,7 +50,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 10 of 10 |
-| Outputs written by Linux | 2 of 9 (not written: `110DF2A4/3`, `9BBB8910/1`, `9BBB8910/2`, `9BBB8910/3`, `9BBB8910/4`, `9BBB8910/5`, `9BBB8910/103`) |
+| Outputs written by Linux | 7 of 9 (not written: `110DF2A4/3`, `9BBB8910/103`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -74,9 +75,9 @@ A device can be controlled only when every output of its blob is written: a blob
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
 | `110DF2A4/3` | O_MINPWR2 | minimum-power request | – | logged only | – |
-| `9BBB8910/1` | O_WTMF_CPU0 | throttle request for a CPU cluster, % (100 = none) | candidate: cpufreq `scaling_max_freq` | logged only | 100 / 100 / 0 |
-| `9BBB8910/2` | O_WTMF_CPU1 | throttle request for a CPU cluster, % (100 = none) | candidate: cpufreq `scaling_max_freq` | logged only | 100 / 100 / 0 |
-| `9BBB8910/3` | O_WTMF_CPU2 | throttle request for a CPU cluster, % (100 = none) | candidate: cpufreq `scaling_max_freq` | logged only | 100 / 100 / 0 |
-| `9BBB8910/4` | O_WTMF_CPU3 | throttle request for a CPU cluster, % (100 = none) | candidate: cpufreq `scaling_max_freq` | logged only | 100 / 100 / 0 |
-| `9BBB8910/5` | O_WTMF_GFX | throttle request for the GPU, % (100 = none) | candidate: GPU maximum frequency | logged only | 100 / 100 / 0 |
+| `9BBB8910/1` | O_WTMF_CPU0 | throttle request for one CPU, % (100 = none) | cpufreq `scaling_max_freq` of its policy | written | 100 / 100 / 0 |
+| `9BBB8910/2` | O_WTMF_CPU1 | throttle request for one CPU, % (100 = none) | cpufreq `scaling_max_freq` of its policy | written | 100 / 100 / 0 |
+| `9BBB8910/3` | O_WTMF_CPU2 | throttle request for one CPU, % (100 = none) | cpufreq `scaling_max_freq` of its policy | written | 100 / 100 / 0 |
+| `9BBB8910/4` | O_WTMF_CPU3 | throttle request for one CPU, % (100 = none) | cpufreq `scaling_max_freq` of its policy | written | 100 / 100 / 0 |
+| `9BBB8910/5` | O_WTMF_GFX | throttle request for the GPU, % (100 = none) | GPU maximum frequency (i915, xe or devfreq; where the machine has one) | written | 100 / 100 / 0 |
 | `9BBB8910/103` | O_MDM_SKIN | throttle request, % (100 = none) | – | logged only | 100 / 100 / 0 |

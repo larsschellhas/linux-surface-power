@@ -54,6 +54,7 @@ flowchart LR
     subgraph OUT0["written"]
         O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
+        O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_PARK"]
     end
     B --> OUT0
     subgraph OUT1["optional (profile)"]
@@ -64,8 +65,7 @@ flowchart LR
         O2_0B7B5350["<b>power limits</b><br/>64 not analysed; O_BATT_MODE; 205 GPU power controller limit<br/>208 GPU power controller limit"]
         O2_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
         O2_349D0E39["<b>SoC (not analysed)</b><br/>1 SoC value; 4 SoC value"]
-        O2_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_PARK"]
-        O2_B620798F["<b>fan and charging</b><br/>101 fan or charging setting for the EC; 102 fan or charging setting for the EC; 111 fan or charging setting for the EC<br/>112 fan or charging setting for the EC; O_FAN1_PROFILE; 202 fan or charging setting for the EC<br/>O_FAN_CS_REQUEST"]
+        O2_B620798F["<b>fan and charging</b><br/>101 minimum fan speed; 102 minimum fan speed; 111 fan noise upper limit<br/>112 fan noise upper limit; O_FAN1_PROFILE; 202 fan profile<br/>O_FAN_CS_REQUEST"]
         O2_CF2F6076["<b>SoC (not analysed)</b><br/>61 SoC value"]
     end
     B --> OUT2
@@ -79,7 +79,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 24 of 27 (missing: `1FB53D4C/10`, `1FB53D4C/21`, `87008365/112`) |
-| Outputs written by Linux | 8 of 25 (not written: `0B7B5350/64`, `0B7B5350/70`, `0B7B5350/201`, `0B7B5350/205`, `0B7B5350/208`, `110DF2A4/3`, `349D0E39/1`, `349D0E39/4`, `9BBB8910/62`, `B620798F/101`, `B620798F/102`, `B620798F/111`, `B620798F/112`, `B620798F/201`, `B620798F/202`, `B620798F/301`, `CF2F6076/61`) |
+| Outputs written by Linux | 9 of 25 (not written: `0B7B5350/64`, `0B7B5350/70`, `0B7B5350/201`, `0B7B5350/205`, `0B7B5350/208`, `110DF2A4/3`, `349D0E39/1`, `349D0E39/4`, `B620798F/101`, `B620798F/102`, `B620798F/111`, `B620798F/112`, `B620798F/201`, `B620798F/202`, `B620798F/301`, `CF2F6076/61`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -134,12 +134,12 @@ A device can be controlled only when every output of its blob is written: a blob
 | `110DF2A4/3` | O_MINPWR2 | minimum-power request | – | logged only | – |
 | `349D0E39/1` | – | SoC value (not analysed) | – | logged only | – |
 | `349D0E39/4` | – | SoC value (not analysed) | – | logged only | – |
-| `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor performance cap) | candidate: cpufreq cap for all CPUs | logged only | – |
-| `B620798F/101` | – | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/102` | – | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/111` | – | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/112` | – | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/201` | O_FAN1_PROFILE | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/202` | – | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
-| `B620798F/301` | O_FAN_CS_REQUEST | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
+| `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |
+| `B620798F/101` | – | minimum fan speed, rpm (fan 1) | SAM FAN `0x0b` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/102` | – | minimum fan speed, rpm (fan 2) | SAM FAN `0x0b` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/111` | – | fan noise upper limit, SPL (fan 1) | SAM FAN `0x0c` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/112` | – | fan noise upper limit, SPL (fan 2) | SAM FAN `0x0c` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/201` | O_FAN1_PROFILE | fan profile, 1-4 (fan 1) | SAM FAN `0x0e`; kernel `surface_platform_profile` sends it from the platform profile | logged only | – |
+| `B620798F/202` | – | fan profile, 1-4 (fan 2) | SAM FAN `0x0e`; kernel `surface_platform_profile` sends it from the platform profile | logged only | – |
+| `B620798F/301` | O_FAN_CS_REQUEST | fan state, 1 normal / 2 standby | SAM FAN `0x0f`; kernel suspend hooks send it | logged only | – |
 | `CF2F6076/61` | – | SoC value (not analysed) | – | logged only | – |

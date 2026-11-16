@@ -13,6 +13,7 @@ from .. import supervisor
 from ..adapters import gpu
 from ..adapters import inputs as inp
 from ..adapters.actions import ThermalActions
+from ..adapters.cpufreq import THROTTLE, ThrottleStage
 from ..adapters.outputs import OutputStage
 from ..engine.graph import build_graph
 from ..loader import container, parser
@@ -94,6 +95,7 @@ def main(argv=None) -> int:
         lines.append(f"  {ref}: {state}")
     stage = OutputStage(root, graph.output_ranges, dry_run=True, pl3=prof.pl3 if prof else None,
                         pl4=prof.pl4 if prof else None)
+    throttle = ThrottleStage(root, [r for r in graph.outputs if r.guid == THROTTLE], dry_run=True)
     dgpu_ref = inp.ChannelRef("0B7B5350-BB8C-4459-8D4A-A75C57073801", 201)
     stand_in = gpu.find_nvidia_gpu(root) is not None          # the stand-in needs an NVIDIA dGPU
     lines.append("outputs:")
@@ -107,6 +109,11 @@ def main(argv=None) -> int:
             kind = "writable as root (MSR 0x615)"
         elif ref in ThermalActions.channels:
             kind = "thermal action (hibernate / power off)"
+        elif ref.guid == THROTTLE:
+            what = throttle.describe(ref)
+            kind = f"writable ({what})" if throttle.has_target(ref) else "no Linux path (logged only)"
+            if not throttle.has_target(ref):
+                missing.append(ref)
         elif ref == dgpu_ref and stand_in:
             kind = "clock-cap stand-in (DO-1)" + ("" if prof and prof.dgpu_clock_cap else ", off in this profile")
             if not (prof and prof.dgpu_clock_cap):
@@ -115,7 +122,7 @@ def main(argv=None) -> int:
             kind = "no Linux path (logged only)"
             missing.append(ref)
         lines.append(f"  {ref}: {kind}")
-    for note in stage.notes:
+    for note in stage.notes + throttle.notes:
         lines.append(f"  note: {note}")
     lines.append("ready for control: " + ("yes" if not missing else
                  f"no, {len(missing)} of {len(graph.outputs)} outputs have no Linux path"))

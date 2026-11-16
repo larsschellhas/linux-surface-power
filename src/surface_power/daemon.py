@@ -21,6 +21,7 @@ import time
 from . import monitor, supervisor
 from .adapters import inputs as inp
 from .adapters.actions import ThermalActions
+from .adapters.cpufreq import THROTTLE, ThrottleStage
 from .adapters import gpu
 from .adapters.gpu import ClockCapStandIn
 from .adapters.outputs import OutputStage
@@ -146,6 +147,10 @@ class Daemon:
         kw = dict(narrow=p.narrow if p else None, pl3=p.pl3 if p else None, pl4=p.pl4 if p else None)
         self.outputs = OutputStage(root, self.graph.output_ranges, dry_run=(self.mode != "control"), **kw)
         self.preview = OutputStage(root, self.graph.output_ranges, dry_run=True, **kw)
+        # Throttle requests (spec outputs 8): frequency caps for CPU policies and the GPU, where this machine has them.
+        throttle_refs = [r for r in self.graph.outputs if r.guid == THROTTLE]
+        self.throttle = ThrottleStage(root, throttle_refs, dry_run=(self.mode != "control"))
+        self.throttle_preview = ThrottleStage(root, throttle_refs, dry_run=True)
 
         # dGPU stand-in (DO-1, per profile): with it, the dGPU limit counts as a written output.
         self.dgpu = None
@@ -154,6 +159,7 @@ class Daemon:
         # Thermal-policy actions (hibernate / power off, spec outputs 7): handled wherever the blob has them.
         self.actions = ThermalActions()
         written |= self.actions.channels & set(self.graph.outputs)
+        written |= {r for r in throttle_refs if self.throttle.has_target(r)}
         # PL4 and PL3 keep their value while an EC input on their path is invalid: their fallback would be far below the
         # firmware value (Pro 10: PL4 20 W instead of 45 W) [D].
         lines_ = self.loaded.parsed.algorithms
@@ -194,12 +200,15 @@ class Daemon:
             self.mode_reason = "; ".join(reasons)
             self.mode = self.state = "dry-run"
             self.outputs.dry_run = True
+            self.throttle.dry_run = True
             if self.dgpu:
                 self.dgpu.dry_run = True
         self.snapshot = None
         if self.mode == "control":
-            keys = [k for k in self.outputs.snapshot_keys() if k.startswith("msr:") or os.path.exists(k)]
+            keys = [k for k in self.outputs.snapshot_keys() + self.throttle.snapshot_keys()
+                    if k.startswith("msr:") or os.path.exists(k)]
             self.snapshot, inherited = supervisor.Snapshot.take(args.run_dir, keys)
+            self.throttle.set_baseline(self.snapshot.values)
             if inherited:
                 self.log("warning", "kept the firmware snapshot of a predecessor that did not stop cleanly")
 
@@ -228,7 +237,7 @@ class Daemon:
                 and any(r.guid == inp.POWER for r in self.graph.inputs)):
             self.log("warning", f"{self.platform.transport.path} missing and no kernel DPTF attributes: load the module "
                                 "surface_aggregator_cdev; until then the EC power data are invalid")
-        for note in self.outputs.notes:
+        for note in self.outputs.notes + self.throttle.notes:
             self.log("info", note)
 
     # --- helpers ---
@@ -263,6 +272,7 @@ class Daemon:
         if state in ("emergency", "yielded", "paused") and self.state == "control" and self.snapshot:
             errors = self.snapshot.restore()
             self.outputs.forget()
+            self.throttle.forget()
             for e in errors:
                 self.log("error", f"restore failed: {e}")
         self.state = state
@@ -304,11 +314,18 @@ class Daemon:
                 self.log("warning", f"limit changed by another process: {names}")
                 if self.foreign.record(now_ms):
                     self._enter("yielded", "three foreign changes within 60 s")
+        if self.state == "control":
+            for f in self.throttle.foreign_changes():
+                self.log("warning", f"throttle target changed by another process: {f.target} ({f.expected} -> {f.found}); "
+                                    "thermald, power-profiles-daemon or a user tool also writes it")
+                if self.foreign.record(now_ms):
+                    self._enter("yielded", "three foreign changes within 60 s")
         hold = frozenset(out for out, refs in self.ec_guard.items() if any(self.values.get(r) is None for r in refs))
         if self.state == "control":
             self.results = self.outputs.apply(rounded, hold)
         else:
             self.results = self.preview.apply(rounded, hold)
+        self.results.update((self.throttle if self.state == "control" else self.throttle_preview).apply(rounded, hold))
         for prio, text in self.actions.step(now_ms, rounded, armed=(self.mode == "control")):
             self.log(prio, text)
         if self.dgpu:
@@ -338,6 +355,13 @@ class Daemon:
                 return "thermal action" if self.mode == "control" else "thermal action (not armed)"
             if ref == DGPU and self.dgpu:
                 return "clock-cap stand-in" if self.state == "control" else "clock-cap stand-in (dry-run)"
+            if ref.guid == THROTTLE:
+                what = self.throttle.describe(ref)
+                if what == "no Linux path":
+                    return what
+                if self.state == "control":
+                    return what
+                return "firmware" if self.state in ("emergency", "yielded", "paused") else f"{what} (dry-run)"
             res = self.results.get(ref)
             if res is not None and res.kind == "held":
                 return "held (EC inputs invalid)"
@@ -368,6 +392,8 @@ class Daemon:
             status["dgpu"] = self.dgpu.status()
         if self.actions.channels & set(self.graph.outputs):
             status["thermal_actions"] = self.actions.status()
+        if self.throttle.targets:
+            status["throttle"] = (self.throttle if self.state == "control" else self.throttle_preview).status()
         if self.unwritten:
             status["outputs_without_linux_path"] = [str(r) for r in self.unwritten]
         monitor.write_status(self.args.run_dir, status)
@@ -400,6 +426,7 @@ class Daemon:
         self.state = self.before_pause or self.mode
         if self.state == "control":
             self.outputs.forget()
+            self.throttle.forget()
 
     def stop(self) -> None:
         if self.dgpu:

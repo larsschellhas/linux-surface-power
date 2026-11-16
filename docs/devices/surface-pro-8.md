@@ -44,13 +44,13 @@ flowchart LR
     subgraph OUT0["written"]
         O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
+        O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_PARK"]
     end
     B --> OUT0
     subgraph OUT1["logged only"]
         O1_0B7B5350["<b>power limits</b><br/>O_BATT_MODE; 71 not analysed"]
-        O1_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_PARK"]
         O1_A79674B4["<b>sensor offsets</b><br/>O_SEN9_OFFSET"]
-        O1_B620798F["<b>fan and charging</b><br/>101 fan or charging setting for the EC"]
+        O1_B620798F["<b>fan and charging</b><br/>101 minimum fan speed"]
         O1_CF2F6076["<b>SoC (not analysed)</b><br/>61 SoC value"]
     end
     B --> OUT1
@@ -64,7 +64,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 14 of 15 (missing: `87008365/112`) |
-| Outputs written by Linux | 8 of 14 (not written: `0B7B5350/70`, `0B7B5350/71`, `9BBB8910/62`, `A79674B4/509`, `B620798F/101`, `CF2F6076/61`) |
+| Outputs written by Linux | 9 of 14 (not written: `0B7B5350/70`, `0B7B5350/71`, `A79674B4/509`, `B620798F/101`, `CF2F6076/61`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -101,7 +101,7 @@ A device can be controlled only when every output of its blob is written: a blob
 | `0B7B5350/71` | – | not analysed | – | logged only | – |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
-| `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor performance cap) | candidate: cpufreq cap for all CPUs | logged only | – |
+| `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |
 | `A79674B4/509` | O_SEN9_OFFSET | offset for sensor 9 | – | logged only | – |
-| `B620798F/101` | – | fan or charging setting for the EC | candidate: EC through SAM (commands not known) | logged only | – |
+| `B620798F/101` | – | minimum fan speed, rpm (fan 1) | SAM FAN `0x0b` through the SSAM debug device (no adapter yet) | logged only | – |
 | `CF2F6076/61` | – | SoC value (not analysed) | – | logged only | – |
