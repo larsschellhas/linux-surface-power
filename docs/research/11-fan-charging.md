@@ -109,8 +109,8 @@ Replayed with `surface-power-replay` on the corpus blobs. Inputs not named were 
 - **`surface_platform_profile`:** writes the TMP profile (`0x03`). On nodes with the property `has_fan` it also sends FAN `0x0e` with
   1 (low-power), 2 (balanced), 3 (balanced-performance) or 4 (performance) at every profile change. In its suspend hooks it sends FAN
   `0x0f` with 2 (standby) before sleep and 1 (normal) after. These are exactly channels 201 and 301, with the Windows numbers.
-- **`has_fan` is set** in the registry for the Laptop 5, 6, 7, Studio 2 and Pro 9 node groups. The Pro 10 probably uses the Pro 9
-  group [H, not checked]. Devices whose group has no `has_fan` (e.g. SB3) get neither command.
+- **`has_fan` is set** in the registry for the Laptop 5, 6, 7, Studio 2 and Pro 9 node groups. The Pro 10 (`MSHW0510`) uses the Pro 9
+  group, so it has `has_fan` and the SAM temperature sensors [C: `surface_aggregator_registry.c`]. The kernel's profile and state requests use the fixed instance 1 [C]. Devices whose group has no `has_fan` (e.g. SB3) get neither command.
 - **`surface_battery`:** BAT `0x01`–`0x04` and `0x53` only (status, info, dynamic data, DPTF data, trip point). No charge threshold.
 - **ACPI:** the Pro 10 has a fan device `FAN0` (`PNP0C0B`, "SAM FAN") that only depends on the SSH device and has no control methods.
   There is no ACPI path.
@@ -209,9 +209,9 @@ finally:
   `scripts/fan-test.py --probe` and `surface-power-report --with-ec` send exactly these two read requests.
 - Whether the daemon's neutral frame (0) really returns the EC to its own control for each channel [H]. The test tool checks the fan
   speed for 60 s after the restore, but only a tester with the device can say.
-- Fans 2 and 3 (Laptop Studio 2): the kernel's profile command is not known to address them, so 202 and 203 have no Linux path [H].
+- Fans 2 and 3 (Laptop Studio 2): the kernel's profile command has the fixed instance 1 [C], so 202 and 203 have no kernel path; the daemon does not send them either.
 - Channels 302–311 have no known neutral value; the opt-in is therefore irreversible without a reboot [H].
 - `has_fan` is not visible in sysfs, so "the kernel sends 201 and 301" is assumed whenever `surface_platform_profile` is bound [H].
 - The instance ID of FAN `0x16` in the Pro 10 and Laptop 6 clients is never set (a Windows bug [C]); newer clients send instance 1.
 - Charging: 309–311 only reduce the charge rate with battery temperature. A charge-level limit is not in this interface. Output
-  `0B7B5350/70` ("battery mode") is not analysed.
+  `0B7B5350/70` ("battery mode") is not a charge setting either: it sends one EC request on battery, see `12-remaining-outputs.md`.

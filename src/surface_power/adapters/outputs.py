@@ -30,7 +30,10 @@ SOC = "CF2F6076-EC8B-4D3D-AF61-CC76B118588A"
 WINDOW_CHANNEL = 61
 # The Windows client rounds the value UP to the next window the register can hold: 4 steps per octave from 2^10 to 2^16 units of
 # 1/1024 s (1 s ... 112 s). Thresholds of its table [C]; the unit 1/1024 s is the register's default time unit [H].
-WINDOW_STEPS_US = [round(2 ** y * (1 + f / 4) * 1_000_000 / 1024) for y in range(10, 17) for f in range(4)]
+# The Windows client compares the millisecond value with the unit counts themselves (1024, 1280, ... 114688), i.e. it takes 1 ms
+# as one unit [C]; the written window is then the unit count x 1/1024 s. WINDOW_UNITS are those thresholds.
+WINDOW_UNITS = [round(2 ** y * (1 + f / 4)) for y in range(10, 17) for f in range(4)]
+WINDOW_STEPS_US = [round(u * 1_000_000 / 1024) for u in WINDOW_UNITS]
 WINDOW_HARD_US = (WINDOW_STEPS_US[0], WINDOW_STEPS_US[-1])      # 1.0 s ... 112 s
 # Hardware rounding tolerance for foreign-change detection (spec supervisor 5).
 TOLERANCE_UW = 200_000
@@ -84,8 +87,9 @@ class WindowTarget(Target):
         return self.path
 
     def shape(self, uw: int) -> int:
-        for step in WINDOW_STEPS_US:
-            if uw <= step:
+        ms = uw / 1000
+        for units, step in zip(WINDOW_UNITS, WINDOW_STEPS_US):
+            if ms <= units:
                 return step
         return WINDOW_STEPS_US[-1]
 

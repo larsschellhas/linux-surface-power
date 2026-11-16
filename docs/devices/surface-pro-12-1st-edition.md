@@ -63,11 +63,10 @@ flowchart LR
     end
     B --> OUT2
     subgraph OUT3["no Linux path"]
-        O3_0B7B5350["<b>power limits</b><br/>O_SYS_MAX"]
+        O3_0B7B5350["<b>power limits</b><br/>O_SYS_MAX; O_BATT_MODE"]
     end
     B --> OUT3
     subgraph OUT4["logged only"]
-        O4_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
         O4_87008365["<b>client-computed channels</b><br/>O_FAST_MAXIM_POLLING; O_CAMERA_AINR"]
         O4_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_NPU"]
     end
@@ -117,10 +116,10 @@ A device can be controlled only when every output of its blob is written: a blob
 | Channel | Microsoft name | Meaning | Linux | Status | Range (default / max / min) |
 |---|---|---|---|---|---|
 | `0B7B5350/55` | O_SYS_MAX | psys PL2, platform short-term | none on Qualcomm Snapdragon (arm64) (Intel RAPL only) | no Linux path | 90000 / 250000 / 15000 |
-| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = no mains supply) | – | logged only | – |
+| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = adapter rating 0, i.e. on battery) | none on Qualcomm Snapdragon (arm64) (only the Intel SoC client is analysed) | no Linux path | – |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
-| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only, the power tracker only logs it [C] | not needed on Linux | – |
+| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only and its policy structure has no field for it; only the power tracker records it (telemetry) [C] | not needed on Linux | – |
 | `87008365/220` | O_FAST_MAXIM_POLLING | fast power-meter polling | – | logged only | – |
 | `87008365/300` | O_CAMERA_AINR | camera AI noise reduction allowed | – | logged only | – |
 | `9BBB8910/5` | O_WTMF_GFX | throttle request for the GPU, % (100 = none) | GPU maximum frequency (i915, xe or devfreq; where the machine has one) | written | 100 / 100 / 0 |

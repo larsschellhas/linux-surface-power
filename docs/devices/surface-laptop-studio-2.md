@@ -55,7 +55,7 @@ flowchart LR
     IN6 --> B
     B(["SMF blob<br/>243 lines, 11 block types"])
     subgraph OUT0["written"]
-        O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK"]
+        O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK<br/>O_BATT_MODE"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
         O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_PARK"]
         O0_B620798F["<b>fan and charging</b><br/>101 minimum fan speed; 102 minimum fan speed; 111 fan noise upper limit<br/>112 fan noise upper limit; O_FAN1_PROFILE; O_FAN_CS_REQUEST"]
@@ -63,7 +63,6 @@ flowchart LR
     end
     B --> OUT0
     subgraph OUT1["not needed on Linux"]
-        O1_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
         O1_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
     end
     B --> OUT1
@@ -90,7 +89,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 25 of 27 (missing: `1FB53D4C/10`, `1FB53D4C/21`) |
-| Outputs written by Linux | 16 of 25; not needed on Linux: `0B7B5350/70`, `110DF2A4/3` (not written: `0B7B5350/64`, `0B7B5350/201`, `0B7B5350/205`, `0B7B5350/208`, `349D0E39/1`, `349D0E39/4`, `B620798F/202`) |
+| Outputs written by Linux | 17 of 25; not needed on Linux: `110DF2A4/3` (not written: `0B7B5350/64`, `0B7B5350/201`, `0B7B5350/205`, `0B7B5350/208`, `349D0E39/1`, `349D0E39/4`, `B620798F/202`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -122,7 +121,7 @@ A device can be controlled only when every output of its blob is written: a blob
 | `8060B17F/3` | I_CAMERA | camera in use | video4linux runtime PM / open nodes | provided | PL1 |
 | `8060B17F/9` | I_SURF_DOCK | Surface Docks attached | USB IDs | provided | PL1 |
 | `87008365/5` | – | Xbox controller connected | input devices | provided | PL1 |
-| `87008365/112` | I_CPU_TEMP_AVG | averaged CPU temperature (client-computed) | `coretemp` package temperature, not averaged [H] (DV-7) | estimate | – |
+| `87008365/112` | I_CPU_TEMP_AVG | averaged CPU temperature (client-computed) | `coretemp` package temperature, same single reading as Windows [C] (DV-7) | estimate | – |
 | `DEF1AB69/100` | I_MS_NOTIFY | Modern Standby phase 1–5 | constant 4 | constant | PL1, PL2, dGPU |
 
 ## Outputs
@@ -136,13 +135,13 @@ A device can be controlled only when every output of its blob is written: a blob
 | `0B7B5350/55` | O_SYS_MAX | psys PL2, platform short-term | powercap `psys/short_term` | written | 90000 / 250000 / 15000 |
 | `0B7B5350/59` | O_SYS_PEAK | PL3, platform peak with duty cycle | MSR `0x615` (root; held without EC data) | written | 90000 / 250000 / 15000 |
 | `0B7B5350/64` | – | not analysed | – | logged only | – |
-| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = no mains supply) | not needed on Linux: the Intel SoC client writes nothing for it (no register, SAM or ACPI request); it only hands a request flag to the Windows-only SMF core [C code, H flag meaning] | not needed on Linux | – |
+| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = adapter rating 0, i.e. on battery) | SAM TMP `0x1b` once when it turns 1 (EC: de-assert PROCHOT [H]), debug device | written | – |
 | `0B7B5350/201` | – | dGPU power limit | clock-cap stand-in (DO-1, profile) | optional (profile) | 35000 / 80000 / 15000 |
 | `0B7B5350/205` | – | GPU power controller limit (not analysed) | – | logged only | 95000 / 120000 / 10000 |
 | `0B7B5350/208` | – | GPU power controller limit (not analysed) | – | logged only | 9000 / 9000 / 1000 |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
-| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only, the power tracker only logs it [C] | not needed on Linux | – |
+| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only and its policy structure has no field for it; only the power tracker records it (telemetry) [C] | not needed on Linux | – |
 | `349D0E39/1` | – | SoC value (not analysed) | – | logged only | – |
 | `349D0E39/4` | – | SoC value (not analysed) | – | logged only | – |
 | `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |

@@ -48,7 +48,7 @@ flowchart LR
     IN5 --> B
     B(["SMF blob<br/>107 lines, 13 block types"])
     subgraph OUT0["written"]
-        O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK"]
+        O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK<br/>O_BATT_MODE"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
         O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_PARK"]
         O0_A79674B4["<b>sensor offsets</b><br/>O_SEN9_OFFSET"]
@@ -57,7 +57,6 @@ flowchart LR
     end
     B --> OUT0
     subgraph OUT1["not needed on Linux"]
-        O1_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
         O1_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
     end
     B --> OUT1
@@ -75,7 +74,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 20 of 21 (no source, but it reaches no output: `87008365/200`) |
-| Outputs written by Linux | 15 of 20; not needed on Linux: `0B7B5350/70`, `110DF2A4/3` (not written: `9BBB8910/103`, `9BBB8910/104`, `9BBB8910/105`) |
+| Outputs written by Linux | 16 of 20; not needed on Linux: `110DF2A4/3` (not written: `9BBB8910/103`, `9BBB8910/104`, `9BBB8910/105`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -100,7 +99,7 @@ A device can be controlled only when every output of its blob is written: a blob
 | `8060B17F/2` | I_EXT_DISPLAY | external display connected | DRM connectors | provided | PL1 |
 | `8060B17F/3` | I_CAMERA | camera in use | video4linux runtime PM / open nodes | provided | PL1 |
 | `8060B17F/9` | I_SURF_DOCK | Surface Docks attached | USB IDs | provided | PL1 |
-| `87008365/112` | I_CPU_TEMP_AVG | averaged CPU temperature (client-computed) | `coretemp` package temperature, not averaged [H] (DV-7) | estimate | – |
+| `87008365/112` | I_CPU_TEMP_AVG | averaged CPU temperature (client-computed) | `coretemp` package temperature, same single reading as Windows [C] (DV-7) | estimate | – |
 | `87008365/200` | I_AMBIENT_AI | estimated ambient temperature (client-computed) | – | not provided | – |
 | `DEF1AB69/100` | I_MS_NOTIFY | Modern Standby phase 1–5 | constant 4 | constant | PL1, PL2 |
 
@@ -114,10 +113,10 @@ A device can be controlled only when every output of its blob is written: a blob
 | `0B7B5350/54` | O_SYS_AVG | psys PL1, platform long-term | powercap `psys/long_term` | written | 45000 / 250000 / 15000 |
 | `0B7B5350/55` | O_SYS_MAX | psys PL2, platform short-term | powercap `psys/short_term` | written | 90000 / 250000 / 15000 |
 | `0B7B5350/59` | O_SYS_PEAK | PL3, platform peak with duty cycle | MSR `0x615` (root; held without EC data) | written | 90000 / 250000 / 15000 |
-| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = no mains supply) | not needed on Linux: the Intel SoC client writes nothing for it (no register, SAM or ACPI request); it only hands a request flag to the Windows-only SMF core [C code, H flag meaning] | not needed on Linux | – |
+| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = adapter rating 0, i.e. on battery) | SAM TMP `0x1b` once when it turns 1 (EC: de-assert PROCHOT [H]), debug device | written | – |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
-| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only, the power tracker only logs it [C] | not needed on Linux | – |
+| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only and its policy structure has no field for it; only the power tracker records it (telemetry) [C] | not needed on Linux | – |
 | `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |
 | `9BBB8910/103` | O_MDM_SKIN | throttle request, % (100 = none) | – | logged only | 100 / 100 / 0 |
 | `9BBB8910/104` | O_MDM_MJCT | throttle request, % (100 = none) | – | logged only | 100 / 100 / 0 |

@@ -8,15 +8,12 @@ import os
 
 from ..loader.model import ChannelRef
 
-BATT_MODE = ChannelRef("0B7B5350-BB8C-4459-8D4A-A75C57073801", 70)
 MINPWR2 = ChannelRef("110DF2A4-5995-473C-92FD-3CAC40EE2E6C", 3)
 
 # ref -> (short reason, intel_only). Intel-only: the evidence comes from the Intel SoC client; AMD and Qualcomm clients are not analysed.
 NOT_NEEDED: dict[ChannelRef, tuple[str, bool]] = {
-    BATT_MODE: ("the Intel SoC client writes nothing for it (no register, SAM or ACPI request); it only hands a request flag to the "
-                "Windows-only SMF core [C code, H flag meaning]", True),
-    MINPWR2: ("no Windows client takes it: the thermal-policy client registers channels 1 and 2 only, the power tracker only logs "
-              "it [C]", False),
+    MINPWR2: ("no Windows client takes it: the thermal-policy client registers channels 1 and 2 only and its policy structure has "
+              "no field for it; only the power tracker records it (telemetry) [C]", False),
 }
 
 

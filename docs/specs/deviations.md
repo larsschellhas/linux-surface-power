@@ -13,7 +13,7 @@ SMF is listed here. Intended improvements are opt-in and off by default; none ex
 | DV-4 | Slider states 8 – 10 (game mode, mixed reality, service flag) do not exist on Linux. Low-power on AC maps to Recommended. | Linux never selects these states. | fixed mapping (OD-4) |
 | DV-5 | The dGPU limit, WTMF and fan outputs have no Linux target. On the SB3 (GTX 1660 Ti, driver 595), `nvidia-smi -pl` is refused with or without persistence mode, and Dynamic Boost (`nvidia-powerd`) needs Ampere or newer; the driver reports it as not supported. | Computed and logged only. A clock-cap stand-in is a backup concept (I-4). | log-only |
 | DV-6 | `0x53` data comes from requests instead of EC events. | Values are fresher than on Windows (where events sometimes did not arrive). | always |
-| DV-7 | `87008365/112` (averaged CPU temperature) is the instantaneous `coretemp` package temperature. Windows reads the same register (package thermal status, MSR 0x1B1) and averages it with an unknown window [H]. | Only the fan noise floor `B620798F/121` above ~71 °C uses it; jitter is smoothed by the blob's own hysteresis. | on |
+| DV-7 | `87008365/112` (called "averaged" CPU temperature) is the instantaneous `coretemp` package temperature. The Windows SoC client takes one reading of the same register (package thermal status, MSR 0x1B1, bits 22:16) per request and converts it with TjMax to 0.1 K; it holds no average and no window [C, client driver of the Pro 10]. Linux gives the same reading with the same 1 K steps. A filter in the SMF core was not found [M]. | Expected to be none. Only the fan noise floor `B620798F/121` above ~71 °C uses it. | on |
 
 ## 2. Unknown details, chosen by us
 

@@ -15,7 +15,7 @@ from test_daemon import blob_text
 
 P0 = "sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq"
 P4 = "sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq"
-PARK, CPU1, CLUSTER1, GFX, NPU = (ref(THROTTLE, c) for c in (62, 2, 21, 5, 200))
+PARK, CPU1, CLUSTER1, GFX, NPU = (ref(THROTTLE, c) for c in (62, 7, 21, 5, 200))
 
 
 class ThrottleStageTest(unittest.TestCase):
@@ -87,7 +87,8 @@ class ThrottleStageTest(unittest.TestCase):
 
     def test_cpu_and_cluster_roles(self):
         st = self.stage((CPU1, ref(THROTTLE, 21), ref(THROTTLE, 22)))
-        self.assertEqual([t.name for t in st.map[CPU1]], ["cpufreq policy0"])
+        self.assertEqual([t.name for t in st.map[CPU1]], ["cpufreq policy0"])     # channel 7 = CLUS.CPU1
+        self.assertEqual([t.name for t in self.stage((ref(THROTTLE, 2),)).map[ref(THROTTLE, 2)]], ["cpufreq policy4"])   # 2 = CPU5
         self.assertEqual([t.name for t in st.map[ref(THROTTLE, 21)]], ["cpufreq policy4"])
         self.assertEqual(st.kind(ref(THROTTLE, 22)), "log-only")    # only two policies here
 

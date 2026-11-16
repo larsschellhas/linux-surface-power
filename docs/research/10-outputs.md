@@ -24,11 +24,11 @@ from about 56 °C up to 100 °C. The daemon's own emergency rule (skin ≥ 60 °
 On Linux `O_HOT`/`O_CRT` are thermal actions since 16.11.2026: hibernate (else suspend) and power-off, armed in control mode
 (`../specs/outputs.md` 7). The throttle requests are written as cpufreq caps per CPU policy and a GPU
 frequency cap since 16.11.2026 (`../specs/outputs.md` 8); the ACPI `OPTS` lists in the public dumps show that x86 devices have only the
-Processor Aggregator Device (`PAGD`, matched with `/62` [H]), so only the Snapdragon (arm64) devices have per-CPU, cluster and GPU requests; untested on a device.
+Processor Aggregator Device (`PAGD`, matched with `/62` by a fixed name table in the driver [C]), so only the Snapdragon (arm64) devices have per-CPU, cluster and GPU requests; untested on a device.
 
 ## 3. Others
 - **Power limits (`0B7B5350`):** IHV CPU client (Intel, Qualcomm), AMD SMF driver, GPU power controller (Laptop Studio, 201–208),
-  battery client (its own channels 300/400, not 70) [C]; 70 "battery mode" only sets a request flag in the SoC client, see `12-remaining-outputs.md`. Linux writes PL1, PL2 and psys PL1/PL2 on Intel through powercap, PL4
+  battery client (its own channels 300/400, not 70) [C]; 70 "battery mode" makes the SoC client send one EC request on battery (SAM TMP `0x1b`, probably "de-assert PROCHOT" [H]), see `12-remaining-outputs.md`. Linux writes PL1, PL2 and psys PL1/PL2 on Intel through powercap, PL4
   where powercap reports it and PL3 through MSR 0x615 (both held while their EC inputs are invalid), and the dGPU limit through the
   clock-cap stand-in.
 - **Fans and charging (`B620798F`):** the SMF client sends each channel as one SAM command to the EC (FAN and TMP categories); the

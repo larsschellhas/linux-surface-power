@@ -33,7 +33,7 @@ flowchart LR
     IN1 --> B
     B(["SMF blob<br/>78 lines, 8 block types"])
     subgraph OUT0["written"]
-        O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK"]
+        O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK<br/>O_BATT_MODE"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
         O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_PARK"]
         O0_A79674B4["<b>sensor offsets</b><br/>O_SEN9_OFFSET"]
@@ -41,14 +41,10 @@ flowchart LR
         O0_CF2F6076["<b>SoC client (time window)</b><br/>O_CPU_AVG_TIME"]
     end
     B --> OUT0
-    subgraph OUT1["not needed on Linux"]
-        O1_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
+    subgraph OUT1["logged only"]
+        O1_0B7B5350["<b>power limits</b><br/>71 not analysed"]
     end
     B --> OUT1
-    subgraph OUT2["logged only"]
-        O2_0B7B5350["<b>power limits</b><br/>71 not analysed"]
-    end
-    B --> OUT2
 ```
 
 ## Readiness
@@ -59,7 +55,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 13 of 13 |
-| Outputs written by Linux | 12 of 14; not needed on Linux: `0B7B5350/70` (not written: `0B7B5350/71`) |
+| Outputs written by Linux | 13 of 14 (not written: `0B7B5350/71`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -90,7 +86,7 @@ A device can be controlled only when every output of its blob is written: a blob
 | `0B7B5350/54` | O_SYS_AVG | psys PL1, platform long-term | powercap `psys/long_term` | written | 45000 / 101000 / 10000 |
 | `0B7B5350/55` | O_SYS_MAX | psys PL2, platform short-term | powercap `psys/short_term` | written | 45000 / 110000 / 10000 |
 | `0B7B5350/59` | O_SYS_PEAK | PL3, platform peak with duty cycle | MSR `0x615` (root; held without EC data) | written | 65000 / 120000 / 20000 |
-| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = no mains supply) | not needed on Linux: the Intel SoC client writes nothing for it (no register, SAM or ACPI request); it only hands a request flag to the Windows-only SMF core [C code, H flag meaning] | not needed on Linux | – |
+| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = adapter rating 0, i.e. on battery) | SAM TMP `0x1b` once when it turns 1 (EC: de-assert PROCHOT [H]), debug device | written | – |
 | `0B7B5350/71` | – | not analysed | – | logged only | – |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |

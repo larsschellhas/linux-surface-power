@@ -176,8 +176,8 @@ missing source keeps the device in dry-run (`supervisor.md` 2.5). None of these 
 - Linux: 1 while a joystick input device from vendor `045e` or with "Xbox" in its name exists, else 0 [H: the Windows criterion].
 
 ### 8.11 Averaged CPU temperature (`87008365/112`)
-- Windows: the Intel SoC client reads the package thermal status (MSR 0x1B1, bits 22:16) [C] and averages it [H: window unknown]. The blob uses it only for the fan noise floor (`B620798F/121`).
-- Linux: the `coretemp` "Package id 0" temperature, which reads the same register, in 0.1 K, not averaged (deviation DV-7). Provided where `coretemp` exists.
+- Windows: the Intel SoC client reads the package thermal status (MSR 0x1B1, bits 22:16) once per request and converts it as (TjMax - readout) x 10 + 2731 in 0.1 K. It has no averaging or window; the same register and field also feed channel 102 of the interface `2E8B14C2` [C, descriptor table and read path of the Pro 10 client]. The name "averaged" comes from the blob's name table. A filter in the SMF core was not found [M]. The blob uses the value only for the fan noise floor (`B620798F/121`).
+- Linux: the `coretemp` "Package id 0" temperature, which reads the same register, in 0.1 K, with the same 1 K steps (deviation DV-7, now expected to be none). Provided where `coretemp` exists.
 - `87008365/200` (estimated ambient temperature) is still not provided; in the Pro 10 blob it reaches no output.
 
 ### 8.10 dGPU power and temperature (`1FB53D4C/3`, `2E8B14C2/101`)

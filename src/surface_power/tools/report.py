@@ -15,6 +15,7 @@ from ..adapters import inputs as inp
 from ..adapters.actions import ThermalActions
 from ..adapters.cpufreq import THROTTLE, ThrottleStage
 from ..adapters import notneeded
+from ..adapters.prochot import BATT_MODE, ProchotStage
 from ..adapters.fan import TC_FAN, FanStage, handles as fan_handles
 from ..adapters.outputs import OutputStage
 from ..engine.graph import build_graph
@@ -114,6 +115,7 @@ def main(argv=None, fan_transport=None) -> int:
     throttle = ThrottleStage(root, [r for r in graph.outputs if r.guid == THROTTLE], dry_run=True)
     fan = FanStage(root, [r for r in graph.outputs if fan_handles(r)], graph.output_ranges, transport=fan_transport,
                    dry_run=True, thresholds=bool(prof and prof.fan_thresholds))
+    prochot = ProchotStage(root, [r for r in graph.outputs if r == BATT_MODE], transport=fan_transport, dry_run=True)
     dgpu_ref = inp.ChannelRef("0B7B5350-BB8C-4459-8D4A-A75C57073801", 201)
     stand_in = gpu.find_nvidia_gpu(root) is not None          # the stand-in needs an NVIDIA dGPU
     lines.append("outputs:")
@@ -132,6 +134,10 @@ def main(argv=None, fan_transport=None) -> int:
             kind = f"writable ({what})" if throttle.has_target(ref) else "no Linux path (logged only)"
             if not throttle.has_target(ref):
                 missing.append(ref)
+        elif ref in prochot.refs:
+            kind = prochot.describe(ref)
+            if not prochot.has_path(ref, report=True):
+                missing.append(ref)
         elif fan_handles(ref):
             kind = fan.describe(ref)
             if not fan.has_path(ref, report=True):
@@ -146,7 +152,7 @@ def main(argv=None, fan_transport=None) -> int:
             kind = "no Linux path (logged only)"
             missing.append(ref)
         lines.append(f"  {ref}: {kind}")
-    for note in stage.notes + throttle.notes + fan.notes:
+    for note in stage.notes + throttle.notes + fan.notes + prochot.notes:
         lines.append(f"  note: {note}")
     lines.append("ready for control: " + ("yes" if not missing else
                  f"no, {len(missing)} of {len(graph.outputs)} outputs have no Linux path"))

@@ -37,7 +37,7 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 | | 54 | psys PL1 | `intel-rapl:1/constraint_0_power_limit_uw` (zone named `psys`) |
 | | 55 | psys PL2 | `intel-rapl:1/constraint_1_power_limit_uw` |
 | | 59 | PL3 | MSR 0x615, see 4 |
-| | 70 | battery mode | not needed on Linux (10) |
+| | 70 | battery mode (1 = adapter rating 0) | one SAM TMP `0x1b` request through the SSAM debug device when it turns 1 (9.9) |
 | | 201 | dGPU limit | log-only (FR-O5): `nvidia-smi -pl` is not supported on the SB3 GPU [M]. Opt-in stand-in: clock cap (6, DO-1) |
 | | 205 | system budget (Laptop Studio 2) | log-only |
 | `9BBB8910` | 1–5, 20–22, 62 | throttle requests for CPUs, clusters, GPU and the aggregator device | cpufreq or GPU frequency cap (8) |
@@ -137,11 +137,12 @@ while no Windows state in the SB3 blob allows more than 50 W.
   - **Pro 9 5G, Dev Kit 2023:** `CLUS.CPU0`–`CPU7`, `GPU0`, `PAGD`, `MSKN` (skin sensor).
   - **Pro 11 and Laptop 7 (Snapdragon):** `CLS0.CPU0`, `CLS1.CPU0`, `CLS2.CPU0`, `GPU0`, `AGR0` (also `ACPI000C`), `MSKN`, `CSW0`, `MJCT`, `MBJ0`.
   - The data are in `adapters/cpufreq.py` (`OPTS`).
-- **Channel → device** [H]. The channel numbers are not `OPTS` indices (an Intel blob has `/62` for a one-entry list). The role comes from the output names in the blobs; the match with the `OPTS` entry is by name, and the aggregator device is matched with `/62` by elimination (it is the only entry without another channel):
+- **Channel → device** [C for the table, H for the Linux side]. The channel numbers are not `OPTS` indices (an Intel blob has `/62` for a one-entry list). The thermal-policy driver holds a fixed table "name of an `OPTS` entry → channel" and compares each entry of the list with it [C, driver binaries of the Pro 10 and Pro 9 packages]. So `PAGD` and `AGR0` are `/62` by that table, not by elimination. The blob names `O_WTMF_CPU0`–`CPU3` for channels 1–4 are labels only: those channels belong to `CLUS.CPU4`–`CPU7` (6–9 to `CPU0`–`CPU3`). That Windows CPU n is Linux CPU n, and that clusters follow the numeric order of the cpufreq policies, is [H].
 
   | Channel | Name | Device | Linux target |
   |---|---|---|---|
-  | 1–4 | `O_WTMF_CPU0`–`CPU3` | `CLUS.CPU0`–`CPU3` | `scaling_max_freq` of the cpufreq policy that contains Linux CPU n |
+  | 1–4 | `O_WTMF_CPU0`–`CPU3` | `CLUS.CPU4`–`CPU7` | `scaling_max_freq` of the cpufreq policy that contains Linux CPU 4–7 |
+  | 6–9 | (not named in the blobs seen) | `CLUS.CPU0`–`CPU3` | the policy that contains Linux CPU 0–3 |
   | 20, 21, 22 | `O_WTMF_E_CORES_C1`, `P_CORES_C2`, `P_CORES_C3` | `CLS0`–`CLS2` | the 1st, 2nd, 3rd cpufreq policy in numeric order |
   | 5 | `O_WTMF_GFX` | `GPU0` | Intel i915 `gt_max_freq_mhz` (or the per-GT `rps_max_freq_mhz`), xe `freq0/max_freq`, else the devfreq device with `gpu` in its name (Adreno); NVIDIA and AMD: none |
   | 62 | `O_WTMF_PARK` | aggregator (`PAGD`, `AGR0`) | all cpufreq policies, see below |
@@ -149,7 +150,7 @@ while no Windows state in the SB3 blob allows more than 50 W.
 
   A channel whose target does not exist on this machine (no cpufreq, no GPU interface, fewer policies than the channel needs) is log-only. Only then it counts as without a Linux path (`supervisor.md` 2.6).
 - **Translation [D]:** cap = request % of `cpuinfo_max_freq` (GPU: of its highest frequency), clamped to [floor, baseline].
-  - **Percent of the maximum, not of the span above the minimum.** The Windows request is a duty-style value: 50 means about half of the throughput. On a CPU the throughput scales with the frequency, so the cap at *p* % of the maximum gives roughly *p* % of the throughput. The span formula `min + p·(max − min)` would give more than *p* %. The cap is a model of the Windows request, not a copy of it [H].
+  - **Percent of the maximum, not of the span above the minimum.** The documented meaning of the request is "percent of full performance of the device, 100 = no throttling, 0 = lowest level" [C, Microsoft driver documentation of the passive-cooling callback]; how the processor stack turns it into a frequency or performance cap (percent of nominal or of maximum, core parking) is not documented and not visible in the drivers [H]. For `/62` (the aggregator device) the effect of the Windows request may be idle injection or parking rather than a frequency cap; a frequency cap is our stand-in [H]. The 20 % floor is our own safety bound [D]. On a CPU the throughput scales with the frequency, so the cap at *p* % of the maximum gives roughly *p* % of the throughput. The span formula `min + p·(max − min)` would give more than *p* %. The cap is a model of the Windows request, not a copy of it [H].
   - **Floor:** 20 % of the maximum, and never below `cpuinfo_min_freq` or the user's `scaling_min_freq` (GPU: `RPn`, the minimum). No request, not even 0, takes a device lower [D].
   - **Baseline:** the value of the file before the first write, from the snapshot (`supervisor.md` 3). A request of 100 % writes the baseline back, so a limit that the user had set before stays in force. No cap goes above it.
   - **Rounding:** `scaling_max_freq` is written in kHz, the GPU file in its own unit (MHz, devfreq Hz). The driver rounds to its steps; the read-back value counts.
@@ -180,7 +181,7 @@ The commands, units and send rules come from the analysis of the Windows receive
 | 114–116, 124–126 | FAN `0x15`, `0x14`, u8, sones | `SAM FAN 0x15 (cdev)`, `SAM FAN 0x14 (cdev)` |
 | 306, 312 | FAN `0x1c` float32, `0x16` u8 | `SAM FAN 0x1c (cdev)`, `SAM FAN 0x16 (cdev)` |
 | 201 | FAN `0x0e`, profile 1–4 | `kernel (platform profile)` |
-| 202, 203 | FAN `0x0e` for fan 2 and 3 | `no Linux path` [H: the kernel sends the profile for fan 1 only; not checked] |
+| 202, 203 | FAN `0x0e` for fan 2 and 3 | `no Linux path` [C: the kernel request has the fixed instance 1; a send for fan 2 and 3 through the debug device is possible but not implemented, and the Laptop Studio 2 effect is unknown] |
 | 301 | FAN `0x0f`, state | `kernel (suspend)` |
 | 302, 304, 305, 307, 308–311 | FAN `0x19`, `0x1a`, `0x1b`, `0x1d`; TMP `0x25`–`0x28`, u16 | `disabled (profile opt-in)` |
 
@@ -208,8 +209,14 @@ Dry-run computes the frames and sends nothing. The status file shows `would send
 
 ### 9.8 Sensor offsets (`A79674B4/5xx`) [C for the command, H for the effect]
 Sent by the same stage as the fan outputs (9.1): TMP `0x24`, instance = sensor number (channel - 500), payload = sensor number (u8) + float32 K (value x 0.1), flags 0.
-Hard bound +-5 K (the blob has no range for it), neutral frame = offset 0 (recorded in the snapshot as `sam:A79674B4/509`), status target `SAM TMP 0x24 (cdev)`.
+Hard bound +-5 K [D] (the blob has no range for it; the corpus has -2 K to +2 K), neutral frame = offset 0 (recorded in the snapshot as `sam:A79674B4/509`), status target `SAM TMP 0x24 (cdev)`.
 In the Pro 10 blob it is constantly 0; other blobs use -2.0 to +1.5 K. Effect on the EC not measured.
+
+### 9.9 Battery mode (`0B7B5350/70`) [C for the request, H for its meaning] (`adapters/prochot.py`)
+Value 1 sends one SAM request: category TMP `0x03`, target ID 1, instance 0, flags 0, command `0x1b`, no payload; the Windows Intel client does the same and sends nothing for 0.
+Windows' ACPI-EC machines call the method `DPHT` instead, which the DSDT labels "de-assert PROCHOT"; TMP `0x1b` is probably its SAM form [H].
+Linux sends it once per episode of value 1 (first cycle, after a value 0, after a resume), rate limit and failure rule as 9.1, nothing to restore (no snapshot entry),
+dry-run by default, status target `SAM TMP 0x1b (cdev)`. No path (log-only, blocks readiness): no SSAM debug device (ACPI-EC machines), AMD or Qualcomm CPU.
 
 ## 10. Outputs that need no Linux path (`adapters/notneeded.py`)
 An output is listed only with [C] evidence that no Windows receiver does anything with it that Linux could do. The readiness rule counts it as covered
@@ -218,7 +225,6 @@ target is that text. Nothing is ever dropped silently.
 
 | Output | Reason | Scope |
 |---|---|---|
-| `0B7B5350/70` battery mode | the Intel SoC client writes nothing for it, it only returns a request flag to the Windows-only SMF core [C code, H flag meaning] | Intel CPUs; AMD and Qualcomm clients not analysed |
-| `110DF2A4/3` `O_MINPWR2` | no client registers it (thermal policy takes 1 and 2); the power tracker only logs it [C] | all platforms |
+| `110DF2A4/3` `O_MINPWR2` | no client registers it (thermal policy takes 1 and 2, its policy structure has no field for it); only the power tracker records it (telemetry) [C] | all platforms |
 
 Details and checked drivers: `../research/12-remaining-outputs.md`. New entries need the same evidence.

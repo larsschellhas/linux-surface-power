@@ -77,7 +77,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|---|---|---|---|
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
-| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only, the power tracker only logs it [C] | not needed on Linux | – |
+| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only and its policy structure has no field for it; only the power tracker records it (telemetry) [C] | not needed on Linux | – |
 | `9BBB8910/1` | O_WTMF_CPU0 | throttle request for one CPU, % (100 = none) | cpufreq `scaling_max_freq` of its policy | written | 100 / 100 / 0 |
 | `9BBB8910/2` | O_WTMF_CPU1 | throttle request for one CPU, % (100 = none) | cpufreq `scaling_max_freq` of its policy | written | 100 / 100 / 0 |
 | `9BBB8910/3` | O_WTMF_CPU2 | throttle request for one CPU, % (100 = none) | cpufreq `scaling_max_freq` of its policy | written | 100 / 100 / 0 |

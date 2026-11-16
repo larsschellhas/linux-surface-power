@@ -33,14 +33,18 @@ OPTS = {
         "\\_SB.CSW0", "\\_SB.MJCT", "\\_SB.MBJ0"),
 }
 
-# Blob channel -> device role. The channel numbers are not OPTS indices (an Intel blob has `/62` for a one-entry list). The role
-# comes from the output names in the blobs (`O_WTMF_CPU0`, `O_WTMF_GFX`, ...); the match with the OPTS entry is by name [H].
+# Blob channel -> device role. The channel numbers are not OPTS indices (an Intel blob has `/62` for a one-entry list). The driver
+# holds a fixed table "OPTS entry name -> channel" and compares every entry of the list with it [C, thermal-policy driver of the
+# Pro 10 and Pro 9 packages]: CLUS.CPU4-7 -> 1-4, CLUS.CPU0-3 -> 6-9, CLS0-2.CPU0 -> 20-22, GPU0 -> 5, PAGD and AGR0 -> 62, MSKN,
+# MJCT, MBJ0 -> 103-105, CSW0 -> 200. (The blob names `O_WTMF_CPU0-3` for channels 1-4 are labels only: those channels reach CPU4-7.)
+# That Windows CPU n is Linux CPU n, and that the clusters follow the numeric order of the policies, is [H].
 #   ("cpu", n)      CPU n of the Windows list (`CLUS.CPUn`)               -> the cpufreq policy that contains Linux CPU n
 #   ("cluster", k)  cluster k (`CLSk.CPU0`)                               -> the k-th cpufreq policy, in numeric order
 #   ("gpu",)        `GPU0`                                                -> Intel i915/xe or a devfreq GPU
 #   ("park",)       the Processor Aggregator Device (`PAGD`, `AGR0`)      -> all cpufreq policies (4)
 #   None            modem sensors, NPU: no Linux frequency interface known -> log-only
-ROLES = {1: ("cpu", 0), 2: ("cpu", 1), 3: ("cpu", 2), 4: ("cpu", 3), 5: ("gpu",),
+ROLES = {1: ("cpu", 4), 2: ("cpu", 5), 3: ("cpu", 6), 4: ("cpu", 7), 6: ("cpu", 0), 7: ("cpu", 1), 8: ("cpu", 2), 9: ("cpu", 3),
+         5: ("gpu",),
          20: ("cluster", 0), 21: ("cluster", 1), 22: ("cluster", 2), 62: ("park",),
          103: None, 104: None, 105: None, 200: None}
 

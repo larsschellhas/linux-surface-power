@@ -23,6 +23,7 @@ from .adapters import inputs as inp
 from .adapters.actions import ThermalActions
 from .adapters.cpufreq import THROTTLE, ThrottleStage
 from .adapters import notneeded
+from .adapters.prochot import BATT_MODE, ProchotStage
 from .adapters.fan import FanStage, NullTransport, handles as fan_handles
 from .adapters import gpu
 from .adapters.gpu import ClockCapStandIn
@@ -162,6 +163,10 @@ class Daemon:
         self.fan = FanStage(root, fan_refs, self.graph.output_ranges, dry_run=(self.mode != "control"),
                             on_touch=self._fan_touch, **fkw)
         self.fan_preview = FanStage(root, fan_refs, self.graph.output_ranges, dry_run=True, **fkw)
+        # Battery mode (70): one EC request when it turns 1 (spec outputs 10); shares the debug device with the fan stage.
+        batt_refs = [r for r in self.graph.outputs if r == BATT_MODE]
+        self.prochot = ProchotStage(root, batt_refs, transport=self.fan.transport, dry_run=(self.mode != "control"))
+        self.prochot_preview = ProchotStage(root, batt_refs, transport=self.fan.transport, dry_run=True)
 
         # dGPU stand-in (DO-1, per profile): with it, the dGPU limit counts as a written output.
         self.dgpu = None
@@ -172,6 +177,7 @@ class Daemon:
         written |= self.actions.channels & set(self.graph.outputs)
         written |= {r for r in throttle_refs if self.throttle.has_target(r)}
         written |= {r for r in fan_refs if self.fan.has_path(r)}
+        written |= {r for r in batt_refs if self.prochot.has_path(r)}
         # Outputs with documented evidence that Linux needs nothing for them (spec outputs 10): covered, but shown as such.
         self.not_needed = {r: notneeded.reason(r, root) for r in self.graph.outputs if notneeded.reason(r, root)}
         written |= set(self.not_needed)
@@ -217,6 +223,7 @@ class Daemon:
             self.outputs.dry_run = True
             self.throttle.dry_run = True
             self.fan.dry_run = True
+            self.prochot.dry_run = True
             if self.dgpu:
                 self.dgpu.dry_run = True
         self.snapshot = None
@@ -254,7 +261,7 @@ class Daemon:
                 and any(r.guid == inp.POWER for r in self.graph.inputs)):
             self.log("warning", f"{self.platform.transport.path} missing and no kernel DPTF attributes: load the module "
                                 "surface_aggregator_cdev; until then the EC power data are invalid")
-        for note in self.outputs.notes + self.throttle.notes + self.fan.notes:
+        for note in self.outputs.notes + self.throttle.notes + self.fan.notes + self.prochot.notes:
             self.log("info", note)
         for r, why in self.not_needed.items():
             self.log("info", f"output {r}: not needed on Linux: {why}")
@@ -299,6 +306,7 @@ class Daemon:
             self.outputs.forget()
             self.throttle.forget()
             self.fan.forget()
+            self.prochot.forget()
             for e in errors:
                 self.log("error", f"restore failed: {e}")
         self.state = state
@@ -356,6 +364,10 @@ class Daemon:
         self.results.update(fan.apply(rounded, now_ms))
         for prio, text in fan.drain_events():
             self.log(prio, text)
+        prochot = self.prochot if self.state == "control" else self.prochot_preview
+        self.results.update(prochot.apply(rounded, now_ms))
+        for prio, text in prochot.drain_events():
+            self.log(prio, text)
         for prio, text in self.actions.step(now_ms, rounded, armed=(self.mode == "control")):
             self.log(prio, text)
         if self.dgpu:
@@ -394,6 +406,13 @@ class Daemon:
                 if self.state == "control":
                     return what
                 return "firmware" if self.state in ("emergency", "yielded", "paused") else f"{what} (dry-run)"
+            if self.prochot.handles(ref):
+                what = self.prochot.describe(ref)
+                if not self.prochot.sends(ref):
+                    return what
+                if self.state == "control":
+                    return what
+                return "firmware" if self.state in ("emergency", "yielded", "paused") else f"would send {what}"
             if fan_handles(ref):
                 what = self.fan.describe(ref)
                 if not self.fan.sends(ref):
@@ -435,6 +454,8 @@ class Daemon:
             status["throttle"] = (self.throttle if self.state == "control" else self.throttle_preview).status()
         if self.fan.chans:
             status["fan"] = (self.fan if self.state == "control" else self.fan_preview).status()
+        if self.prochot.refs:
+            status["battery_mode"] = (self.prochot if self.state == "control" else self.prochot_preview).status()
         if self.unwritten:
             status["outputs_without_linux_path"] = [str(r) for r in self.unwritten]
         monitor.write_status(self.args.run_dir, status)
@@ -467,6 +488,8 @@ class Daemon:
         self.state = self.before_pause or self.mode
         self.fan.forget()                           # everything is sent again on the first cycle after resume
         self.fan_preview.forget()
+        self.prochot.forget()                       # a battery mode of 1 is sent again after resume
+        self.prochot_preview.forget()
         if self.state == "control":
             self.outputs.forget()
             self.throttle.forget()

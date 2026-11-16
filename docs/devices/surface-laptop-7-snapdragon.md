@@ -60,11 +60,10 @@ flowchart LR
     end
     B --> OUT1
     subgraph OUT2["no Linux path"]
-        O2_0B7B5350["<b>power limits</b><br/>O_SYS_AVG; O_SYS_MAX"]
+        O2_0B7B5350["<b>power limits</b><br/>O_SYS_AVG; O_SYS_MAX; O_BATT_MODE"]
     end
     B --> OUT2
     subgraph OUT3["logged only"]
-        O3_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
         O3_87008365["<b>client-computed channels</b><br/>O_FAST_MAXIM_POLLING; 250 not analysed"]
         O3_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_NPU"]
     end
@@ -105,7 +104,7 @@ A device can be controlled only when every output of its blob is written: a blob
 | `8060B17F/2` | I_EXT_DISPLAY | external display connected | DRM connectors | provided | – |
 | `8060B17F/3` | I_CAMERA | camera in use | video4linux runtime PM / open nodes | provided | – |
 | `8060B17F/9` | I_SURF_DOCK | Surface Docks attached | USB IDs | provided | – |
-| `87008365/112` | I_CPU_TEMP_AVG | averaged CPU temperature (client-computed) | `coretemp` package temperature, not averaged [H] (DV-7) | estimate | – |
+| `87008365/112` | I_CPU_TEMP_AVG | averaged CPU temperature (client-computed) | `coretemp` package temperature, same single reading as Windows [C] (DV-7) | estimate | – |
 | `DEF1AB69/100` | I_MS_NOTIFY | Modern Standby phase 1–5 | constant 4 | constant | – |
 
 ## Outputs
@@ -114,10 +113,10 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|---|---|---|---|
 | `0B7B5350/54` | O_SYS_AVG | psys PL1, platform long-term | none on Qualcomm Snapdragon (arm64) (Intel RAPL only) | no Linux path | 45000 / 250000 / 15000 |
 | `0B7B5350/55` | O_SYS_MAX | psys PL2, platform short-term | none on Qualcomm Snapdragon (arm64) (Intel RAPL only) | no Linux path | 90000 / 250000 / 15000 |
-| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = no mains supply) | – | logged only | – |
+| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = adapter rating 0, i.e. on battery) | none on Qualcomm Snapdragon (arm64) (only the Intel SoC client is analysed) | no Linux path | – |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
-| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only, the power tracker only logs it [C] | not needed on Linux | – |
+| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only and its policy structure has no field for it; only the power tracker records it (telemetry) [C] | not needed on Linux | – |
 | `87008365/220` | O_FAST_MAXIM_POLLING | fast power-meter polling | – | logged only | – |
 | `87008365/250` | – | not analysed | – | logged only | – |
 | `9BBB8910/5` | O_WTMF_GFX | throttle request for the GPU, % (100 = none) | GPU maximum frequency (i915, xe or devfreq; where the machine has one) | written | 100 / 100 / 0 |

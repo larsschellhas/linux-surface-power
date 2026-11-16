@@ -91,7 +91,7 @@ def _build() -> dict[int, Spec]:
         s[114 + n] = Spec(114 + n, TC_FAN, 0x15, 1 + n, "u8", 255)
         s[121 + n] = Spec(121 + n, TC_FAN, 0x12, 1 + n, "f32", 100)
         s[124 + n] = Spec(124 + n, TC_FAN, 0x14, 1 + n, "u8", 255)
-        # The kernel sends the profile for the first fan only [H, not checked for fan 2 and 3].
+        # The kernel sends the profile with the fixed instance 1, i.e. for the first fan only [C: surface_platform_profile.c].
         s[201 + n] = Spec(201 + n, TC_FAN, 0x0E, 1 + n, "u8", 4, neutral=None, route="kernel-profile" if n == 0 else "none")
     s[301] = Spec(301, TC_FAN, 0x0F, 1, "u8", 2, neutral=None, route="kernel-suspend")
     s[306] = Spec(306, TC_FAN, 0x1C, 1, "f32", 100)

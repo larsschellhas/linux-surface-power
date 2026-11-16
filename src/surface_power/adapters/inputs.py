@@ -603,9 +603,9 @@ class ProximitySensor(Source):
 
 
 class CpuTempAverage(Source):
-    """`87008365/112` (I_CPU_TEMP_AVG): the Windows SoC client reads the package thermal status (MSR 0x1B1, bits 22:16) [C] and
-    averages it [H: window unknown]. Linux `coretemp` "Package id 0" reads the same register, so it gives the instantaneous value
-    (deviation DV-7, spec inputs 8.10). The blob only uses it to raise the fan noise floor above ~71 C."""
+    """`87008365/112` (I_CPU_TEMP_AVG): the Windows SoC client reads the package thermal status (MSR 0x1B1, bits 22:16) [C] once per
+    request, without averaging [C], and converts it with TjMax. Linux `coretemp` "Package id 0" reads the same register
+    (deviation DV-7, spec inputs 8.11). The blob only uses it to raise the fan noise floor above ~71 C."""
 
     def __init__(self, root: str = "/"):
         self.ref = ChannelRef(COMPOSITE, 112)

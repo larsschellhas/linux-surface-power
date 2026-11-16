@@ -59,6 +59,7 @@ DEVICES = {
 }
 PLATFORM = {"lap3_amd": "amd", "lap4_amd": "amd", "pro9_5g": "arm64", "pro11_snap": "arm64", "pro12_1": "arm64",
             "lap7_snap": "arm64", "lap13_1_snap": "arm64"}
+EC_PAGES = {"surface-go-3", "surface-go-4"}   # ACPI-EC machines (no SAM): the SoC client calls the ACPI method `DPHT`
 PLATFORM_NAMES = {"intel": "Intel", "amd": "AMD", "arm64": "Qualcomm Snapdragon (arm64)"}
 SB3 = {"13in": ("surface-book-3-13", "Surface Book 3 13.5\""), "15in": ("surface-book-3-15", "Surface Book 3 15\"")}
 
@@ -111,7 +112,7 @@ INPUTS = {
     (SPT, 9): ("I_USB_SOURCE_PWR", "power out of the USB-C ports, mW", "Type-C ports (upper bound)", "estimate"),
     (COMPOSITE, 5): ("", "Xbox controller connected", "input devices", "sysfs"),
     (COMPOSITE, 112): ("I_CPU_TEMP_AVG", "averaged CPU temperature (client-computed)",
-                       "`coretemp` package temperature, not averaged [H] (DV-7)", "estimate"),
+                       "`coretemp` package temperature, same single reading as Windows [C] (DV-7)", "estimate"),
     (COMPOSITE, 113): ("", "proximity sensor state", "0 (no sensor driver)", "constant"),
     (COMPOSITE, 200): ("I_AMBIENT_AI", "estimated ambient temperature (client-computed)", "–", "none"),
     (MS, 100): ("I_MS_NOTIFY", "Modern Standby phase 1–5", "constant 4", "constant"),
@@ -125,7 +126,8 @@ OUTPUTS = {
     (LIMITS, 55): ("O_SYS_MAX", "psys PL2, platform short-term", "powercap `psys/short_term`", "written"),
     (LIMITS, 59): ("O_SYS_PEAK", "PL3, platform peak with duty cycle", "MSR `0x615` (root; held without EC data)", "written"),
     (LIMITS, 64): ("", "not analysed", "–", "log"),
-    (LIMITS, 70): ("O_BATT_MODE", "battery mode (1 = no mains supply)", "–", "log"),
+    (LIMITS, 70): ("O_BATT_MODE", "battery mode (1 = adapter rating 0, i.e. on battery)",
+                   "SAM TMP `0x1b` once when it turns 1 (EC: de-assert PROCHOT [H]), debug device", "written"),
     (LIMITS, 71): ("", "not analysed", "–", "log"),
     (LIMITS, 201): ("", "dGPU power limit", "clock-cap stand-in (DO-1, profile)", "optional"),
     (LIMITS, 205): ("", "GPU power controller limit (not analysed)", "–", "log"),
@@ -178,8 +180,15 @@ def input_info(ref: ChannelRef):
     return INPUTS.get((g, c), ("", "not analysed", "–", "none"))
 
 
-def output_info(ref: ChannelRef, platform: str = "intel"):
+def output_info(ref: ChannelRef, platform: str = "intel", ec: bool = False):
     g, c = g8(ref.guid), ref.channel
+    if g == LIMITS and c == 70:     # battery mode: one SAM request, Intel SoC client only (docs/research/12 2.2)
+        base = OUTPUTS[(LIMITS, 70)]
+        if platform != "intel":
+            return (base[0], base[1], f"none on {PLATFORM_NAMES[platform]} (only the Intel SoC client is analysed)", "noplat")
+        if ec:
+            return (base[0], base[1], "none: ACPI-EC machine, Windows calls the ACPI method `DPHT` (EC de-assert PROCHOT)", "noplat")
+        return base
     if g == "9BBB8910":
         ms = WTMF.get(c, "")
         if c == 62:
@@ -196,8 +205,7 @@ def output_info(ref: ChannelRef, platform: str = "intel"):
     if g == "B620798F":
         return (FANS.get(c, ""), *FAN_CMDS.get(c, ("fan or charging setting for the EC", "no Linux path (command not known)", "noplat")))
     info = OUTPUTS.get((g, c), ("", "not analysed", "–", "log"))
-    why = notneeded.static_reason(ChannelRef(next((k for k in (notneeded.BATT_MODE.guid, notneeded.MINPWR2.guid)
-                                                   if k.startswith(g)), g), c), platform)
+    why = notneeded.static_reason(ChannelRef(next((k for k in (notneeded.MINPWR2.guid,) if k.startswith(g)), g), c), platform)
     if why:
         return (info[0], info[1], "not needed on Linux: " + why, "notneeded")
     if platform != "intel" and g in (LIMITS, "CF2F6076") and info[3] in ("written", "optional") and c != 201:
@@ -282,6 +290,7 @@ def mermaid_label(items: list[str], per_line: int = 3) -> str:
 
 
 def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[str, dict]:
+    ec = key in EC_PAGES
     ins, outs, blocks, reach, ranges = {}, {}, Counter(), defaultdict(set), {}
     reach_any = defaultdict(set)
     rows = []
@@ -325,7 +334,7 @@ def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[
     disabled = profile_disabled(profile)
 
     def out_status(r):
-        st = output_info(r, platform)[3]
+        st = output_info(r, platform, ec)[3]
         if st == "optional" and r.channel in enabled and g8(r.guid) == LIMITS:
             return "written"
         if st == "written" and g8(r.guid) == LIMITS and r.channel in disabled:
@@ -343,7 +352,7 @@ def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[
         groups_in[STATUS_IN[info[3]]][k[0]].append(short(k, info) if info[0] else f"{k[1]} {info[1].split(',')[0]}")
     groups_out = defaultdict(lambda: defaultdict(list))
     for k, r in sorted(outs.items()):
-        info = output_info(r, platform)
+        info = output_info(r, platform, ec)
         groups_out[STATUS_OUT[out_status(r)]][k[0]].append(short(k, info) if info[0] else f"{k[1]} {info[1].split(',')[0].split(' (')[0]}")
     L += ["## Overview", "", "Every input and output of the blob(s), grouped by what Linux does with it.", "",
           "```mermaid", "flowchart LR"]
@@ -380,7 +389,7 @@ def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[
     L += ["", "## Outputs", "", "| Channel | Microsoft name | Meaning | Linux | Status | Range (default / max / min) |",
           "|---|---|---|---|---|---|"]
     for k, r in sorted(outs.items()):
-        ms, what, tgt, _ = output_info(r, platform)
+        ms, what, tgt, _ = output_info(r, platform, ec)
         st = out_status(r)
         rg = "; ".join(f"{d:g} / {mx:g} / {mn:g}" for d, mx, mn in sorted(ranges.get(k, ()))) or "–"
         L.append(f"| {name(r)} | {ms or '–'} | {what} | {tgt} | {STATUS_OUT[st]} | {rg} |")

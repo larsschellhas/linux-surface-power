@@ -45,10 +45,13 @@ flowchart LR
     end
     B --> OUT0
     subgraph OUT1["not needed on Linux"]
-        O1_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
         O1_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
     end
     B --> OUT1
+    subgraph OUT2["no Linux path"]
+        O2_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
+    end
+    B --> OUT2
 ```
 
 ## Readiness
@@ -59,8 +62,8 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 15 of 15 |
-| Outputs written by Linux | 11 of 13; not needed on Linux: `0B7B5350/70`, `110DF2A4/3` |
-| Ready for control | yes |
+| Outputs written by Linux | 11 of 13; not needed on Linux: `110DF2A4/3` (not written: `0B7B5350/70`) |
+| Ready for control | no: dry-run only |
 
 ## Inputs
 
@@ -92,10 +95,10 @@ A device can be controlled only when every output of its blob is written: a blob
 | `0B7B5350/54` | O_SYS_AVG | psys PL1, platform long-term | powercap `psys/long_term` | written | 45000 / 250000 / 15000 |
 | `0B7B5350/55` | O_SYS_MAX | psys PL2, platform short-term | powercap `psys/short_term` | written | 90000 / 250000 / 15000 |
 | `0B7B5350/59` | O_SYS_PEAK | PL3, platform peak with duty cycle | MSR `0x615` (root; held without EC data) | written | 90000 / 250000 / 15000 |
-| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = no mains supply) | not needed on Linux: the Intel SoC client writes nothing for it (no register, SAM or ACPI request); it only hands a request flag to the Windows-only SMF core [C code, H flag meaning] | not needed on Linux | – |
+| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = adapter rating 0, i.e. on battery) | none: ACPI-EC machine, Windows calls the ACPI method `DPHT` (EC de-assert PROCHOT) | no Linux path | – |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
-| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only, the power tracker only logs it [C] | not needed on Linux | – |
+| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only and its policy structure has no field for it; only the power tracker records it (telemetry) [C] | not needed on Linux | – |
 | `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |
 | `A79674B4/509` | O_SEN9_OFFSET | virtual temperature offset of sensor 9, 0.1 K | SAM TMP `0x24` through the SSAM debug device (root; neutral frame 0 at the restore) | written | – |
 | `CF2F6076/61` | O_CPU_AVG_TIME | PL1 time window, ms (rounded up to 4 steps per octave) | powercap `package-0/long_term` time window | written | – |
