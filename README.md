@@ -47,7 +47,9 @@ Start with [`docs/README.md`](docs/README.md): how it works, with diagrams, and 
   EC's battery EWMA level and max-charge flag, standby phase, USB-C source power (estimate), and the Laptop Studio's dGPU inputs. Every
   SMF blob now has a source for each input that reaches a limit. They are tested on a fake sysfs and partly on the SB3, not yet on the
   devices that need them.
-- **Next:** reports from devices other than the SB3, and a kernel attribute for the EC's battery EWMA level and max-charge flag.
+- **Next:** the outputs that Linux does not write yet (`docs/research/10-outputs.md`): first the thermal-policy hibernate and shutdown
+  requests and PL4, then the throttle requests and fans. Also reports from devices other than the SB3, and a kernel attribute for the
+  EC's battery EWMA level and max-charge flag.
 
 ## Device overview
 
@@ -59,42 +61,46 @@ packages (`scripts/corpus-report.py`, `docs/research/09-newer-blobs.md`). Only t
 - **Inputs:** where the inputs come from that the blob needs for PL1, PL2, PL4 or psys (`docs/specs/inputs.md` 8). An input without a
   source keeps the daemon in dry-run on that device. "Debug device" means `/dev/surface/aggregator`, which needs root and the
   `surface_aggregator_cdev` module until a kernel attribute exists.
+- **Outputs written:** how many of the blob's outputs Linux writes; the link opens the device page with the full list. A device is
+  ready for control only when all of them are written. Otherwise the blob would regulate, for example, the CPU while its fan, throttle
+  or safety outputs go nowhere.
 - **On device:** Linux side (sensors, batteries, outputs) checked on real hardware and compared with Windows measurements.
 
-| Device | Blob runs | Profile | Inputs | On device | State |
-|---|---|---|---|---|---|
-| Book 3 15" | ✓ | classic, tested after AC-L4 | all from sysfs and the EC data (kernel#195 or debug device) | ✓ field tests match Windows; kernel#190, #195 pending | controls; default dry-run until AC-L4 |
-| Book 3 13" | ✓ | classic (shared with 15") | all from sysfs | – | could control; untested |
-| Pro 7+ | ✓ | – (direct) | all from sysfs | – | could control; untested |
-| Pro 8 | ✓ | classic, untested | battery EWMA level: debug device (root) | – | could control with root; untested |
-| Pro 9 Intel | ✓ | – (direct) | battery EWMA level: debug device (root) | – | could control with root; untested |
-| Pro 9 5G (arm64) | ✓ | – (direct) | all from sysfs | – | inputs complete; no Linux path for its limits yet |
-| Pro 10, Pro 10 5G | ✓ | – (direct) | battery EWMA level and max charge: debug device (root) | – | could control with root; untested |
-| Pro 11 Intel | ✓ | – (direct) | as Pro 10 | – | could control with root; untested |
-| Pro 11 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | – | inputs complete; no Linux path for its limits yet |
-| Pro 12" 1st Ed. (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | – | inputs complete; no Linux path for its limits yet |
-| Laptop 3 AMD | ✓ | classic, untested (core 2.51 not compared) | all from sysfs | – | inputs complete; no Linux path for its limits yet |
-| Laptop 4 AMD | ✓ | classic, untested | all from sysfs | – | inputs complete; no Linux path for its limits yet |
-| Laptop 4 Intel | ✓ | – (direct) | all from sysfs | – | could control; untested |
-| Laptop 5 | ✓ | – (direct) | all from sysfs | – | could control; untested |
-| Laptop 6 | ✓ | – (direct) | as Pro 10 | – | could control with root; untested |
-| Laptop 7 Intel, Laptop 7 5G | ✓ | – (direct) | as Pro 10 | – | could control with root; untested |
-| Laptop 7 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | – | inputs complete; no Linux path for its limits yet |
-| Laptop 13" (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | – | inputs complete; no Linux path for its limits yet |
-| Laptop Go 1 | ✓ | classic, untested | all from sysfs | – | could control; untested |
-| Laptop Go 2 | ✓ | – (direct) | all from sysfs | – | could control; untested |
-| Laptop Go 3 | ✓ | – (direct) | all from sysfs | – | could control; untested |
-| Go 3 | ✓ | classic, untested | all from sysfs | – | could control; untested |
-| Go 4 | ✓ | – (direct) | all from sysfs | – | could control; untested |
-| Laptop Studio 1 | ✓ | classic, untested | battery EWMA level: debug device (root); dGPU power and temperature: NVML | – | could control with root; untested |
-| Laptop Studio 2 | ✓ | – (direct) | as Laptop Studio 1 | – | could control with root; untested |
-| 2025/26 models (MPTF) | – | – | – | – | not covered (Windows MPTF, [linux-surface#2384](https://github.com/linux-surface/linux-surface/issues/2384)) |
+| Device | Blob runs | Profile | Inputs | Outputs written | On device | State |
+|---|---|---|---|---|---|---|
+| Book 3 15" | ✓ | classic, tested after AC-L4 | all from sysfs and the EC data (kernel#195 or debug device) | [5 of 9](docs/devices/surface-book-3-15.md) | ✓ field tests match Windows; kernel#190, #195 pending | dry-run; PL1/PL2/psys and dGPU match Windows in field tests; PL4, PL3 and the hibernate/shutdown requests not written yet |
+| Book 3 13" | ✓ | classic (shared with 15") | all from sysfs | [5 of 9](docs/devices/surface-book-3-13.md) | – | dry-run only |
+| Pro 7+ | ✓ | – (direct) | all from sysfs | [4 of 12](docs/devices/surface-pro-7-plus.md) | – | dry-run only |
+| Pro 8 | ✓ | classic, untested | battery EWMA level: debug device (root) | [4 of 14](docs/devices/surface-pro-8.md) | – | dry-run only |
+| Pro 9 Intel | ✓ | – (direct) | battery EWMA level: debug device (root) | [4 of 17](docs/devices/surface-pro-9-intel.md) | – | dry-run only |
+| Pro 9 5G (arm64) | ✓ | – (direct) | all from sysfs | [0 of 9](docs/devices/surface-pro-9-5g.md) | – | dry-run only; no Linux path for its limits yet |
+| Pro 10, Pro 10 5G | ✓ | – (direct) | battery EWMA level and max charge: debug device (root) | [4 of 17](docs/devices/surface-pro-10.md), [4 of 20](docs/devices/surface-pro-10-5g.md) | – | dry-run only |
+| Pro 11 Intel | ✓ | – (direct) | as Pro 10 | [4 of 16](docs/devices/surface-pro-11-intel.md) | – | dry-run only |
+| Pro 11 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [0 of 20](docs/devices/surface-pro-11-snapdragon.md) | – | dry-run only; no Linux path for its limits yet |
+| Pro 12" 1st Ed. (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [0 of 16](docs/devices/surface-pro-12-1st-edition.md) | – | dry-run only; no Linux path for its limits yet |
+| Laptop 3 AMD | ✓ | classic, untested (core 2.51 not compared) | all from sysfs | [0 of 5](docs/devices/surface-laptop-3-amd.md) | – | dry-run only; no Linux path for its limits yet |
+| Laptop 4 AMD | ✓ | classic, untested | all from sysfs | [0 of 8](docs/devices/surface-laptop-4-amd.md) | – | dry-run only; no Linux path for its limits yet |
+| Laptop 4 Intel | ✓ | – (direct) | all from sysfs | [4 of 12](docs/devices/surface-laptop-4-intel.md) | – | dry-run only |
+| Laptop 5 | ✓ | – (direct) | all from sysfs | [4 of 16](docs/devices/surface-laptop-5.md) | – | dry-run only |
+| Laptop 6 | ✓ | – (direct) | as Pro 10 | [4 of 17](docs/devices/surface-laptop-6.md) | – | dry-run only |
+| Laptop 7 Intel, Laptop 7 5G | ✓ | – (direct) | as Pro 10 | [4 of 16](docs/devices/surface-laptop-7-intel.md), [4 of 19](docs/devices/surface-laptop-7-5g.md) | – | dry-run only |
+| Laptop 7 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [0 of 18](docs/devices/surface-laptop-7-snapdragon.md) | – | dry-run only; no Linux path for its limits yet |
+| Laptop 13" (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [0 of 25](docs/devices/surface-laptop-13.md) | – | dry-run only; no Linux path for its limits yet |
+| Laptop Go 1 | ✓ | classic, untested | all from sysfs | [4 of 10](docs/devices/surface-laptop-go.md) | – | dry-run only |
+| Laptop Go 2 | ✓ | – (direct) | all from sysfs | [4 of 14](docs/devices/surface-laptop-go-2.md) | – | dry-run only |
+| Laptop Go 3 | ✓ | – (direct) | all from sysfs | [4 of 17](docs/devices/surface-laptop-go-3.md) | – | dry-run only |
+| Go 3 | ✓ | classic, untested | all from sysfs | [4 of 12](docs/devices/surface-go-3.md) | – | dry-run only |
+| Go 4 | ✓ | – (direct) | all from sysfs | [4 of 13](docs/devices/surface-go-4.md) | – | dry-run only |
+| Laptop Studio 1 | ✓ | classic, untested | battery EWMA level: debug device (root); dGPU power and temperature: NVML | [4 of 16](docs/devices/surface-laptop-studio.md) | – | dry-run only |
+| Laptop Studio 2 | ✓ | – (direct) | as Laptop Studio 1 | [4 of 25](docs/devices/surface-laptop-studio-2.md) | – | dry-run only |
+| 2025/26 models (MPTF) | – | – | – | – | – | not covered (Windows MPTF, [linux-surface#2384](https://github.com/linux-surface/linux-surface/issues/2384)) |
 
 Notes:
 - For devices with several blobs (sizes, LTE/Wi-Fi, iGPU/dGPU, LCD/OLED), the table covers all of them.
-- "Could control" means the daemon has a source for every input the blob needs for the limits. Nothing beyond the SB3 15" has run on
-  a device. The temperature sensors the blob reads (SAM sensors 5, 9 and 12 on most devices) still have to show up in Linux on that
-  device, and the newer input adapters are only tested on a fake sysfs and on this SB3. Only a report from the device can tell.
+- No device is ready for control by this rule yet. Missing on every device are, among others, the thermal-policy outputs: on Windows,
+  `O_HOT` and `O_CRT` at 2 make the system hibernate or shut down (on the SB3 from about 54 °C and 56 °C skin temperature), and the
+  throttle requests cap CPU clusters and the GPU. Fan and charging outputs exist on the newer devices.
+- Nothing beyond the SB3 15" has run on a device. The newer input adapters are only tested on a fake sysfs and on this SB3.
 - **AMD and Snapdragon devices:** the blob runs and every input has a source, but Linux has no write path for these limits: powercap
   limits exist on Intel only. On Snapdragon the blobs regulate mainly through thermal throttle requests per CPU cluster and GPU; cpufreq
   caps are the Linux candidate (not implemented). The per-device pages in [`docs/devices/`](docs/devices/README.md) list every output.

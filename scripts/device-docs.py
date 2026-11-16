@@ -11,6 +11,7 @@ import glob
 import hashlib
 import os
 import sys
+import tomllib
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
@@ -101,7 +102,7 @@ INPUTS = {
     (STATE, 21): ("", "not analysed", "–", "none"),
     (STATE, 31): ("", "on battery, 0/1", "`Mains/online`", "sysfs"),
     (STATE, 32): ("I_NPU_UTIL", "NPU use, %", "–", "none"),
-    (STATE, 41): ("", "display brightness, millinits", "– (Windows fallback, DV-3)", "none"),
+    (STATE, 41): ("", "display brightness, millinits", "none: the block default, as on Windows without it (DV-3)", "fallback"),
     (STATE, 42): ("I_DISP_PERCENT1", "display brightness, %", "backlight", "sysfs"),
     (STATE, 43): ("I_DISP_PWR1", "display power", "–", "none"),
     (SPT, 2): ("I_SYS_PWR", "system power from the power meters, mW", "–", "none"),
@@ -127,8 +128,8 @@ OUTPUTS = {
     (LIMITS, 201): ("", "dGPU power limit", "clock-cap stand-in (DO-1, profile)", "optional"),
     (LIMITS, 205): ("", "GPU power controller limit (not analysed)", "–", "log"),
     (LIMITS, 208): ("", "GPU power controller limit (not analysed)", "–", "log"),
-    ("110DF2A4", 1): ("O_HOT", "hot notification", "–", "log"),
-    ("110DF2A4", 2): ("O_CRT", "critical notification", "–", "log"),
+    ("110DF2A4", 1): ("O_HOT", "hibernate request at 2 (thermal policy of zone `TPOL`)", "candidate: hibernate", "log"),
+    ("110DF2A4", 2): ("O_CRT", "critical shutdown request at 2 (thermal policy of zone `TPOL`)", "candidate: power off", "log"),
     ("110DF2A4", 3): ("O_MINPWR2", "minimum-power request", "–", "log"),
     ("A79674B4", 509): ("O_SEN9_OFFSET", "offset for sensor 9", "–", "log"),
     ("CF2F6076", 61): ("", "SoC value (not analysed)", "–", "log"),
@@ -148,7 +149,8 @@ FANS = {114: "O_FAN1_MAX_SONES", 121: "O_FAN1_ACTIVE_SPL", 124: "O_FAN1_ACTIVE_S
 
 WRITTEN = {51, 52, 54, 55}
 STATUS_IN = {"sysfs": "provided", "ec": "EC data (kernel#195 or debug device)", "debug": "debug device (root)",
-             "estimate": "estimate", "constant": "constant", "nvml": "NVML", "none": "not provided"}
+             "estimate": "estimate", "constant": "constant", "nvml": "NVML", "fallback": "Windows fallback (DV-3)",
+             "none": "not provided"}
 STATUS_OUT = {"written": "written", "optional": "optional (profile)", "noplat": "no Linux path", "log": "logged only"}
 
 
@@ -177,7 +179,7 @@ def output_info(ref: ChannelRef, platform: str = "intel"):
     if g == "9BBB8910":
         ms = WTMF.get(c, "")
         if c == 62:
-            return (ms, "core parking request", "candidate: take CPUs offline", "log")
+            return (ms, "passive limit of zone `TPOL`, % (processor performance cap)", "candidate: cpufreq cap for all CPUs", "log")
         if "CPU" in ms or "CORES" in ms:
             return (ms, "throttle request for a CPU cluster, % (100 = none)", "candidate: cpufreq `scaling_max_freq`", "log")
         if "GFX" in ms:
@@ -201,6 +203,20 @@ def load(path):
     dec = container.decode(data)
     parsed = parser.parse_text(dec.text, dec.form)
     return dec, parsed, data
+
+
+def profile_outputs(profile: str | None) -> set[int]:
+    """Optional limit channels a device profile switches on (PL4 53, PL3 59, dGPU stand-in 201)."""
+    if not profile:
+        return set()
+    with open(os.path.join(ROOT, "src", "surface_power", "profiles", profile), "rb") as f:
+        o = tomllib.load(f).get("outputs", {})
+    return {c for c, k in ((53, "pl4"), (59, "pl3"), (201, "dgpu_clock_cap")) if o.get(k)}
+
+
+def mermaid_label(items: list[str], per_line: int = 3) -> str:
+    rows = ["; ".join(items[i:i + per_line]) for i in range(0, len(items), per_line)]
+    return "<br/>".join(rows)
 
 
 def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[str, dict]:
@@ -240,26 +256,47 @@ def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[
           f"- **Controller variant:** `{variant}`" + (f" (profile `{profile}`)" if profile else " (no profile: default)"),
           "- **Block types:** " + ", ".join(f"{k} ({v})" for k, v in sorted(blocks.items())), ""]
 
-    # Diagram: input groups -> blob -> output groups.
-    groups_in = defaultdict(list)
+    enabled = profile_outputs(profile)
+
+    def out_status(r):
+        st = output_info(r, platform)[3]
+        if st == "optional" and r.channel in enabled and g8(r.guid) == LIMITS:
+            return "written"
+        return st
+
+    # Diagram: every input and output, grouped by status and interface.
+    def short(k, info):
+        return info[0] or f"{k[0]}/{k[1]}"
+    groups_in = defaultdict(lambda: defaultdict(list))
     for k, r in sorted(ins.items()):
         if k[0] == PLACEHOLDER:
             continue
-        groups_in[STATUS_IN[input_info(r)[3]]].append(k)
-    groups_out = defaultdict(list)
+        info = input_info(r)
+        groups_in[STATUS_IN[info[3]]][k[0]].append(short(k, info) if info[0] else f"{k[1]} {info[1].split(',')[0]}")
+    groups_out = defaultdict(lambda: defaultdict(list))
     for k, r in sorted(outs.items()):
-        groups_out[STATUS_OUT[output_info(r, platform)[3]]].append(k)
-    L += ["## Overview", "", "```mermaid", "flowchart LR"]
-    order_in = [STATUS_IN[k] for k in ("sysfs", "ec", "debug", "nvml", "estimate", "constant", "none")]
-    for i, grp in enumerate(g for g in order_in if g in groups_in):
-        ks = groups_in[grp]
-        label = "<br/>".join(f"{g}/{c}" for g, c in ks[:8]) + ("<br/>…" if len(ks) > 8 else "")
-        L.append(f'    I{i}["<b>{grp}</b> ({len(ks)})<br/>{label}"] --> B')
+        info = output_info(r, platform)
+        groups_out[STATUS_OUT[out_status(r)]][k[0]].append(short(k, info) if info[0] else f"{k[1]} {info[1].split(',')[0].split(' (')[0]}")
+    L += ["## Overview", "", "Every input and output of the blob(s), grouped by what Linux does with it.", "",
+          "```mermaid", "flowchart LR"]
+    order_in = [STATUS_IN[k] for k in ("sysfs", "ec", "debug", "nvml", "estimate", "constant", "fallback", "none")]
+    n = 0
+    for grp in (g for g in order_in if g in groups_in):
+        L.append(f'    subgraph IN{n}["{grp}"]')
+        for itf, items in sorted(groups_in[grp].items()):
+            L.append(f'        I{n}_{itf}["<b>{INTERFACES.get(itf, itf)}</b><br/>{mermaid_label(items)}"]')
+        L.append("    end")
+        L.append(f"    IN{n} --> B")
+        n += 1
     L.append(f'    B(["SMF blob<br/>{sum(r[2] for r in rows)} lines, {len(blocks)} block types"])')
-    for i, grp in enumerate(g for g in STATUS_OUT.values() if g in groups_out):
-        ks = groups_out[grp]
-        label = "<br/>".join(f"{g}/{c}" for g, c in ks[:8]) + ("<br/>…" if len(ks) > 8 else "")
-        L.append(f'    B --> O{i}["<b>{grp}</b> ({len(ks)})<br/>{label}"]')
+    m = 0
+    for grp in (g for g in STATUS_OUT.values() if g in groups_out):
+        L.append(f'    subgraph OUT{m}["{grp}"]')
+        for itf, items in sorted(groups_out[grp].items()):
+            L.append(f'        O{m}_{itf}["<b>{INTERFACES.get(itf, itf)}</b><br/>{mermaid_label(items)}"]')
+        L.append("    end")
+        L.append(f"    B --> OUT{m}")
+        m += 1
     L += ["```", ""]
 
     L += ["## Inputs", "", "| Channel | Microsoft name | Meaning | Linux source | Status | Reaches limits |", "|---|---|---|---|---|---|"]
@@ -275,7 +312,8 @@ def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[
     L += ["", "## Outputs", "", "| Channel | Microsoft name | Meaning | Linux | Status | Range (default / max / min) |",
           "|---|---|---|---|---|---|"]
     for k, r in sorted(outs.items()):
-        ms, what, tgt, st = output_info(r, platform)
+        ms, what, tgt, _ = output_info(r, platform)
+        st = out_status(r)
         rg = "; ".join(f"{d:g} / {mx:g} / {mn:g}" for d, mx, mn in sorted(ranges.get(k, ()))) or "–"
         L.append(f"| {name(r)} | {ms or '–'} | {what} | {tgt} | {STATUS_OUT[st]} | {rg} |")
     L.append("")
@@ -283,7 +321,24 @@ def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[
         L.append("**Missing inputs that reach a written limit:** " + ", ".join(f"`{g}/{c}`" for g, c in blocking)
                  + ". The daemon stays in dry-run on this device.")
         L.append("")
-    summary = {"title": title, "blobs": len(rows), "inputs": len(ins), "outputs": len(outs), "blocking": blocking,
+    written_n = sum(1 for r in outs.values() if out_status(r) == "written")
+    missing_out = [k for k, r in sorted(outs.items()) if out_status(r) != "written"]
+    missing_in = [k for k, r in sorted(ins.items()) if k[0] != PLACEHOLDER and input_info(r)[3] == "none"]
+    ready = not missing_out and not missing_in and platform == "intel"
+    R = ["## Readiness", "",
+         "A device can be controlled only when every output of its blob is written: a blob that regulates the CPU "
+         "but whose fan, throttle or safety outputs go nowhere would run with part of its design missing.", "",
+         "| Check | Result |", "|---|---|",
+         f"| Blob runs | {'✓' if all(r[4] for r in rows) else '–'} |",
+         f"| Inputs with a Linux source | {len(ins) - len(missing_in) - (1 if (PLACEHOLDER, 1) in ins else 0)} of "
+         f"{len(ins) - (1 if (PLACEHOLDER, 1) in ins else 0)}"
+         + (f" (missing: {', '.join(f'`{g}/{c}`' for g, c in missing_in)})" if missing_in else "") + " |",
+         f"| Outputs written by Linux | {written_n} of {len(outs)}"
+         + (f" (not written: {', '.join(f'`{g}/{c}`' for g, c in missing_out)})" if missing_out else "") + " |",
+         f"| Ready for control | {'yes' if ready else 'no: dry-run only'} |", ""]
+    i = L.index("## Inputs")
+    L[i:i] = R
+    summary = {"title": title, "written_n": written_n, "ready": ready, "missing_out": missing_out, "blobs": len(rows), "inputs": len(ins), "outputs": len(outs), "blocking": blocking,
                "written": sorted(c for g, c in outs if g == LIMITS and c in WRITTEN) if platform == "intel" else [],
                "platform": platform, "outs": outs, "groups_in": groups_in}
     return "\n".join(L), summary
@@ -339,13 +394,14 @@ def main() -> int:
          f"One page per Surface with SMF (2020–2025 models), generated by `scripts/device-docs.py` from the local blob corpus "
          f"(as of {AS_OF}). Each page lists the blob's inputs and outputs, where Linux gets or puts each value, and the "
          f"block types it uses. The current state per device is in the [README overview](../../README.md#device-overview).", "",
-         "| Device | Platform | Blobs | Inputs | Outputs | Limits Linux writes | Missing inputs on a written limit |",
+         "| Device | Platform | Blobs | Inputs | Outputs written | Limits Linux writes | Ready for control |",
          "|---|---|---|---|---|---|---|"]
     names = {51: "PL1", 52: "PL2", 54: "psys PL1", 55: "psys PL2"}
     for p in order:
         s = summaries[p]
         L.append(f"| [{s['title']}]({p}.md) | {PLATFORM_NAMES[s['platform']].split(' (')[0]} | {s['blobs']} | {s['inputs']} | "
-                 f"{s['outputs']} | {', '.join(names[c] for c in s['written']) or 'none'} | {', '.join(f'`{g}/{c}`' for g, c in s['blocking']) or 'none'} |")
+                 f"{s['written_n']} of {s['outputs']} | {', '.join(names[c] for c in s['written']) or 'none'} | "
+                 f"{'yes' if s['ready'] else 'no'} |")
     L += ["", *catalogue(all_outs)]
     with open(os.path.join(args.out, "README.md"), "w") as f:
         f.write("\n".join(L))
