@@ -85,7 +85,7 @@ The SB3 15" blob reads only posture 1, through the PL1 and dGPU posture tables. 
 The same payload also arrives as an EC event on some devices (surface-aggregator-module#29, values there fit the field names below).
 - **Preferred source: kernel attributes.**
   - `power_supply/BAT<n>/dptf_battery/{max_platform_power_mw, max_steady_state_power_mw, high_freq_impedance_mohm, no_load_voltage_mv, available_input_power_mw, rest_of_platform_power_mw}` come from `surface_battery`, which applies the EC event.
-  - `power_supply/ADP1/dptf_power/adapter_rating_mw` comes from `surface_charger`. It gives ENODATA while no rating is known.
+  - `power_supply/ADP1/dptf_power/adapter_rating_mw` comes from `surface_charger`. It gives ENODATA while no rating is known. Each read is an EC request, so the daemon reads it when the power source changes (AC online, or a battery's available input power moves) and otherwise every 60 s.
   - The names follow the DPTF participant ABI (`sysfs-platform-dptf`).
   - Prototype patches tested on the SB3 15" (15.11.2026 [M]). They are not upstream yet.
   - With them, these channels need neither root nor the debug device. The values match the debug-device readings exactly.

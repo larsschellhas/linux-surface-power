@@ -136,6 +136,25 @@ class InputsTest(unittest.TestCase):
         self.fs.write("sys/class/power_supply/BAT2/dptf_battery/available_input_power_mw", 65000)   # event: base on USB-C
         self.assertEqual(pp.read(1000)[ref(POWER, 108)], 65000)
 
+    def test_platform_power_adapter_rating_read_rarely(self):
+        """Each read of adapter_rating_mw is an EC request: read on source changes and every 60 s, not every cycle."""
+        bat = "sys/class/power_supply/BAT1/dptf_battery/available_input_power_mw"
+        artg = "sys/class/power_supply/ADP1/dptf_power/adapter_rating_mw"
+        self.fs.write(bat, 73113)
+        self.fs.write(artg, 120000)
+        pp = inputs.PlatformPower(self.fs.root, transport=FakeTransport())
+        self.assertEqual(pp.read(0)[ref(POWER, 7)], 120000)
+        self.fs.write(artg, 65000)                          # rating changed without an event: not seen before 60 s
+        self.assertEqual(pp.read(1000)[ref(POWER, 7)], 120000)
+        self.assertEqual(pp.read(59000)[ref(POWER, 7)], 120000)
+        self.assertEqual(pp.read(60000)[ref(POWER, 7)], 65000)    # fallback after 60 s
+        self.fs.write(artg, 120000)
+        self.fs.write(bat, 73000)                           # battery event: the source changed, read the rating at once
+        self.assertEqual(pp.read(61000)[ref(POWER, 7)], 120000)
+        self.fs.write(artg, 65000)
+        pp.request_refresh()                                # resume
+        self.assertEqual(pp.read(62000)[ref(POWER, 7)], 65000)
+
     def test_platform_power_unknown_adapter_rating(self):
         """ENODATA (no rating known) reads as missing; the attribute's existence still means: no cdev for it."""
         self.fs.write("sys/class/power_supply/BAT1/dptf_battery/available_input_power_mw", 45720)

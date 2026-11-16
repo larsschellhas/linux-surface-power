@@ -336,7 +336,8 @@ class PlatformPower(Source):
 
     Preferred source: the kernel attributes `power_supply/BAT<n>/dptf_battery/*` (surface_battery) and
     `power_supply/ADP1/dptf_power/adapter_rating_mw` (surface_charger). The kernel updates the battery values on the EC
-    event, so they are read on every call. Without these attributes, the values are requested through the SSAM debug
+    event, so they are read on every call; the rating costs an EC request per read and is read on source changes and
+    every 60 s. Without these attributes, the values are requested through the SSAM debug
     device (interim, NFR-11): at start, on AC changes and every 60 s. The two paths can be mixed per battery.
     """
 
@@ -354,6 +355,7 @@ class PlatformPower(Source):
         self.channels = {ChannelRef(POWER, base + f[3]) for *_, base in self.BATTERIES for f in self.FIELDS} | {self.ARTG}
         self.values: dict[ChannelRef, float | None] = {ref: None for ref in self.channels}
         self.next_ms: int | None = None
+        self.artg_next_ms: int | None = None
         self.ac: bool | None = None
         self.ok = False
 
@@ -373,15 +375,23 @@ class PlatformPower(Source):
         """True if any value still has to come through the SSAM debug device."""
         return self._sysfs_artg() is None or any(self._sysfs_battery(n) is None for _, n, _ in self.BATTERIES)
 
-    def _read_sysfs(self) -> None:
+    def _read_sysfs(self, now_ms: int, ac: bool | None) -> None:
+        before = tuple(self.values[ChannelRef(POWER, base + 8)] for *_, base in self.BATTERIES)
         for _, name, base in self.BATTERIES:
             d = self._sysfs_battery(name)
             if d:
                 for *_, attr, ch in self.FIELDS:
                     self.values[ChannelRef(POWER, base + ch)] = _int(os.path.join(d, attr))
         p = self._sysfs_artg()
-        if p:
+        if not p:
+            return
+        # Every read of adapter_rating_mw is an EC request, while the battery values are cached by the driver and updated
+        # on the EC event. So the rating is read again only when the power source changes (AC online, or the available
+        # input power of a battery moves) and otherwise every 60 s.
+        after = tuple(self.values[ChannelRef(POWER, base + 8)] for *_, base in self.BATTERIES)
+        if self.artg_next_ms is None or now_ms >= self.artg_next_ms or ac != self.ac or after != before:
             self.values[self.ARTG] = _int(p)            # ENODATA (no rating known) reads as None
+            self.artg_next_ms = now_ms + self.REFRESH_MS
 
     def refresh(self) -> None:
         """Requests through the debug device for everything the kernel does not provide."""
@@ -400,14 +410,15 @@ class PlatformPower(Source):
     def request_refresh(self) -> None:
         """Force a refresh at the next read, e.g. after resume."""
         self.next_ms = None
+        self.artg_next_ms = None
 
     def read(self, now_ms):
         ac = _ac_online(self.root)
         if self.needs_cdev and (self.next_ms is None or now_ms >= self.next_ms or ac != self.ac):
             self.refresh()
             self.next_ms = now_ms + self.REFRESH_MS
+        self._read_sysfs(now_ms, ac)
         self.ac = ac
-        self._read_sysfs()
         self.ok = self.values[ChannelRef(POWER, 8)] is not None
         return dict(self.values)
 
