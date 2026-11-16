@@ -233,6 +233,8 @@ class DaemonTest(unittest.TestCase):
         d.cycle(0)
         self.assertEqual(nvml.cap, 1260)
         self.assertEqual(self.status()["dgpu"]["cap_mhz"], 1260)
+        out = {o["channel"]: o for o in self.status()["outputs"]}
+        self.assertEqual(out["0B7B5350/201"]["target"], "clock-cap stand-in")
         os.remove(self.fs.path("sys/class/hwmon/hwmon2/temp9_input"))   # skin sensor lost -> emergency after 60 s
         for t in range(2000, 64000, 2000):
             d.cycle(t)

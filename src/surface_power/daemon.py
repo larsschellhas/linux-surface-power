@@ -336,6 +336,8 @@ class Daemon:
         def target(ref):
             if ref in self.actions.channels:
                 return "thermal action" if self.mode == "control" else "thermal action (not armed)"
+            if ref == DGPU and self.dgpu:
+                return "clock-cap stand-in" if self.state == "control" else "clock-cap stand-in (dry-run)"
             res = self.results.get(ref)
             if res is not None and res.kind == "held":
                 return "held (EC inputs invalid)"
