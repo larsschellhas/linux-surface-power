@@ -123,8 +123,12 @@ class Daemon:
         transport = _NoTransport() if args.no_ec else None
         dtx = (lambda: None) if root != "/" else inp.dtx_device_mode
         self.platform = inp.PlatformPower(root, transport=transport)
+        self.battery_ec = inp.BatteryEcState(root, transport=transport)
         sources = [inp.HwmonTemperatures(root), inp.SliderState(root), inp.Batteries(root), inp.Posture(root, dtx),
-                   self.platform]
+                   self.platform, inp.DisplayBrightness(root), inp.PlatformEvents(root), inp.BatteryCurrent(root),
+                   self.battery_ec, inp.StandbyPhase(root), inp.UsbSourcePower(root),
+                   inp.DgpuOnBattery(root), inp.ProximitySensor(root), inp.XboxController(root),
+                   inp.DgpuSensors(root)]
         self.cpu_ref = ChannelRef(inp.TEMP, 102)
         # Skin channels that controllers regulate on; the emergency rules watch them (spec supervisor 4).
         self.skin_refs = sorted({c.line.inputs[0] for c in self.graph.controllers if c.line.inputs[0].guid == inp.TEMP})
@@ -350,6 +354,7 @@ class Daemon:
         self.log("notice", "resume: engine reset")
         self.sched.reset(now_ms)
         self.platform.request_refresh()
+        self.battery_ec.request_refresh()
         self.state = self.before_pause or self.mode
         if self.state == "control":
             self.outputs.forget()

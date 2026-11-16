@@ -14,7 +14,10 @@ SYSTEM = "2DD6960F-7CB9-4BB8-82BF-97FA5D8BD767"
 POWER = "28B7BD85-B4CD-49F1-B02B-F84E5AA09889"
 POSTURE = "8060B17F-2FFB-4139-82E6-8B4C60F48419"
 LID = "5D0EE597-8C3D-4305-A812-05CDFAFB1C66"
-STATE = "1FB53D4C-5BDE-4B4A-B3C4-C23F7872DA1F"   # power/state values; channel 41 = display brightness
+STATE = "1FB53D4C-5BDE-4B4A-B3C4-C23F7872DA1F"   # power/state values; 41 = brightness (nits), 42 = brightness (%)
+MS_NOTIFY = "DEF1AB69-2537-4018-A676-ED20162BCFDE"  # Modern Standby phase
+SPT = "049E36F2-906D-47F2-ACA4-610552BFB1FA"        # power tracker items; 9 = USB source power
+COMPOSITE = "87008365-EA3A-461C-B83D-6AC6E8DB2F8A"  # client-computed channels (ambient estimate, sensor states)
 PLACEHOLDER = "99999999-9999-9999-9999-999999999999"
 
 ZERO_C = 2731  # 0 °C in 0.1 K
@@ -339,8 +342,288 @@ class PlatformPower(Source):
         return dict(self.values)
 
 
+# --- inputs of the newer blobs (spec inputs 8) ---
+
+def _backlight(root: str) -> str | None:
+    """The panel backlight: `firmware` before `platform` before `raw`, as the desktop tools pick it."""
+    dirs = sorted(glob.glob(os.path.join(root, "sys/class/backlight/*")))
+    order = {"firmware": 0, "platform": 1, "raw": 2}
+    dirs.sort(key=lambda d: order.get(_read(os.path.join(d, "type")) or "", 3))
+    return dirs[0] if dirs else None
+
+
+class DisplayBrightness(Source):
+    """`I_DISP_PERCENT1`: brightness setting of the panel in percent, 0-100 (spec inputs 8.1)."""
+
+    def __init__(self, root: str = "/"):
+        self.dir = _backlight(root)
+        self.ref = ChannelRef(STATE, 42)
+        self.channels = {self.ref} if self.dir else set()
+
+    def read(self, now_ms):
+        b = _int(os.path.join(self.dir, "brightness"))
+        m = _int(os.path.join(self.dir, "max_brightness"))
+        return {self.ref: round(100 * b / m) if b is not None and m else None}
+
+
+INTERNAL_CONNECTORS = ("eDP", "LVDS", "DSI")
+SURFACE_DOCK_IDS = {("045e", "0900"), ("045e", "0857"), ("045e", "09a9")}
+
+
+def _connectors(root: str) -> list[tuple[str, str]]:
+    """(connector type, connector dir) for every DRM connector, e.g. ("DP", ".../card1-DP-1")."""
+    out = []
+    for d in sorted(glob.glob(os.path.join(root, "sys/class/drm/card[0-9]*-*"))):
+        name = os.path.basename(d).split("-", 1)[1]
+        out.append((name.rsplit("-", 1)[0], d))
+    return out
+
+
+def _runtime_pm(dev: str) -> tuple[str, str] | None:
+    """(power/control, power/runtime_status) of the nearest ancestor of `dev` that has runtime PM."""
+    d = os.path.realpath(dev)
+    while d not in ("/", ""):
+        status = _read(os.path.join(d, "power/runtime_status"))
+        if status is not None and status != "unsupported":
+            return _read(os.path.join(d, "power/control")) or "", status
+        d = os.path.dirname(d)
+    return None
+
+
+class PlatformEvents(Source):
+    """Channels the Windows Surface service reports (spec inputs 8.2): external display (2), camera in use (3),
+    number of Surface Dock hubs (9)."""
+
+    def __init__(self, root: str = "/"):
+        self.root = root
+        self.ext, self.camera, self.dock = (ChannelRef(POSTURE, c) for c in (2, 3, 9))
+        self.channels = {self.camera, self.dock}
+        if os.path.isdir(os.path.join(root, "sys/class/drm")):
+            self.channels.add(self.ext)
+
+    def external_display(self) -> int:
+        return int(any(t not in INTERNAL_CONNECTORS and _read(os.path.join(d, "status")) == "connected"
+                       for t, d in _connectors(self.root)))
+
+    def _video_nodes_open(self) -> set[str]:
+        """Names of the video nodes some process has open (needs root to see every process)."""
+        nodes = set()
+        for fd in glob.glob(os.path.join(self.root, "proc/[0-9]*/fd/*")):
+            try:
+                target = os.readlink(fd)
+            except OSError:
+                continue
+            if target.startswith("/dev/video"):
+                nodes.add(target[len("/dev/"):])
+        return nodes
+
+    def camera_in_use(self) -> int:
+        nodes = sorted(glob.glob(os.path.join(self.root, "sys/class/video4linux/video*")))
+        opened = None
+        for n in nodes:
+            pm = _runtime_pm(os.path.join(n, "device"))
+            if pm and pm[0] == "auto":
+                if pm[1] == "active":
+                    return 1
+                continue
+            if opened is None:                           # runtime PM tells nothing: look for an open node
+                opened = self._video_nodes_open()
+            if os.path.basename(n) in opened:
+                return 1
+        return 0
+
+    def docks(self) -> int:
+        n = 0
+        for d in glob.glob(os.path.join(self.root, "sys/bus/usb/devices/*")):
+            ids = (_read(os.path.join(d, "idVendor")), _read(os.path.join(d, "idProduct")))
+            n += ids in SURFACE_DOCK_IDS
+        return n
+
+    def read(self, now_ms):
+        out = {self.camera: self.camera_in_use(), self.dock: self.docks()}
+        if self.ext in self.channels:
+            out[self.ext] = self.external_display()
+        return out
+
+
+class BatteryCurrent(Source):
+    """`I_BCDR1_I`: current of battery 1 in mA, positive while discharging, negative otherwise (spec inputs 8.3)."""
+
+    def __init__(self, root: str = "/"):
+        self.dir = os.path.join(root, "sys/class/power_supply/BAT1")
+        self.ref = ChannelRef(POWER, 12)
+        self.channels = {self.ref} if os.path.isdir(self.dir) else set()
+
+    def read(self, now_ms):
+        status = _read(os.path.join(self.dir, "status"))
+        ua = _int(os.path.join(self.dir, "current_now"))
+        if ua is None:
+            uw, uv = _int(os.path.join(self.dir, "power_now")), _int(os.path.join(self.dir, "voltage_now"))
+            ua = uw / uv * 1e6 if uw is not None and uv else None
+        if status is None or ua is None:
+            return {self.ref: None}
+        ma = abs(ua) / 1000
+        return {self.ref: round(ma) if status == "Discharging" else -round(ma)}
+
+
+class BatteryEcState(Source):
+    """`I_BDR_EWMA1_LVL` (13) and `I_BAT1_MAX_CHARGE` (16): one-byte SAM battery queries 0x1A and 0x69
+    (spec inputs 8.4). Interim through the SSAM debug device, like the 0x53 data."""
+
+    REFRESH_MS = 10000
+    QUERIES = ((13, 0x1A), (16, 0x69))
+
+    def __init__(self, root: str = "/", transport=None):
+        self.transport = transport if transport is not None else CdevTransport(os.path.join(root, SSAM_CDEV.lstrip("/")))
+        available = getattr(self.transport, "available", None)
+        ok = available() if available else True
+        self.channels = {ChannelRef(POWER, ch) for ch, _ in self.QUERIES} if ok else set()
+        self.values: dict[ChannelRef, float | None] = {ref: None for ref in self.channels}
+        self.next_ms: int | None = None
+
+    def request_refresh(self) -> None:
+        self.next_ms = None
+
+    def read(self, now_ms):
+        if self.next_ms is None or now_ms >= self.next_ms:
+            for ch, cid in self.QUERIES:
+                data = self.transport.request(1, cid)
+                self.values[ChannelRef(POWER, ch)] = data[0] if data else None
+            self.next_ms = now_ms + self.REFRESH_MS
+        return dict(self.values)
+
+
+class StandbyPhase(Source):
+    """`I_MS_NOTIFY`: constant 4 (normal) while the daemon runs (spec inputs 8.5). Windows leaves 4 only on Modern
+    Standby notifications while the user counts as present; idle display-off comes after "not present", and the
+    sleep phases (2, 3, 5) happen while the daemon is suspended."""
+
+    def __init__(self, root: str = "/"):
+        self.ref = ChannelRef(MS_NOTIFY, 100)
+        self.channels = {self.ref}
+
+    def read(self, now_ms):
+        return {self.ref: 4}
+
+
+class DgpuOnBattery(Source):
+    """`1FB53D4C/31` (Laptop Studio dGPU blobs): 1 on battery, 0 on AC, as the Windows GPU power controller reports
+    the AC/DC power source (spec inputs 8.7)."""
+
+    def __init__(self, root: str = "/"):
+        self.root = root
+        self.ref = ChannelRef(STATE, 31)
+        self.channels = {self.ref}
+
+    def read(self, now_ms):
+        ac = _ac_online(self.root)
+        return {self.ref: None if ac is None else int(not ac)}
+
+
+class ProximitySensor(Source):
+    """`87008365/113` (Pro 9 Intel, Laptop 5): state of the Windows proximity-envelope custom sensor. 0 = no valid
+    reading, which is what Windows sends without the sensor; Linux has no driver for it (spec inputs 8.8)."""
+
+    def __init__(self, root: str = "/"):
+        self.ref = ChannelRef(COMPOSITE, 113)
+        self.channels = {self.ref}
+
+    def read(self, now_ms):
+        return {self.ref: 0}
+
+
+class XboxController(Source):
+    """`87008365/5` (Laptop Studio 2): 1 while an Xbox controller is connected, else 0. Windows reports "controller
+    active (Xbox connection)" through the SMF client; a joystick input device from Microsoft (vendor 045e) or one
+    named "Xbox" counts here (spec inputs 8.9) [H: the exact Windows criterion]."""
+
+    def __init__(self, root: str = "/"):
+        self.root = root
+        self.ref = ChannelRef(COMPOSITE, 5)
+        self.channels = {self.ref}
+
+    def read(self, now_ms):
+        for d in glob.glob(os.path.join(self.root, "sys/class/input/input*")):
+            if not glob.glob(os.path.join(d, "js*")):
+                continue                                    # not a joystick
+            name = _read(os.path.join(d, "name")) or ""
+            if _read(os.path.join(d, "id/vendor")) == "045e" or "xbox" in name.lower():
+                return {self.ref: 1}
+        return {self.ref: 0}
+
+
+class DgpuSensors(Source):
+    """dGPU power `1FB53D4C/3` (mW) and temperature `2E8B14C2/101` (0.1 K) of the Laptop Studio (spec inputs 8.10).
+    Windows gets both from the NVIDIA driver. Here NVML is only asked while another process keeps the GPU awake,
+    at most every 2 s; a runtime-suspended GPU reads as 0 W with an invalid temperature."""
+
+    SAMPLE_MS = 2000
+
+    def __init__(self, root: str = "/", nvml_factory=None):
+        from . import gpu
+        self.gpu = gpu
+        self.root = root
+        self.factory = nvml_factory or gpu.Nvml
+        self.pci = gpu.find_nvidia_gpu(root)
+        self.power, self.temp = ChannelRef(STATE, 3), ChannelRef(TEMP, 101)
+        self.channels = {self.power, self.temp} if self.pci else set()
+        self.values: dict[ChannelRef, float | None] = {self.power: None, self.temp: None}
+        self.next_ms = 0
+
+    def read(self, now_ms):
+        status = _read(os.path.join(self.root, "sys/bus/pci/devices", self.pci, "power/runtime_status"))
+        if status == "suspended":
+            self.values = {self.power: 0, self.temp: None}
+        elif now_ms >= self.next_ms and self.gpu.other_nvidia_client(self.root):
+            self.next_ms = now_ms + self.SAMPLE_MS
+            try:
+                with self.factory(self.pci) as nv:
+                    self.values = {self.power: nv.read().power_w * 1000, self.temp: ZERO_C + 10 * nv.temperature_c()}
+            except self.gpu.NvmlError:
+                self.values = {self.power: None, self.temp: None}
+        return dict(self.values)
+
+
+# Current a Type-C source offers without PD, per power_operation_mode (USB 3 default: 900 mA).
+TYPEC_MODE_MA = {"default": 900, "1.5A": 1500, "3.0A": 3000}
+
+
+class UsbSourcePower(Source):
+    """`I_USB_SOURCE_PWR`: upper bound of the power this device supplies through its USB-C ports, mW
+    (spec inputs 8.6). Windows measures it; Linux only knows what each port offers."""
+
+    def __init__(self, root: str = "/"):
+        self.root = root
+        self.ref = ChannelRef(SPT, 9)
+        self.channels = {self.ref} if os.path.isdir(os.path.join(root, "sys/class/typec")) else set()
+
+    def _pd_max_mw(self, port: str) -> int | None:
+        best = None
+        for pdo in glob.glob(os.path.join(port, "usb_power_delivery/source-capabilities/*:fixed_supply")):
+            mv, ma = _int(os.path.join(pdo, "voltage")), _int(os.path.join(pdo, "maximum_current"))
+            if mv is not None and ma is not None:
+                best = max(best or 0, mv * ma // 1000)
+        return best
+
+    def read(self, now_ms):
+        total = 0
+        for port in sorted(glob.glob(os.path.join(self.root, "sys/class/typec/port[0-9]*"))):
+            name = os.path.basename(port)
+            if "-" in name or not os.path.isdir(os.path.join(self.root, "sys/class/typec", f"{name}-partner")):
+                continue
+            if "[source]" not in (_read(os.path.join(port, "power_role")) or ""):
+                continue
+            mode = _read(os.path.join(port, "power_operation_mode")) or ""
+            mw = self._pd_max_mw(port) if mode == "usb_power_delivery" else None
+            total += mw if mw is not None else 5 * TYPEC_MODE_MA.get(mode, 3000)
+        return {self.ref: total}
+
+
 def default_sources(root: str = "/") -> list[Source]:
-    return [HwmonTemperatures(root), SliderState(root), Batteries(root), Posture(root), PlatformPower(root)]
+    return [HwmonTemperatures(root), SliderState(root), Batteries(root), Posture(root), PlatformPower(root),
+            DisplayBrightness(root), PlatformEvents(root), BatteryCurrent(root), BatteryEcState(root),
+            StandbyPhase(root), UsbSourcePower(root), DgpuOnBattery(root), ProximitySensor(root),
+            XboxController(root), DgpuSensors(root)]
 
 
 class InputReader:

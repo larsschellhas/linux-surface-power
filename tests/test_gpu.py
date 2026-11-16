@@ -156,3 +156,46 @@ class StandInTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DgpuSensorsTest(unittest.TestCase):
+    """dGPU power and temperature as blob inputs (spec inputs 8.10)."""
+
+    def setUp(self):
+        from surface_power.adapters import inputs
+        self.inputs = inputs
+        self.fs = FakeSys()
+        d = f"sys/bus/pci/devices/{PCI}"
+        self.fs.write(f"{d}/vendor", "0x10de")
+        self.fs.write(f"{d}/class", "0x030200")
+        self.fs.write(f"{d}/power/runtime_status", "active")
+        self.nv = FakeNvml(power=42.5)
+        self.nv.temperature_c = lambda: 61
+        self.src = inputs.DgpuSensors(self.fs.root, nvml_factory=lambda pci: self.nv)
+        self.p, self.t = inputs.ChannelRef(inputs.STATE, 3), inputs.ChannelRef(inputs.TEMP, 101)
+
+    def tearDown(self):
+        self.fs.cleanup()
+
+    def test_no_session_without_other_client(self):
+        v = self.src.read(0)
+        self.assertEqual(self.nv.sessions, 0)
+        self.assertIsNone(v[self.p])
+
+    def test_reads_while_another_client_keeps_it_awake(self):
+        self.fs.link_raw("proc/4242/fd/5", "/dev/nvidia0")
+        v = self.src.read(0)
+        self.assertEqual((v[self.p], v[self.t]), (42500, 2731 + 610))
+        self.src.read(1000)
+        self.assertEqual(self.nv.sessions, 1)                  # at most every 2 s
+
+    def test_suspended_gpu_is_zero_watts(self):
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "suspended")
+        v = self.src.read(0)
+        self.assertEqual((v[self.p], v[self.t]), (0, None))
+        self.assertEqual(self.nv.sessions, 0)
+
+    def test_without_nvidia_gpu_not_provided(self):
+        fs = FakeSys()
+        self.assertEqual(self.inputs.DgpuSensors(fs.root).channels, set())
+        fs.cleanup()

@@ -29,6 +29,10 @@ class FakeTransport:
             return bytes([1]) + struct.pack("<IIHHII", 47900, 35600, 170, 8030, ipl, 9700)
         if cid == 0x0F:
             return (120000).to_bytes(4, "little")
+        if cid == 0x1A:
+            return bytes([7])                                      # discharge-rate EWMA level
+        if cid == 0x69:
+            return bytes([1])                                      # max charge reached
         return None
 
 
@@ -148,6 +152,144 @@ class InputsTest(unittest.TestCase):
         v = pp.read(0)
         self.assertIsNone(v[ref(POWER, 8)])
         self.assertIsNone(v[ref(POWER, 7)])
+
+    # --- inputs of the newer blobs (spec inputs 8) ---
+
+    def test_display_brightness_percent(self):
+        self.fs.write("sys/class/backlight/acpi_video0/type", "firmware")
+        self.fs.write("sys/class/backlight/acpi_video0/brightness", 5)
+        self.fs.write("sys/class/backlight/acpi_video0/max_brightness", 10)
+        self.fs.write("sys/class/backlight/intel_backlight/type", "raw")
+        self.fs.write("sys/class/backlight/intel_backlight/brightness", 87446)
+        self.fs.write("sys/class/backlight/intel_backlight/max_brightness", 96000)
+        self.assertEqual(inputs.DisplayBrightness(self.fs.root).read(0)[ref(inputs.STATE, 42)], 50)   # firmware first
+        os.remove(self.fs.path("sys/class/backlight/acpi_video0/type"))
+        self.assertEqual(inputs.DisplayBrightness(self.fs.root).read(0)[ref(inputs.STATE, 42)], 91)
+
+    def test_display_brightness_without_backlight_not_provided(self):
+        self.assertEqual(inputs.DisplayBrightness(self.fs.root).channels, set())
+
+    def _connector(self, name, status, enabled="enabled", dpms="On"):
+        d = f"sys/class/drm/card1-{name}"
+        self.fs.write(f"{d}/status", status)
+        self.fs.write(f"{d}/enabled", enabled)
+        self.fs.write(f"{d}/dpms", dpms)
+
+    def test_external_display(self):
+        ext = ref(inputs.POSTURE, 2)
+        self._connector("eDP-1", "connected")
+        self._connector("DP-1", "disconnected")
+        self.assertEqual(inputs.PlatformEvents(self.fs.root).read(0)[ext], 0)
+        self._connector("DP-1", "connected", "disabled", "Off")          # plugged in counts, lit or not
+        self.assertEqual(inputs.PlatformEvents(self.fs.root).read(0)[ext], 1)
+
+    def test_camera_from_runtime_pm(self):
+        cam = ref(inputs.POSTURE, 3)
+        usb = "sys/devices/pci0000:00/usb1/1-1"
+        self.fs.write(f"{usb}/power/control", "auto")
+        self.fs.write(f"{usb}/power/runtime_status", "suspended")
+        self.fs.link("sys/class/video4linux/video0/device", f"{usb}/1-1:1.0")
+        pe = inputs.PlatformEvents(self.fs.root)
+        self.assertEqual(pe.read(0)[cam], 0)
+        self.fs.write(f"{usb}/power/runtime_status", "active")
+        self.assertEqual(pe.read(0)[cam], 1)
+
+    def test_camera_from_open_node_without_runtime_pm(self):
+        cam = ref(inputs.POSTURE, 3)
+        dev = "sys/devices/platform/cam0"
+        self.fs.write(f"{dev}/power/control", "on")
+        self.fs.write(f"{dev}/power/runtime_status", "active")      # always active: says nothing about use
+        self.fs.link("sys/class/video4linux/video2/device", dev)
+        pe = inputs.PlatformEvents(self.fs.root)
+        self.assertEqual(pe.read(0)[cam], 0)
+        self.fs.link_raw("proc/4242/fd/7", "/dev/video2")
+        self.assertEqual(pe.read(0)[cam], 1)
+
+    def test_surface_docks_counted(self):
+        dock = ref(inputs.POSTURE, 9)
+        for n, (vid, pid) in enumerate((("045e", "0900"), ("045e", "09a9"), ("045e", "07a5"), ("8087", "0900"))):
+            self.fs.write(f"sys/bus/usb/devices/1-{n}/idVendor", vid)
+            self.fs.write(f"sys/bus/usb/devices/1-{n}/idProduct", pid)
+        self.assertEqual(inputs.PlatformEvents(self.fs.root).read(0)[dock], 2)
+
+    def test_battery_current_sign(self):
+        cur = ref(POWER, 12)
+        bat = "sys/class/power_supply/BAT1"
+        self.fs.write(f"{bat}/status", "Discharging")
+        self.fs.write(f"{bat}/power_now", 16000000)        # 16 W
+        self.fs.write(f"{bat}/voltage_now", 8000000)       # 8 V
+        bc = inputs.BatteryCurrent(self.fs.root)
+        self.assertEqual(bc.read(0)[cur], 2000)
+        self.fs.write(f"{bat}/status", "Charging")
+        self.assertEqual(bc.read(0)[cur], -2000)
+        self.fs.write(f"{bat}/current_now", 1500000)       # preferred where present (µA)
+        self.assertEqual(bc.read(0)[cur], -1500)
+        self.fs.write(f"{bat}/status", "Full")
+        self.fs.write(f"{bat}/current_now", 0)
+        self.assertEqual(bc.read(0)[cur], 0)
+
+    def test_battery_ec_state(self):
+        tr = FakeTransport()
+        be = inputs.BatteryEcState(self.fs.root, transport=tr)
+        v = be.read(0)
+        self.assertEqual((v[ref(POWER, 13)], v[ref(POWER, 16)]), (7, 1))
+        calls = tr.calls
+        be.read(5000)
+        self.assertEqual(tr.calls, calls)                  # cached
+        be.read(10000)
+        self.assertGreater(tr.calls, calls)                # every 10 s
+        v = inputs.BatteryEcState(self.fs.root, transport=FakeTransport(fail=True)).read(0)
+        self.assertIsNone(v[ref(POWER, 13)])
+
+    def test_battery_ec_state_without_debug_device_not_provided(self):
+        class Absent(FakeTransport):
+            def available(self):
+                return False
+        self.assertEqual(inputs.BatteryEcState(self.fs.root, transport=Absent()).channels, set())
+
+    def test_standby_phase_is_normal(self):
+        self._connector("eDP-1", "connected", "disabled", "Off")
+        self.assertEqual(inputs.StandbyPhase(self.fs.root).read(0)[ref(inputs.MS_NOTIFY, 100)], 4)
+
+    def test_dgpu_on_battery(self):
+        r = ref(inputs.STATE, 31)
+        self.assertEqual(inputs.DgpuOnBattery(self.fs.root).read(0)[r], 0)        # FakeSys: on AC
+        self.fs.write("sys/class/power_supply/ADP1/online", 0)
+        self.assertEqual(inputs.DgpuOnBattery(self.fs.root).read(0)[r], 1)
+
+    def test_proximity_sensor_absent(self):
+        self.assertEqual(inputs.ProximitySensor(self.fs.root).read(0)[ref(inputs.COMPOSITE, 113)], 0)
+
+    def test_xbox_controller(self):
+        r = ref(inputs.COMPOSITE, 5)
+        xc = inputs.XboxController(self.fs.root)
+        self.fs.write("sys/class/input/input3/name", "AT Translated Set 2 keyboard")
+        self.fs.write("sys/class/input/input3/id/vendor", "0001")
+        self.fs.write("sys/class/input/input9/name", "Microsoft X-Box 360 pad")   # a Microsoft device, not a joystick yet
+        self.fs.write("sys/class/input/input9/id/vendor", "045e")
+        self.assertEqual(xc.read(0)[r], 0)
+        os.makedirs(self.fs.path("sys/class/input/input9/js0"))
+        self.assertEqual(xc.read(0)[r], 1)
+
+    def test_usb_source_power(self):
+        usb = ref(inputs.SPT, 9)
+        self.assertEqual(inputs.UsbSourcePower(self.fs.root).channels, set())   # no Type-C class: not provided
+        tc = "sys/class/typec"
+        self.fs.write(f"{tc}/port0/power_role", "[source] sink")
+        self.fs.write(f"{tc}/port0/power_operation_mode", "1.5A")
+        self.fs.write(f"{tc}/port1/power_role", "source [sink]")         # charging the device: not counted
+        self.fs.write(f"{tc}/port1/power_operation_mode", "usb_power_delivery")
+        self.fs.write(f"{tc}/port2/power_role", "[source] sink")         # no partner: not counted
+        up = inputs.UsbSourcePower(self.fs.root)
+        self.assertEqual(up.read(0)[usb], 0)
+        os.makedirs(self.fs.path(f"{tc}/port0-partner"))
+        os.makedirs(self.fs.path(f"{tc}/port1-partner"))
+        self.assertEqual(up.read(0)[usb], 7500)
+        self.fs.write(f"{tc}/port0/power_operation_mode", "usb_power_delivery")
+        pdo = f"{tc}/port0/usb_power_delivery/source-capabilities/1:fixed_supply"
+        self.fs.write(f"{pdo}/voltage", 5000)
+        self.fs.write(f"{pdo}/maximum_current", 3000)
+        self.assertEqual(up.read(0)[usb], 15000)
 
     def test_reader_reports_missing_once(self):
         wanted = {ref(TEMP, 509), ref(TEMP, 609), ref(SYSTEM, 1), ref("99999999-9999-9999-9999-999999999999", 1)}

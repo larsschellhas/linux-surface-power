@@ -1,6 +1,6 @@
 # Spec: input adapters
 
-Version 0.1, 14.11.2026. Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC-I3. Markers as in `blob-format.md`.
+Version 0.2, 16.11.2026. Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC-I3. Markers as in `blob-format.md`.
 
 ## 1. Interface
 - **Adapter role:** each adapter owns one or more device input channels (`GUID/channel`). On `read(now_ms)` it returns `{channel: value | None}` in blob units. `None` means invalid.
@@ -14,7 +14,7 @@ Version 0.1, 14.11.2026. Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC
 |---|---|---|---|---|
 | `2E8B14C2` temperature | 501 – 599 | SAM sensor `iid = ch − 500` | hwmon `surface_thermal`, `temp<iid>_input` (on the SB3 `temp9` is labelled `I_VTS1` = channel 509 [M]) | `0.1 K = 2731 + m°C / 100` |
 | | 601 – 699 | KIP (base) sensor `iid = ch − 600` | hwmon `surface_thermal` whose SSAM device is `01:03:02:00:02` (target KIP, below the base hub). On the SB3 this needs the registry node and a `surface_temp` match entry for KIP (both not upstream yet, tested 15.11.2026 [M]); otherwise invalid | 0.1 K |
-| | 101, 102 | GPU, CPU temperature | 102: hwmon `coretemp` "Package id 0"; 101: not provided | as above |
+| | 101, 102 | GPU, CPU temperature | 102: hwmon `coretemp` "Package id 0"; 101: NVML on the Laptop Studio (section 8.10) | as above |
 | `2DD6960F` system state | 1 | slider state 1 – 10 | `platform_profile` × AC/battery (section 3) | integer |
 | `28B7BD85` power tracker | 1 / 101 | charge level of battery 1 / 2 in % | `power_supply` `BAT1` / `BAT2` `capacity` [M: BAT1 is the display part at 8.0 V, BAT2 the base at 12.6 V] | % |
 | | 2 / 102 | battery peak power `I_BAT_PEAK` | SSAM `0x53` @1, SAM / KIP | mW |
@@ -25,10 +25,19 @@ Version 0.1, 14.11.2026. Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC
 | | 7 | PSU size | SSAM DPTF `0x0f` ARTG | mW |
 | | 8 / 108 | available input power `I_IPL_TOP` / `I_IPL_BASE` | SSAM `0x53` @13, SAM / KIP | mW |
 | | 10 / 110 | charge/discharge rate of battery 1 / 2 `I_BCDR` | `power_supply` `power_now` when `status` is "Discharging", else 0 [H for sign and for 0 while charging] | µW → mW |
-| | 12 | battery margin / current (newer blobs) | not provided (phase 5) | |
+| | 12 | battery current `I_BCDR1_I` (newer blobs) | `BAT1` `current_now`, else `power_now` / `voltage_now`; sign from `status` (section 8.3) | mA |
+| | 13 / 16 | discharge-rate EWMA level / max charge reached | SSAM battery `0x1A` / `0x69` (section 8.4) | byte |
 | `8060B17F` posture | 1 | posture 1 – 5 | `surface_dtx` mode + lid (section 4) | integer |
 | `5D0EE597` lid | 1 | lid state | lid switch (section 4) | 1 = open, 2 = closed [H] |
-| `1FB53D4C` power/state | 41 | display brightness in millinits | not provided by default (section 5) | |
+| `1FB53D4C` power/state | 41 | display brightness in millinits (SB3 era) | not provided by default (section 5) | |
+| | 42 | display brightness in % (newer blobs) | backlight `brightness` / `max_brightness` (section 8.1) | % |
+| | 3 | dGPU power (Laptop Studio) | NVML, section 8.10 | mW |
+| | 31 | on battery (Laptop Studio dGPU blobs) | not `online` of the `Mains` supply (section 8.7) | 0 / 1 |
+| `8060B17F` platform events | 2 / 3 / 9 | external display / camera in use / Surface Docks | DRM, video4linux, USB (section 8.2) | 0 / 1 / count |
+| `DEF1AB69` Modern Standby | 100 | standby phase `I_MS_NOTIFY` | constant 4 (section 8.5) | 1 – 5 |
+| `049E36F2` power tracker | 9 | USB source power | Type-C ports in source role (section 8.6) | mW |
+| `87008365` client-computed | 113 / 5 | proximity sensor state / Xbox controller | 0 / input devices (sections 8.8, 8.9) | |
+| `2E8B14C2` temperature | 101 | dGPU temperature (Laptop Studio) | NVML, section 8.10 | 0.1 K |
 
 The placeholder channel `99999999-…/1` (`blob-format.md` 5.2b) is never provided and is not reported as missing.
 
@@ -106,3 +115,65 @@ The same payload also arrives as an EC event on some devices (surface-aggregator
 ## 7. Polling and cost (NFR-4)
 - **Sensors:** sysfs reads once per second. EC requests as in 6. No busy waiting.
 - **Read failures:** a failing read makes that channel invalid for this cycle. After 10 failures in a row, the adapter logs once and retries every 30 s [D].
+
+## 8. Inputs of the newer blobs (phase 6)
+What Windows sends is in `../research/09-newer-blobs.md` 4. Each adapter declares its channels only where Linux has the source; a
+missing source keeps the device in dry-run (`supervisor.md` 2.5). None of these channels is read by the SB3 blobs.
+
+### 8.1 Display brightness in percent (`1FB53D4C/42`)
+- Windows sends the brightness setting of the current monitor in percent.
+- Linux: `round(100 · brightness / max_brightness)` of the panel backlight. With several backlights: type `firmware` before `platform`
+  before `raw`. No backlight: not provided.
+- [H] The Windows percent and the raw backlight scale may not be linear to each other.
+
+### 8.2 External display, camera, Surface Docks (`8060B17F/2, 3, 9`)
+- **External display:** 1 if any DRM connector other than `eDP`, `LVDS` or `DSI` has `status` `connected`, else 0. Provided where
+  `/sys/class/drm` exists.
+- **Camera:** 1 if a video4linux node is in use. Per node, the nearest ancestor device with runtime PM decides when its
+  `power/control` is `auto`: `runtime_status` `active` means in use. Otherwise (runtime PM off) a process with the node open counts
+  (`/proc/*/fd`, root sees all).
+- **Docks:** number of USB devices with vendor `045e` and product `0900`, `0857` or `09a9`.
+
+### 8.3 Battery current (`28B7BD85/12`)
+- Windows: `_BST` rate (mW) · 1000 / present voltage (mV), positive while the state is exactly "discharging", else negative.
+- Linux: `current_now` (µA) if present, else `power_now / voltage_now`; magnitude in mA, positive if `status` is `Discharging`,
+  else negative. Integer mA.
+
+### 8.4 Battery EWMA level and max-charge flag (`28B7BD85/13, 16`)
+- SSAM request, target category `0x02` (BAT), target 1 (SAM), instance 1, command `0x1A` (level) and `0x69` (flag), one-byte answer.
+  The EC also sends events with the same command IDs when the values change.
+- Interim transport: the debug device (section 6), every 10 s and after resume [D]. Without the debug device the channels are
+  not provided. A kernel attribute next to `dptf_battery` is planned (OD-3).
+- [H] Not yet requested on an affected device.
+
+### 8.5 Standby phase (`DEF1AB69/100`)
+- Windows: the Surface ACPI platform extension forwards the Microsoft low-power `_DSM` calls (`Notify(SAPD, 0xC0 + n)`) and maps them
+  to 1 (display off), 2 (sleep), 3 (maintenance), 5 (legacy sleep). While `GUID_GLOBAL_USER_PRESENCE` reads "not present", and for
+  every other notification, it sends 4.
+- Linux: constant 4. Idle display-off on Windows follows "not present" and so stays 4; 2, 3 and 5 occur while the daemon is
+  suspended.
+
+### 8.6 USB source power (`049E36F2/9`)
+- Windows measures the power out of the USB-C ports (Snapdragon models).
+- Linux has no measurement. Upper bound: the sum over Type-C ports in source role with a partner. With a PD contract: the largest
+  fixed PDO the port offers (`usb_power_delivery/source-capabilities`); else 5 V × the current of `power_operation_mode`
+  (`default` 900 mA, `1.5A`, `3.0A`). An overestimate lowers the CPU limit. Provided where `/sys/class/typec` exists.
+
+### 8.7 On battery (`1FB53D4C/31`)
+- Windows: the Surface GPU power controller (Laptop Studio) sends 1 on DC and 0 on AC, from `GUID_ACDC_POWER_SOURCE`.
+- Linux: 1 if the `Mains` supply is offline, 0 if online, invalid if there is none.
+
+### 8.8 Proximity sensor (`87008365/113`)
+- Windows: the SMF sensor client reads a proximity custom sensor and sends 0 (no valid reading), 1 (valid, nothing near) or 2
+  (something near). The blob allows a 2 K higher skin limit only at 1.
+- Linux has no driver for this sensor. The adapter sends 0, what Windows sends without a valid reading.
+
+### 8.9 Xbox controller (`87008365/5`)
+- Windows: "controller active (Xbox connection)" from the SMF client. At 1 the blob allows a 3 K higher skin limit.
+- Linux: 1 while a joystick input device from vendor `045e` or with "Xbox" in its name exists, else 0 [H: the Windows criterion].
+
+### 8.10 dGPU power and temperature (`1FB53D4C/3`, `2E8B14C2/101`)
+- Windows: the Surface GPU power controller gets both from the NVIDIA driver.
+- Linux: NVML (`nvmlDeviceGetPowerUsage`, `nvmlDeviceGetTemperature`), at most every 2 s and only while another process has an
+  NVIDIA device open, as for the clock-cap stand-in (`outputs.md` 6). A runtime-suspended GPU gives 0 mW and an invalid temperature.
+  Provided where an NVIDIA display controller exists.

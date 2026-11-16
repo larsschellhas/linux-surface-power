@@ -27,7 +27,7 @@ Discussion upstream: [linux-surface#2383](https://github.com/linux-surface/linux
 
 ## Status
 
-- **Specs and a Python reference implementation** (`docs/specs/`, `src/`, 228 unit tests):
+- **Specs and a Python reference implementation** (`docs/specs/`, `src/`, 246 unit tests):
   - Loader: reads all known blob forms; MPTF configurations (2025/26 models) are recognised and rejected.
   - Engine: all block types of the SMF blobs from 2020 to 2025, including expressions with channel references and the variable-setpoint PID, with the PID in both core variants. All 41 SMF blobs of the local corpus build completely (`docs/research/09-newer-blobs.md`).
   - Around it: adapters, supervisor, monitoring, the daemon and tools.
@@ -40,53 +40,58 @@ Discussion upstream: [linux-surface#2383](https://github.com/linux-surface/linux
 - **Kernel side** (submitted, not merged yet):
   - SB3 sensor and fan nodes, main and base: [kernel#190](https://github.com/linux-surface/kernel/pull/190).
   - The EC's DPTF battery data and adapter rating in sysfs: [kernel#195](https://github.com/linux-surface/kernel/pull/195). Without it, the daemon reads these values through the SSAM debug device, which needs root.
-- **Next:** the inputs that the newer blobs read and the daemon does not provide yet (display brightness, external display, camera, battery
-  current, …). Until they exist, those devices run in dry-run. Per device: the overview below; per channel: `docs/research/09-newer-blobs.md` 4.
+- **Inputs of the newer blobs** (`docs/specs/inputs.md` 8): display brightness, external display, camera, docks, battery current, the
+  EC's battery EWMA level and max-charge flag, standby phase, USB-C source power (estimate), and the Laptop Studio's dGPU inputs. Every
+  SMF blob now has a source for each input that reaches a limit. They are tested on a fake sysfs and partly on the SB3, not yet on the
+  devices that need them.
+- **Next:** reports from devices other than the SB3, and a kernel attribute for the EC's battery EWMA level and max-charge flag.
 
 ## Device overview
 
-What is done per device, as of 15.11.2026. Source: the local blob corpus, one or more blob versions per device from the Surface driver
+What is done per device, as of 16.11.2026. Source: the local blob corpus, one or more blob versions per device from the Surface driver
 packages (`scripts/corpus-report.py`, `docs/research/09-newer-blobs.md`). Only the Surface Book 3 15" has been run and measured.
 
 - **Blob runs:** the engine builds and runs every line of the device's blob(s).
 - **Profile:** device profile in `src/surface_power/profiles/`, with the PID variant (`classic` / `direct`). Without a profile: `direct`.
-- **Missing inputs:** channels the blob needs for PL1, PL2, PL4 or psys that Linux does not provide yet. While one is missing, the daemon
-  stays in dry-run on that device.
+- **Inputs:** where the inputs come from that the blob needs for PL1, PL2, PL4 or psys (`docs/specs/inputs.md` 8). An input without a
+  source keeps the daemon in dry-run on that device. "Debug device" means `/dev/surface/aggregator`, which needs root and the
+  `surface_aggregator_cdev` module until a kernel attribute exists.
 - **On device:** Linux side (sensors, batteries, outputs) checked on real hardware and compared with Windows measurements.
 
-| Device | Blob runs | Profile | Missing inputs | On device | State |
+| Device | Blob runs | Profile | Inputs | On device | State |
 |---|---|---|---|---|---|
-| Book 3 15" | ✓ | classic, tested after AC-L4 | none | ✓ field tests match Windows; kernel#190, #195 pending | controls; default dry-run until AC-L4 |
-| Book 3 13" | ✓ | classic (shared with 15") | external display, camera | – | dry-run |
-| Pro 7+ | ✓ | – (direct) | display brightness, external display, camera | – | dry-run |
-| Pro 8 | ✓ | classic, untested | display brightness, battery EWMA, external display, camera | – | dry-run |
-| Pro 9 Intel | ✓ | – (direct) | display brightness, battery current, battery EWMA, external display, camera, MS notify, a composite sensor | – | dry-run |
-| Pro 9 5G (arm64) | ✓ | – (direct) | none | – | could control; untested |
-| Pro 10, Pro 10 5G | ✓ | – (direct) | display brightness, battery current, battery EWMA, battery max charge, external display, camera, dock, MS notify | – | dry-run |
-| Pro 11 Intel | ✓ | – (direct) | as Pro 10 | – | dry-run |
-| Pro 11 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power | – | dry-run |
-| Pro 12" 1st Ed. (arm64) | ✓ | – (direct) | USB-C source power | – | dry-run |
-| Laptop 3 AMD | ✓ | classic, untested (core 2.51 not compared) | none | – | could control; untested |
-| Laptop 4 AMD | ✓ | classic, untested | display brightness, battery current | – | dry-run |
-| Laptop 4 Intel | ✓ | – (direct) | display brightness, external display, camera | – | dry-run |
-| Laptop 5 | ✓ | – (direct) | display brightness, battery current, external display, camera, MS notify | – | dry-run |
-| Laptop 6 | ✓ | – (direct) | as Pro 10 | – | dry-run |
-| Laptop 7 Intel, Laptop 7 5G | ✓ | – (direct) | as Pro 10 | – | dry-run |
-| Laptop 7 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power | – | dry-run |
-| Laptop 13" (arm64) | ✓ | – (direct) | USB-C source power | – | dry-run |
-| Laptop Go 1 | ✓ | classic, untested | display brightness | – | dry-run |
-| Laptop Go 2 | ✓ | – (direct) | display brightness, battery current, external display, camera | – | dry-run |
-| Laptop Go 3 | ✓ | – (direct) | display brightness, battery current, external display, MS notify | – | dry-run |
-| Go 3 | ✓ | classic, untested | display brightness, external display, camera | – | dry-run |
-| Go 4 | ✓ | – (direct) | display brightness, battery current, external display, MS notify | – | dry-run |
-| Laptop Studio 1 | ✓ | classic, untested | display brightness, battery current, battery EWMA, external display, camera, dGPU power (2 channels) | – | dry-run |
-| Laptop Studio 2 | ✓ | – (direct) | display brightness, battery current, battery EWMA, external display, camera, dock, MS notify, dGPU power (2 channels), a composite sensor | – | dry-run |
+| Book 3 15" | ✓ | classic, tested after AC-L4 | all from sysfs and the EC data (kernel#195 or debug device) | ✓ field tests match Windows; kernel#190, #195 pending | controls; default dry-run until AC-L4 |
+| Book 3 13" | ✓ | classic (shared with 15") | all from sysfs | – | could control; untested |
+| Pro 7+ | ✓ | – (direct) | all from sysfs | – | could control; untested |
+| Pro 8 | ✓ | classic, untested | battery EWMA level: debug device (root) | – | could control with root; untested |
+| Pro 9 Intel | ✓ | – (direct) | battery EWMA level: debug device (root) | – | could control with root; untested |
+| Pro 9 5G (arm64) | ✓ | – (direct) | all from sysfs | – | could control; untested |
+| Pro 10, Pro 10 5G | ✓ | – (direct) | battery EWMA level and max charge: debug device (root) | – | could control with root; untested |
+| Pro 11 Intel | ✓ | – (direct) | as Pro 10 | – | could control with root; untested |
+| Pro 11 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | – | could control; untested |
+| Pro 12" 1st Ed. (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | – | could control; untested |
+| Laptop 3 AMD | ✓ | classic, untested (core 2.51 not compared) | all from sysfs | – | could control; untested |
+| Laptop 4 AMD | ✓ | classic, untested | all from sysfs | – | could control; untested |
+| Laptop 4 Intel | ✓ | – (direct) | all from sysfs | – | could control; untested |
+| Laptop 5 | ✓ | – (direct) | all from sysfs | – | could control; untested |
+| Laptop 6 | ✓ | – (direct) | as Pro 10 | – | could control with root; untested |
+| Laptop 7 Intel, Laptop 7 5G | ✓ | – (direct) | as Pro 10 | – | could control with root; untested |
+| Laptop 7 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | – | could control; untested |
+| Laptop 13" (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | – | could control; untested |
+| Laptop Go 1 | ✓ | classic, untested | all from sysfs | – | could control; untested |
+| Laptop Go 2 | ✓ | – (direct) | all from sysfs | – | could control; untested |
+| Laptop Go 3 | ✓ | – (direct) | all from sysfs | – | could control; untested |
+| Go 3 | ✓ | classic, untested | all from sysfs | – | could control; untested |
+| Go 4 | ✓ | – (direct) | all from sysfs | – | could control; untested |
+| Laptop Studio 1 | ✓ | classic, untested | battery EWMA level: debug device (root); dGPU power and temperature: NVML | – | could control with root; untested |
+| Laptop Studio 2 | ✓ | – (direct) | as Laptop Studio 1 | – | could control with root; untested |
 | 2025/26 models (MPTF) | – | – | – | – | not covered (Windows MPTF, [linux-surface#2384](https://github.com/linux-surface/linux-surface/issues/2384)) |
 
 Notes:
-- For devices with several blobs (sizes, LTE/Wi-Fi, iGPU/dGPU, LCD/OLED), the union of their missing inputs is shown.
-- "Could control" means Linux provides every input the blob needs for the limits. The temperature sensors it reads (SAM sensors 5 and 9
-  on most devices) still have to show up in Linux on that device. Only a report from the device can tell.
+- For devices with several blobs (sizes, LTE/Wi-Fi, iGPU/dGPU, LCD/OLED), the table covers all of them.
+- "Could control" means the daemon has a source for every input the blob needs for the limits. Nothing beyond the SB3 15" has run on
+  a device. The temperature sensors the blob reads (SAM sensors 5, 9 and 12 on most devices) still have to show up in Linux on that
+  device, and the newer input adapters are only tested on a fake sysfs and on this SB3. Only a report from the device can tell.
 - Older devices (Book 2, Pro 7, Laptop 3 Intel, …) use Intel DTT, not SMF, and are out of scope.
 
 ## Try it on your Surface

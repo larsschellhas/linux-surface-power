@@ -97,6 +97,9 @@ class Nvml:
                       min_clock_mhz=300,            # lowest supported graphics clock on the SB3 [M]
                       max_clock_mhz=self._uint("nvmlDeviceGetMaxClockInfo", graphics))
 
+    def temperature_c(self) -> int:
+        return self._uint("nvmlDeviceGetTemperature", ctypes.c_int(0))   # NVML_TEMPERATURE_GPU
+
     def set_cap(self, max_mhz: int) -> None:
         self._call("nvmlDeviceSetGpuLockedClocks", self.dev, ctypes.c_uint(300), ctypes.c_uint(max_mhz))
 
@@ -119,6 +122,20 @@ def find_nvidia_gpu(root: str = "/") -> str | None:
     return None
 
 
+def other_nvidia_client(root: str = "/") -> bool:
+    """True if a process other than this one has /dev/nvidia* open (needs root to see all processes)."""
+    own = str(os.getpid())
+    for fd in glob.glob(os.path.join(root, "proc/[0-9]*/fd/*")):
+        if fd.split(os.sep)[-3] == own:
+            continue
+        try:
+            if os.readlink(fd).startswith("/dev/nvidia"):
+                return True
+        except OSError:
+            continue                                # the process or descriptor went away
+    return False
+
+
 class ClockCapStandIn:
     """Regulates the dGPU power to the target with a clock cap, sampling only while another client keeps the GPU awake."""
 
@@ -136,17 +153,7 @@ class ClockCapStandIn:
         self.error: str | None = None if self.pci else "no NVIDIA GPU found"
 
     def _other_client(self) -> bool:
-        """True if a process other than this one has /dev/nvidia* open (needs root to see all processes)."""
-        own = str(os.getpid())
-        for fd in glob.glob(os.path.join(self.root, "proc/[0-9]*/fd/*")):
-            if fd.split(os.sep)[-3] == own:
-                continue
-            try:
-                if os.readlink(fd).startswith("/dev/nvidia"):
-                    return True
-            except OSError:
-                continue                            # the process or descriptor went away
-        return False
+        return other_nvidia_client(self.root)
 
     def _fail(self, e: Exception) -> None:
         self.enabled = False

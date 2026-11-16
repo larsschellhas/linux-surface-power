@@ -56,7 +56,10 @@ def main(argv=None) -> int:
               f"usable for control: {graph.usable_for_control}"]
     for u in graph.unsupported:
         lines.append(f"  unsupported: {u.guid[:8]} ({u.reason.split(':')[0]}) -> {', '.join(str(r) for r in u.reaches) or 'no output'}")
-    sources = [inp.HwmonTemperatures(root), inp.SliderState(root), inp.Batteries(root), inp.Posture(root, lambda: None)]
+    sources = [inp.HwmonTemperatures(root), inp.SliderState(root), inp.Batteries(root), inp.Posture(root, lambda: None),
+               inp.DisplayBrightness(root), inp.PlatformEvents(root), inp.BatteryCurrent(root), inp.StandbyPhase(root),
+               inp.UsbSourcePower(root), inp.DgpuOnBattery(root), inp.ProximitySensor(root),
+               inp.XboxController(root), inp.DgpuSensors(root)]
     provided = set().union(*(s.channels for s in sources))
     # EC power data (spec inputs 6): from the kernel attributes if present, else only through the debug device.
     pp = inp.PlatformPower(root)
@@ -68,12 +71,20 @@ def main(argv=None) -> int:
         lines.append("EC power data: debug device only (needs root and surface_aggregator_cdev; "
                      "kernel attributes missing)")
         via_cdev = set(pp.channels)
-    if args.with_ec and via_cdev:
+    ec_state = {inp.ChannelRef(inp.POWER, ch) for ch, _ in inp.BatteryEcState.QUERIES}   # SAM 0x1A / 0x69: cdev only
+    via_cdev |= ec_state
+    if args.with_ec and ec_state & set(graph.inputs):
+        got = inp.BatteryEcState(root).read(0)
+        lines.append("EC battery level/max-charge answers: " + ", ".join(f"{r.channel}={got.get(r)}" for r in sorted(ec_state)))
+        if all(got.get(r) is not None for r in ec_state):
+            provided |= ec_state
+            via_cdev -= ec_state
+    if args.with_ec and via_cdev - ec_state:
         pp.refresh()
         lines.append(f"EC 0x53 request answers: {pp.ok}; PSU size answers: {pp.values.get(inp.ChannelRef(inp.POWER, 7)) is not None}")
         if pp.ok:
-            provided |= via_cdev
-            via_cdev = set()
+            provided |= pp.channels
+            via_cdev -= pp.channels
     lines.append("inputs:")
     for ref in sorted(graph.inputs):
         if ref.guid == inp.PLACEHOLDER:
