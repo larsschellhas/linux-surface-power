@@ -36,6 +36,7 @@ flowchart LR
     IN2 --> B
     subgraph IN3["estimate"]
         I3_049E36F2["<b>power tracker items</b><br/>I_USB_SOURCE_PWR"]
+        I3_87008365["<b>client-computed channels</b><br/>I_CPU_TEMP_AVG"]
     end
     IN3 --> B
     subgraph IN4["constant"]
@@ -45,7 +46,7 @@ flowchart LR
     subgraph IN5["not provided"]
         I5_049E36F2["<b>power tracker items</b><br/>I_SYS_PWR"]
         I5_1FB53D4C["<b>power and display state</b><br/>I_NPU_UTIL; I_DISP_PWR1"]
-        I5_87008365["<b>client-computed channels</b><br/>I_CPU_TEMP_AVG; I_AMBIENT_AI"]
+        I5_87008365["<b>client-computed channels</b><br/>I_AMBIENT_AI"]
     end
     IN5 --> B
     B(["SMF blob<br/>140 lines, 14 block types"])
@@ -55,21 +56,24 @@ flowchart LR
         O0_B620798F["<b>fan and charging</b><br/>O_FAN1_MAX_SONES; O_FAN1_ACTIVE_SONES; O_FAN1_PROFILE<br/>O_FAN_CS_REQUEST; O_MCU_FAN_MAX_SONES"]
     end
     B --> OUT0
-    subgraph OUT1["optional (profile)"]
-        O1_B620798F["<b>fan and charging</b><br/>O_MCU_FAN_ON_TEMP; O_MCU_FAN_RAMP_TEMP; O_MCU_FAN_MAX_TEMP<br/>O_MCU_FAN_CRITICAL_TEMP; O_MCU_PROCHOT_TEMP; O_NORMAL_CHARGE_TEMP<br/>O_SLOW_CHARGE_TEMP; O_TRICKLE_CHARGE_TEMP"]
+    subgraph OUT1["not needed on Linux"]
+        O1_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
     end
     B --> OUT1
-    subgraph OUT2["no Linux path"]
-        O2_0B7B5350["<b>power limits</b><br/>O_SYS_MAX"]
+    subgraph OUT2["optional (profile)"]
+        O2_B620798F["<b>fan and charging</b><br/>O_MCU_FAN_ON_TEMP; O_MCU_FAN_RAMP_TEMP; O_MCU_FAN_MAX_TEMP<br/>O_MCU_FAN_CRITICAL_TEMP; O_MCU_PROCHOT_TEMP; O_NORMAL_CHARGE_TEMP<br/>O_SLOW_CHARGE_TEMP; O_TRICKLE_CHARGE_TEMP"]
     end
     B --> OUT2
-    subgraph OUT3["logged only"]
-        O3_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
-        O3_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
-        O3_87008365["<b>client-computed channels</b><br/>O_FAST_MAXIM_POLLING; O_CAMERA_AINR"]
-        O3_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_NPU"]
+    subgraph OUT3["no Linux path"]
+        O3_0B7B5350["<b>power limits</b><br/>O_SYS_MAX"]
     end
     B --> OUT3
+    subgraph OUT4["logged only"]
+        O4_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
+        O4_87008365["<b>client-computed channels</b><br/>O_FAST_MAXIM_POLLING; O_CAMERA_AINR"]
+        O4_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_NPU"]
+    end
+    B --> OUT4
 ```
 
 ## Readiness
@@ -79,8 +83,8 @@ A device can be controlled only when every output of its blob is written: a blob
 | Check | Result |
 |---|---|
 | Blob runs | ✓ |
-| Inputs with a Linux source | 18 of 23 (missing: `049E36F2/2`, `1FB53D4C/32`, `1FB53D4C/43`, `87008365/112`, `87008365/200`) |
-| Outputs written by Linux | 11 of 25 (not written: `0B7B5350/55`, `0B7B5350/70`, `110DF2A4/3`, `87008365/220`, `87008365/300`, `9BBB8910/200`, `B620798F/302`, `B620798F/304`, `B620798F/305`, `B620798F/307`, `B620798F/308`, `B620798F/309`, `B620798F/310`, `B620798F/311`) |
+| Inputs with a Linux source | 19 of 23 (missing: `049E36F2/2`, `1FB53D4C/43`) (no source, but it reaches no output: `1FB53D4C/32`, `87008365/200`) |
+| Outputs written by Linux | 11 of 25; not needed on Linux: `110DF2A4/3` (not written: `0B7B5350/55`, `0B7B5350/70`, `87008365/220`, `87008365/300`, `9BBB8910/200`, `B620798F/302`, `B620798F/304`, `B620798F/305`, `B620798F/307`, `B620798F/308`, `B620798F/309`, `B620798F/310`, `B620798F/311`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -107,7 +111,7 @@ A device can be controlled only when every output of its blob is written: a blob
 | `8060B17F/2` | I_EXT_DISPLAY | external display connected | DRM connectors | provided | – |
 | `8060B17F/3` | I_CAMERA | camera in use | video4linux runtime PM / open nodes | provided | – |
 | `8060B17F/9` | I_SURF_DOCK | Surface Docks attached | USB IDs | provided | – |
-| `87008365/112` | I_CPU_TEMP_AVG | averaged CPU temperature (client-computed) | – | not provided | – |
+| `87008365/112` | I_CPU_TEMP_AVG | averaged CPU temperature (client-computed) | `coretemp` package temperature, not averaged [H] (DV-7) | estimate | – |
 | `87008365/200` | I_AMBIENT_AI | estimated ambient temperature (client-computed) | – | not provided | – |
 | `DEF1AB69/100` | I_MS_NOTIFY | Modern Standby phase 1–5 | constant 4 | constant | – |
 
@@ -116,10 +120,10 @@ A device can be controlled only when every output of its blob is written: a blob
 | Channel | Microsoft name | Meaning | Linux | Status | Range (default / max / min) |
 |---|---|---|---|---|---|
 | `0B7B5350/55` | O_SYS_MAX | psys PL2, platform short-term | none on Qualcomm Snapdragon (arm64) (Intel RAPL only) | no Linux path | 90000 / 250000 / 15000 |
-| `0B7B5350/70` | O_BATT_MODE | battery mode | – | logged only | – |
+| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = no mains supply) | – | logged only | – |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
-| `110DF2A4/3` | O_MINPWR2 | minimum-power request | – | logged only | – |
+| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only, the power tracker only logs it [C] | not needed on Linux | – |
 | `87008365/220` | O_FAST_MAXIM_POLLING | fast power-meter polling | – | logged only | – |
 | `87008365/300` | O_CAMERA_AINR | camera AI noise reduction allowed | – | logged only | – |
 | `9BBB8910/5` | O_WTMF_GFX | throttle request for the GPU, % (100 = none) | GPU maximum frequency (i915, xe or devfreq; where the machine has one) | written | 100 / 100 / 0 |

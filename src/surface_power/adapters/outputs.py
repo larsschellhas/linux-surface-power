@@ -25,6 +25,13 @@ CHANNELS = {
     55: ("psys2", "psys", "short_term"),
 }
 PL3_CHANNEL = 59
+# PL1 time window (`CF2F6076/61`, the Windows SoC client's "average time", docs/research/12 2.1): ms in the blob, µs in powercap.
+SOC = "CF2F6076-EC8B-4D3D-AF61-CC76B118588A"
+WINDOW_CHANNEL = 61
+# The Windows client rounds the value UP to the next window the register can hold: 4 steps per octave from 2^10 to 2^16 units of
+# 1/1024 s (1 s ... 112 s). Thresholds of its table [C]; the unit 1/1024 s is the register's default time unit [H].
+WINDOW_STEPS_US = [round(2 ** y * (1 + f / 4) * 1_000_000 / 1024) for y in range(10, 17) for f in range(4)]
+WINDOW_HARD_US = (WINDOW_STEPS_US[0], WINDOW_STEPS_US[-1])      # 1.0 s ... 112 s
 # Hardware rounding tolerance for foreign-change detection (spec supervisor 5).
 TOLERANCE_UW = 200_000
 
@@ -46,6 +53,14 @@ class Target:
     hard_max_uw: int
     last_uw: int | None = None     # last value we wrote, as read back
 
+    def shape(self, uw: int) -> int:
+        """Last step before writing: a target may round the value the way the Windows client does."""
+        return uw
+
+    def tolerance(self, uw: int) -> int:
+        """How far a read-back value may differ from the written one (hardware rounding)."""
+        return TOLERANCE_UW
+
     @property
     def snapshot_key(self) -> str:
         return self.path
@@ -57,6 +72,25 @@ class Target:
     def write_uw(self, uw: int) -> None:
         with open(self.path, "w") as f:
             f.write(str(uw))
+
+
+@dataclass
+class WindowTarget(Target):
+    """The PL1 time window (`constraint_0_time_window_us`, spec outputs 3.2). The value is in µs here, so it shares the µ-unit code
+    path with the power limits. The register holds only 4 steps per octave, so a read-back differs from the request by up to ~14 %."""
+
+    @property
+    def snapshot_key(self) -> str:
+        return self.path
+
+    def shape(self, uw: int) -> int:
+        for step in WINDOW_STEPS_US:
+            if uw <= step:
+                return step
+        return WINDOW_STEPS_US[-1]
+
+    def tolerance(self, uw: int) -> int:
+        return max(TOLERANCE_UW, int(uw * 0.15))
 
 
 @dataclass
@@ -144,6 +178,14 @@ class OutputStage:
                 self.notes.append("pl4: peak_power reads 0 on this system, log-only (a device profile can enable it)")
                 continue
             self.targets[ChannelRef(LIMITS, ch)] = Target(name, path, *bounds(name))
+        # PL1 time window (CF2F6076/61): written to the same powercap constraint as PL1, `long_term`.
+        wzone = find_zone(root, "package-0")
+        wlimit = find_constraint(wzone, "long_term") if wzone else None
+        wpath = wlimit[:-len("_power_limit_uw")] + "_time_window_us" if wlimit else None
+        if wpath and os.path.exists(wpath):
+            self.targets[ChannelRef(SOC, WINDOW_CHANNEL)] = WindowTarget("pl1_window", wpath, *WINDOW_HARD_US)
+        else:
+            self.notes.append("pl1 time window: no powercap target (package-0/long_term time window), log-only")
         if pl3 is False:
             self.notes.append("pl3: off in the device profile, log-only")
         elif not msr.available(root):
@@ -160,10 +202,10 @@ class OutputStage:
         keys = []
         for t in self.targets.values():
             keys.append(t.snapshot_key)
-            if not isinstance(t, MsrTarget):
+            if not isinstance(t, (MsrTarget, WindowTarget)):
                 keys.append(os.path.join(os.path.dirname(t.path), os.path.basename(t.path).split("_power")[0]
                                          + "_time_window_us"))
-        return keys
+        return list(dict.fromkeys(keys))
 
     def kind(self, ref: ChannelRef) -> str:
         if ref in self.targets:
@@ -177,7 +219,7 @@ class OutputStage:
         if rng is not None:
             v = min(max(v, rng.min), rng.max)
         uw = int(round(v * 1000))
-        return min(max(uw, t.hard_min_uw), t.hard_max_uw)
+        return t.shape(min(max(uw, t.hard_min_uw), t.hard_max_uw))
 
     def apply(self, values: dict[ChannelRef, float], hold: frozenset = frozenset()) -> dict[ChannelRef, Result]:
         """Clamp, convert and write the values. Channels in `hold` keep their current value (e.g. PL4 while its EC
@@ -197,7 +239,8 @@ class OutputStage:
                 continue
             written = False
             current = t.read_uw()
-            if t.last_uw is None or abs(t.last_uw - uw) > TOLERANCE_UW or current is None or abs(current - uw) > TOLERANCE_UW:
+            tol = t.tolerance(uw)
+            if t.last_uw is None or abs(t.last_uw - uw) > tol or current is None or abs(current - uw) > tol:
                 try:
                     t.write_uw(uw)
                 except OSError as e:
@@ -224,7 +267,7 @@ class OutputStage:
             if t.last_uw is None:
                 continue
             cur_uw = t.read_uw()
-            if cur_uw is None or abs(cur_uw - t.last_uw) > TOLERANCE_UW:
+            if cur_uw is None or abs(cur_uw - t.last_uw) > t.tolerance(t.last_uw):
                 found.append(self.Foreign(ref, t.last_uw, cur_uw))
         return found
 

@@ -16,7 +16,7 @@ from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
-from surface_power.adapters import fan  # noqa: E402
+from surface_power.adapters import fan, notneeded  # noqa: E402
 from surface_power.engine.graph import build_graph, outputs_reached_by  # noqa: E402
 from surface_power.engine.registry import INTERNAL_NODE  # noqa: E402
 from surface_power.loader import container, parser  # noqa: E402
@@ -71,7 +71,7 @@ INTERFACES = {
     LID: "lid", STATE: "power and display state", SPT: "power tracker items", COMPOSITE: "client-computed channels",
     MS: "Modern Standby", LIMITS: "power limits", "110DF2A4": "thermal notifications",
     "9BBB8910": "thermal throttle requests", "B620798F": "fan and charging", "A79674B4": "sensor offsets",
-    "CF2F6076": "SoC (not analysed)", "349D0E39": "SoC (not analysed)", PLACEHOLDER: "placeholder",
+    "CF2F6076": "SoC client (time window)", "349D0E39": "SoC (not analysed)", PLACEHOLDER: "placeholder",
 }
 
 # Linux status of an input: "sysfs", "ec" (EC data: kernel#195 attributes or the debug device), "debug" (debug device only),
@@ -110,7 +110,8 @@ INPUTS = {
     (SPT, 6): ("", "power-meter item (not analysed)", "–", "none"),
     (SPT, 9): ("I_USB_SOURCE_PWR", "power out of the USB-C ports, mW", "Type-C ports (upper bound)", "estimate"),
     (COMPOSITE, 5): ("", "Xbox controller connected", "input devices", "sysfs"),
-    (COMPOSITE, 112): ("I_CPU_TEMP_AVG", "averaged CPU temperature (client-computed)", "–", "none"),
+    (COMPOSITE, 112): ("I_CPU_TEMP_AVG", "averaged CPU temperature (client-computed)",
+                       "`coretemp` package temperature, not averaged [H] (DV-7)", "estimate"),
     (COMPOSITE, 113): ("", "proximity sensor state", "0 (no sensor driver)", "constant"),
     (COMPOSITE, 200): ("I_AMBIENT_AI", "estimated ambient temperature (client-computed)", "–", "none"),
     (MS, 100): ("I_MS_NOTIFY", "Modern Standby phase 1–5", "constant 4", "constant"),
@@ -124,16 +125,18 @@ OUTPUTS = {
     (LIMITS, 55): ("O_SYS_MAX", "psys PL2, platform short-term", "powercap `psys/short_term`", "written"),
     (LIMITS, 59): ("O_SYS_PEAK", "PL3, platform peak with duty cycle", "MSR `0x615` (root; held without EC data)", "written"),
     (LIMITS, 64): ("", "not analysed", "–", "log"),
-    (LIMITS, 70): ("O_BATT_MODE", "battery mode", "–", "log"),
+    (LIMITS, 70): ("O_BATT_MODE", "battery mode (1 = no mains supply)", "–", "log"),
     (LIMITS, 71): ("", "not analysed", "–", "log"),
     (LIMITS, 201): ("", "dGPU power limit", "clock-cap stand-in (DO-1, profile)", "optional"),
     (LIMITS, 205): ("", "GPU power controller limit (not analysed)", "–", "log"),
     (LIMITS, 208): ("", "GPU power controller limit (not analysed)", "–", "log"),
     ("110DF2A4", 1): ("O_HOT", "hibernate request at 2 (thermal policy of zone `TPOL`)", "thermal action: hibernate, else suspend", "written"),
     ("110DF2A4", 2): ("O_CRT", "critical shutdown request at 2 (thermal policy of zone `TPOL`)", "thermal action: power off", "written"),
-    ("110DF2A4", 3): ("O_MINPWR2", "minimum-power request", "–", "log"),
-    ("A79674B4", 509): ("O_SEN9_OFFSET", "offset for sensor 9", "–", "log"),
-    ("CF2F6076", 61): ("", "SoC value (not analysed)", "–", "log"),
+    ("110DF2A4", 3): ("O_MINPWR2", "minimum-power flags (bit mask 0-7 of three controllers)", "–", "log"),
+    ("A79674B4", 509): ("O_SEN9_OFFSET", "virtual temperature offset of sensor 9, 0.1 K",
+                        "SAM TMP `0x24` through the SSAM debug device (root; neutral frame 0 at the restore)", "written"),
+    ("CF2F6076", 61): ("O_CPU_AVG_TIME", "PL1 time window, ms (rounded up to 4 steps per octave)",
+                       "powercap `package-0/long_term` time window", "written"),
     ("349D0E39", 1): ("", "SoC value (not analysed)", "–", "log"),
     ("349D0E39", 4): ("", "SoC value (not analysed)", "–", "log"),
     (COMPOSITE, 220): ("O_FAST_MAXIM_POLLING", "fast power-meter polling", "–", "log"),
@@ -152,7 +155,7 @@ WRITTEN = {51, 52, 54, 55}
 STATUS_IN = {"sysfs": "provided", "ec": "EC data (kernel#195 or debug device)", "debug": "debug device (root)",
              "estimate": "estimate", "constant": "constant", "nvml": "NVML", "fallback": "Windows fallback (DV-3)",
              "none": "not provided"}
-STATUS_OUT = {"written": "written", "optional": "optional (profile)", "noplat": "no Linux path", "log": "logged only"}
+STATUS_OUT = {"written": "written", "notneeded": "not needed on Linux", "optional": "optional (profile)", "noplat": "no Linux path", "log": "logged only"}
 
 
 def g8(guid: str) -> str:
@@ -193,7 +196,11 @@ def output_info(ref: ChannelRef, platform: str = "intel"):
     if g == "B620798F":
         return (FANS.get(c, ""), *FAN_CMDS.get(c, ("fan or charging setting for the EC", "no Linux path (command not known)", "noplat")))
     info = OUTPUTS.get((g, c), ("", "not analysed", "–", "log"))
-    if platform != "intel" and g == LIMITS and info[3] in ("written", "optional") and c != 201:
+    why = notneeded.static_reason(ChannelRef(next((k for k in (notneeded.BATT_MODE.guid, notneeded.MINPWR2.guid)
+                                                   if k.startswith(g)), g), c), platform)
+    if why:
+        return (info[0], info[1], "not needed on Linux: " + why, "notneeded")
+    if platform != "intel" and g in (LIMITS, "CF2F6076") and info[3] in ("written", "optional") and c != 201:
         return (info[0], info[1], f"none on {PLATFORM_NAMES[platform]} (Intel RAPL only)", "noplat")
     return info
 
@@ -276,6 +283,7 @@ def mermaid_label(items: list[str], per_line: int = 3) -> str:
 
 def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[str, dict]:
     ins, outs, blocks, reach, ranges = {}, {}, Counter(), defaultdict(set), {}
+    reach_any = defaultdict(set)
     rows = []
     for path in blobs:
         dec, parsed, data = load(path)
@@ -287,6 +295,7 @@ def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[
         for r in graph.inputs:
             ins[(g8(r.guid), r.channel)] = r
             for o in outputs_reached_by(r, parsed.algorithms):
+                reach_any[(g8(r.guid), r.channel)].add((g8(o.guid), o.channel))
                 if g8(o.guid) == LIMITS:
                     reach[(g8(r.guid), r.channel)].add(o.channel)
         for r in graph.outputs:
@@ -381,23 +390,30 @@ def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[
                  + ". The daemon stays in dry-run on this device.")
         L.append("")
     written_n = sum(1 for r in outs.values() if out_status(r) == "written")
-    missing_out = [k for k, r in sorted(outs.items()) if out_status(r) != "written"]
-    missing_in = [k for k, r in sorted(ins.items()) if k[0] != PLACEHOLDER and input_info(r)[3] == "none"]
+    not_needed = [k for k, r in sorted(outs.items()) if out_status(r) == "notneeded"]
+    missing_out = [k for k, r in sorted(outs.items()) if out_status(r) not in ("written", "notneeded")]
+    # An input without a Linux source only matters if it reaches an output (the daemon applies the same rule).
+    missing_in = [k for k, r in sorted(ins.items())
+                  if k[0] != PLACEHOLDER and input_info(r)[3] == "none" and reach_any.get(k)]
+    idle_in = [k for k, r in sorted(ins.items())
+               if k[0] != PLACEHOLDER and input_info(r)[3] == "none" and not reach_any.get(k)]
     ready = not missing_out and not missing_in and platform == "intel"
     R = ["## Readiness", "",
          "A device can be controlled only when every output of its blob is written: a blob that regulates the CPU "
          "but whose fan, throttle or safety outputs go nowhere would run with part of its design missing.", "",
          "| Check | Result |", "|---|---|",
          f"| Blob runs | {'✓' if all(r[4] for r in rows) else '–'} |",
-         f"| Inputs with a Linux source | {len(ins) - len(missing_in) - (1 if (PLACEHOLDER, 1) in ins else 0)} of "
+         f"| Inputs with a Linux source | {len(ins) - len(missing_in) - len(idle_in) - (1 if (PLACEHOLDER, 1) in ins else 0)} of "
          f"{len(ins) - (1 if (PLACEHOLDER, 1) in ins else 0)}"
-         + (f" (missing: {', '.join(f'`{g}/{c}`' for g, c in missing_in)})" if missing_in else "") + " |",
+         + (f" (missing: {', '.join(f'`{g}/{c}`' for g, c in missing_in)})" if missing_in else "")
+         + (f" (no source, but it reaches no output: {', '.join(f'`{g}/{c}`' for g, c in idle_in)})" if idle_in else "") + " |",
          f"| Outputs written by Linux | {written_n} of {len(outs)}"
+         + (f"; not needed on Linux: {', '.join(f'`{g}/{c}`' for g, c in not_needed)}" if not_needed else "")
          + (f" (not written: {', '.join(f'`{g}/{c}`' for g, c in missing_out)})" if missing_out else "") + " |",
          f"| Ready for control | {'yes' if ready else 'no: dry-run only'} |", ""]
     i = L.index("## Inputs")
     L[i:i] = R
-    summary = {"title": title, "written_n": written_n, "ready": ready, "missing_out": missing_out, "blobs": len(rows), "inputs": len(ins), "outputs": len(outs), "blocking": blocking,
+    summary = {"title": title, "written_n": written_n, "not_needed_n": len(not_needed), "ready": ready, "missing_out": missing_out, "blobs": len(rows), "inputs": len(ins), "outputs": len(outs), "blocking": blocking,
                "written": sorted(c for g, c in outs if g == LIMITS and c in WRITTEN) if platform == "intel" else [],
                "platform": platform, "outs": outs, "groups_in": groups_in}
     return "\n".join(L), summary
@@ -459,7 +475,7 @@ def main() -> int:
     for p in order:
         s = summaries[p]
         L.append(f"| [{s['title']}]({p}.md) | {PLATFORM_NAMES[s['platform']].split(' (')[0]} | {s['blobs']} | {s['inputs']} | "
-                 f"{s['written_n']} of {s['outputs']} | {', '.join(names[c] for c in s['written']) or 'none'} | "
+                 f"{s['written_n']} of {s['outputs']}{' + ' + str(s['not_needed_n']) + ' not needed' if s['not_needed_n'] else ''} | {', '.join(names[c] for c in s['written']) or 'none'} | "
                  f"{'yes' if s['ready'] else 'no'} |")
     L += ["", *catalogue(all_outs)]
     with open(os.path.join(args.out, "README.md"), "w") as f:

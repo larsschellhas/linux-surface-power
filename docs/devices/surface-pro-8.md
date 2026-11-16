@@ -36,7 +36,7 @@ flowchart LR
         I2_28B7BD85["<b>battery and power data</b><br/>I_BDR_EWMA1_LVL"]
     end
     IN2 --> B
-    subgraph IN3["not provided"]
+    subgraph IN3["estimate"]
         I3_87008365["<b>client-computed channels</b><br/>I_CPU_TEMP_AVG"]
     end
     IN3 --> B
@@ -45,15 +45,19 @@ flowchart LR
         O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
         O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_PARK"]
+        O0_A79674B4["<b>sensor offsets</b><br/>O_SEN9_OFFSET"]
         O0_B620798F["<b>fan and charging</b><br/>101 minimum fan speed"]
+        O0_CF2F6076["<b>SoC client (time window)</b><br/>O_CPU_AVG_TIME"]
     end
     B --> OUT0
-    subgraph OUT1["logged only"]
-        O1_0B7B5350["<b>power limits</b><br/>O_BATT_MODE; 71 not analysed"]
-        O1_A79674B4["<b>sensor offsets</b><br/>O_SEN9_OFFSET"]
-        O1_CF2F6076["<b>SoC (not analysed)</b><br/>61 SoC value"]
+    subgraph OUT1["not needed on Linux"]
+        O1_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
     end
     B --> OUT1
+    subgraph OUT2["logged only"]
+        O2_0B7B5350["<b>power limits</b><br/>71 not analysed"]
+    end
+    B --> OUT2
 ```
 
 ## Readiness
@@ -63,8 +67,8 @@ A device can be controlled only when every output of its blob is written: a blob
 | Check | Result |
 |---|---|
 | Blob runs | ✓ |
-| Inputs with a Linux source | 14 of 15 (missing: `87008365/112`) |
-| Outputs written by Linux | 10 of 14 (not written: `0B7B5350/70`, `0B7B5350/71`, `A79674B4/509`, `CF2F6076/61`) |
+| Inputs with a Linux source | 15 of 15 |
+| Outputs written by Linux | 12 of 14; not needed on Linux: `0B7B5350/70` (not written: `0B7B5350/71`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -85,7 +89,7 @@ A device can be controlled only when every output of its blob is written: a blob
 | `8060B17F/1` | I_POSTURE | posture 1–5 | `surface_dtx` + lid | provided | – |
 | `8060B17F/2` | I_EXT_DISPLAY | external display connected | DRM connectors | provided | PL1 |
 | `8060B17F/3` | I_CAMERA | camera in use | video4linux runtime PM / open nodes | provided | PL1 |
-| `87008365/112` | I_CPU_TEMP_AVG | averaged CPU temperature (client-computed) | – | not provided | – |
+| `87008365/112` | I_CPU_TEMP_AVG | averaged CPU temperature (client-computed) | `coretemp` package temperature, not averaged [H] (DV-7) | estimate | – |
 
 ## Outputs
 
@@ -97,11 +101,11 @@ A device can be controlled only when every output of its blob is written: a blob
 | `0B7B5350/54` | O_SYS_AVG | psys PL1, platform long-term | powercap `psys/long_term` | written | 45000 / 101000 / 10000 |
 | `0B7B5350/55` | O_SYS_MAX | psys PL2, platform short-term | powercap `psys/short_term` | written | 45000 / 120000 / 10000 |
 | `0B7B5350/59` | O_SYS_PEAK | PL3, platform peak with duty cycle | MSR `0x615` (root; held without EC data) | written | 65000 / 130000 / 20000 |
-| `0B7B5350/70` | O_BATT_MODE | battery mode | – | logged only | – |
+| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = no mains supply) | not needed on Linux: the Intel SoC client writes nothing for it (no register, SAM or ACPI request); it only hands a request flag to the Windows-only SMF core [C code, H flag meaning] | not needed on Linux | – |
 | `0B7B5350/71` | – | not analysed | – | logged only | – |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
 | `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |
-| `A79674B4/509` | O_SEN9_OFFSET | offset for sensor 9 | – | logged only | – |
+| `A79674B4/509` | O_SEN9_OFFSET | virtual temperature offset of sensor 9, 0.1 K | SAM TMP `0x24` through the SSAM debug device (root; neutral frame 0 at the restore) | written | – |
 | `B620798F/101` | – | minimum fan speed, rpm (fan 1) | SAM FAN `0x0b` through the SSAM debug device (root; neutral frame 0 at the restore) | written | – |
-| `CF2F6076/61` | – | SoC value (not analysed) | – | logged only | – |
+| `CF2F6076/61` | O_CPU_AVG_TIME | PL1 time window, ms (rounded up to 4 steps per octave) | powercap `package-0/long_term` time window | written | – |

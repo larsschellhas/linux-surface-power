@@ -16,7 +16,7 @@ The Surface thermal-policy driver owns the ACPI thermal zone `TPOL` (`MSHW0187`)
 - **`110DF2A4/1`** (`O_HOT`) and **`/2`** (`O_CRT`), values 0–2: at 2 the driver sets the "hibernate" or the "critical" flag of the
   zone's thermal policy. The 24-byte policy it returns matches the Windows `THERMAL_POLICY` layout (flags at offsets 5 and 6, passive
   limit at 12) [H: identified by the layout]. Windows then hibernates or shuts down.
-- **`110DF2A4/3`** (`O_MINPWR2`): not analysed.
+- **`110DF2A4/3`** (`O_MINPWR2`): no Windows client takes it; the power tracker only logs it [C]. Not needed on Linux (`12-remaining-outputs.md`).
 
 On the SB3 15" (engine run, skin sensors 505 and 509 at the same temperature): `O_HOT` is 2 from about 54 °C to 56 °C, `O_CRT` is 2
 from about 56 °C up to 100 °C. The daemon's own emergency rule (skin ≥ 60 °C for 10 s) only restores the firmware limits.
@@ -28,7 +28,7 @@ Processor Aggregator Device (`PAGD`, matched with `/62` [H]), so only the Snapdr
 
 ## 3. Others
 - **Power limits (`0B7B5350`):** IHV CPU client (Intel, Qualcomm), AMD SMF driver, GPU power controller (Laptop Studio, 201–208),
-  battery client (70 battery mode) [C, GUID references]. Linux writes PL1, PL2 and psys PL1/PL2 on Intel through powercap, PL4
+  battery client (its own channels 300/400, not 70) [C]; 70 "battery mode" only sets a request flag in the SoC client, see `12-remaining-outputs.md`. Linux writes PL1, PL2 and psys PL1/PL2 on Intel through powercap, PL4
   where powercap reports it and PL3 through MSR 0x615 (both held while their EC inputs are invalid), and the dGPU limit through the
   clock-cap stand-in.
 - **Fans and charging (`B620798F`):** the SMF client sends each channel as one SAM command to the EC (FAN and TMP categories); the
@@ -36,8 +36,8 @@ Processor Aggregator Device (`PAGD`, matched with `/62` [H]), so only the Snapdr
   limits (101–103, 111–116, 121–126, 306, 312) through the SSAM debug device (`../specs/outputs.md` 9); 201 and 301 are sent by the
   linux-surface kernel (`surface_platform_profile`), and the temperature thresholds 302–311 stay off unless a device profile opts in.
   Implemented and tested on fakes only: no device with these outputs has run it (`scripts/fan-test.py` is the test for a tester).
-- **Sensor offsets (`A79674B4`):** passed to the EC/MCU by the SMF client [C, GUID references], commands not analysed.
-- **`CF2F6076`, `349D0E39`:** SoC-specific values for the IHV CPU client and the AMD driver, not analysed.
+- **Sensor offsets (`A79674B4`):** SAM TMP `0x24` with the offset in 0.1 K, sent by the SMF client; written by the daemon since 16.11.2026 (`12-remaining-outputs.md` 2.3).
+- **`CF2F6076`:** channel 61 is the PL1 time window of the IHV CPU client (`12-remaining-outputs.md` 2.1), written through powercap. `349D0E39` (AMD and others) is not analysed.
 - **`87008365/220, 250, 300`:** the Surface service (power-meter polling, camera noise reduction), not relevant for limits.
 
 ## 4. PL3 and PL4 on the SB3 15" [M, 16.11.2026]

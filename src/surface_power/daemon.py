@@ -22,7 +22,8 @@ from . import monitor, supervisor
 from .adapters import inputs as inp
 from .adapters.actions import ThermalActions
 from .adapters.cpufreq import THROTTLE, ThrottleStage
-from .adapters.fan import FAN_GUID, FanStage, NullTransport
+from .adapters import notneeded
+from .adapters.fan import FanStage, NullTransport, handles as fan_handles
 from .adapters import gpu
 from .adapters.gpu import ClockCapStandIn
 from .adapters.outputs import OutputStage
@@ -136,7 +137,7 @@ class Daemon:
                    self.platform, inp.DisplayBrightness(root), inp.PlatformEvents(root), inp.BatteryCurrent(root),
                    self.battery_ec, inp.StandbyPhase(root), inp.UsbSourcePower(root),
                    inp.DgpuOnBattery(root), inp.ProximitySensor(root), inp.XboxController(root),
-                   inp.DgpuSensors(root, probe=self.gpu_probe)]
+                   inp.DgpuSensors(root, probe=self.gpu_probe), inp.CpuTempAverage(root)]
         self.cpu_ref = ChannelRef(inp.TEMP, 102)
         # Skin channels that controllers regulate on; the emergency rules watch them (spec supervisor 4).
         self.skin_refs = sorted({c.line.inputs[0] for c in self.graph.controllers if c.line.inputs[0].guid == inp.TEMP})
@@ -154,7 +155,7 @@ class Daemon:
         self.throttle_preview = ThrottleStage(root, throttle_refs, dry_run=True)
 
         # Fan and charging outputs (spec outputs 9): SAM requests through the debug device, or the kernel's own path.
-        fan_refs = [r for r in self.graph.outputs if r.guid == FAN_GUID]
+        fan_refs = [r for r in self.graph.outputs if fan_handles(r)]
         if fan_transport is None:
             fan_transport = NullTransport() if args.no_ec else None
         fkw = dict(transport=fan_transport, thresholds=bool(p and p.fan_thresholds))
@@ -171,6 +172,9 @@ class Daemon:
         written |= self.actions.channels & set(self.graph.outputs)
         written |= {r for r in throttle_refs if self.throttle.has_target(r)}
         written |= {r for r in fan_refs if self.fan.has_path(r)}
+        # Outputs with documented evidence that Linux needs nothing for them (spec outputs 10): covered, but shown as such.
+        self.not_needed = {r: notneeded.reason(r, root) for r in self.graph.outputs if notneeded.reason(r, root)}
+        written |= set(self.not_needed)
         # PL4 and PL3 keep their value while an EC input on their path is invalid: their fallback would be far below the
         # firmware value (Pro 10: PL4 20 W instead of 45 W) [D].
         lines_ = self.loaded.parsed.algorithms
@@ -252,6 +256,8 @@ class Daemon:
                                 "surface_aggregator_cdev; until then the EC power data are invalid")
         for note in self.outputs.notes + self.throttle.notes + self.fan.notes:
             self.log("info", note)
+        for r, why in self.not_needed.items():
+            self.log("info", f"output {r}: not needed on Linux: {why}")
 
     # --- helpers ---
     def _fan_touch(self, key: str, frame) -> None:
@@ -375,6 +381,8 @@ class Daemon:
 
     def _write_status(self) -> None:
         def target(ref):
+            if ref in self.not_needed:
+                return "not needed on Linux: " + self.not_needed[ref]
             if ref in self.actions.channels:
                 return "thermal action" if self.mode == "control" else "thermal action (not armed)"
             if ref == DGPU and self.dgpu:
@@ -386,7 +394,7 @@ class Daemon:
                 if self.state == "control":
                     return what
                 return "firmware" if self.state in ("emergency", "yielded", "paused") else f"{what} (dry-run)"
-            if ref.guid == FAN_GUID:
+            if fan_handles(ref):
                 what = self.fan.describe(ref)
                 if not self.fan.sends(ref):
                     return what                                  # kernel path, disabled or no path: the same in every state

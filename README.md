@@ -70,29 +70,29 @@ packages (`scripts/corpus-report.py`, `docs/research/09-newer-blobs.md`). Only t
 |---|---|---|---|---|---|---|
 | Book 3 15" | ✓ | classic, tested after AC-L4 | all from sysfs and the EC data (kernel#195 or debug device) | [9 of 9](docs/devices/surface-book-3-15.md) | ✓ field tests match Windows; kernel#190, #195 pending | all outputs written; dry-run by default until AC-L4 (soak test restarted 16.11.2026) |
 | Book 3 13" | ✓ | classic (shared with 15") | all from sysfs | [9 of 9](docs/devices/surface-book-3-13.md) | – | all outputs written; dry-run, not checked on a device |
-| Pro 7+ | ✓ | – (direct) | all from sysfs | [9 of 12](docs/devices/surface-pro-7-plus.md) | – | dry-run only |
-| Pro 8 | ✓ | classic, untested | battery EWMA level: debug device (root) | [10 of 14](docs/devices/surface-pro-8.md) | – | dry-run only |
-| Pro 9 Intel | ✓ | – (direct) | battery EWMA level: debug device (root) | [13 of 17](docs/devices/surface-pro-9-intel.md) | – | dry-run only |
-| Pro 9 5G (arm64) | ✓ | – (direct) | all from sysfs | [7 of 9](docs/devices/surface-pro-9-5g.md) | – | dry-run only; no Linux path for its limits yet |
-| Pro 10, Pro 10 5G | ✓ | – (direct) | battery EWMA level and max charge: debug device (root) | [13 of 17](docs/devices/surface-pro-10.md), [13 of 20](docs/devices/surface-pro-10-5g.md) | – | dry-run only |
-| Pro 11 Intel | ✓ | – (direct) | as Pro 10 | [13 of 16](docs/devices/surface-pro-11-intel.md) | – | dry-run only |
-| Pro 11 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [11 of 20](docs/devices/surface-pro-11-snapdragon.md) | – | dry-run only; no Linux path for its limits yet |
-| Pro 12" 1st Ed. (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [6 of 16](docs/devices/surface-pro-12-1st-edition.md) | – | dry-run only; no Linux path for its limits yet |
+| Pro 7+ | ✓ | – (direct) | all from sysfs | [11 of 12 + 1 not needed](docs/devices/surface-pro-7-plus.md) | – | all outputs covered (written, or not needed on Linux); dry-run by default, untested on a device |
+| Pro 8 | ✓ | classic, untested | battery EWMA level: debug device (root) | [12 of 14 + 1 not needed](docs/devices/surface-pro-8.md) | – | dry-run only |
+| Pro 9 Intel | ✓ | – (direct) | battery EWMA level: debug device (root) | [15 of 17 + 2 not needed](docs/devices/surface-pro-9-intel.md) | – | all outputs covered (written, or not needed on Linux); dry-run by default, untested on a device |
+| Pro 9 5G (arm64) | ✓ | – (direct) | all from sysfs | [7 of 9 + 1 not needed](docs/devices/surface-pro-9-5g.md) | – | dry-run only; no Linux path for its limits yet |
+| Pro 10, Pro 10 5G | ✓ | direct (Pro 10: profile, untested) | battery EWMA level and max charge: debug device (root) | [15 of 17 + 2 not needed](docs/devices/surface-pro-10.md), [15 of 20 + 2 not needed](docs/devices/surface-pro-10-5g.md) | – | Pro 10: all outputs covered (written, or not needed on Linux), profile `surface-pro-10.toml` (untested); dry-run by default, [tester checklist](docs/research/12-remaining-outputs.md). Pro 10 5G: dry-run only, no profile |
+| Pro 11 Intel | ✓ | – (direct) | as Pro 10 | [14 of 16 + 2 not needed](docs/devices/surface-pro-11-intel.md) | – | all outputs covered (written, or not needed on Linux); dry-run by default, untested on a device |
+| Pro 11 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [11 of 20 + 1 not needed](docs/devices/surface-pro-11-snapdragon.md) | – | dry-run only; no Linux path for its limits yet |
+| Pro 12" 1st Ed. (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [6 of 16 + 1 not needed](docs/devices/surface-pro-12-1st-edition.md) | – | dry-run only; no Linux path for its limits yet |
 | Laptop 3 AMD | ✓ | classic, untested (core 2.51 not compared) | all from sysfs | [2 of 5](docs/devices/surface-laptop-3-amd.md) | – | dry-run only; no Linux path for its limits yet |
 | Laptop 4 AMD | ✓ | classic, untested | all from sysfs | [3 of 8](docs/devices/surface-laptop-4-amd.md) | – | dry-run only; no Linux path for its limits yet |
-| Laptop 4 Intel | ✓ | – (direct) | all from sysfs | [9 of 12](docs/devices/surface-laptop-4-intel.md) | – | dry-run only |
-| Laptop 5 | ✓ | – (direct) | all from sysfs | [12 of 16](docs/devices/surface-laptop-5.md) | – | dry-run only |
-| Laptop 6 | ✓ | – (direct) | as Pro 10 | [13 of 17](docs/devices/surface-laptop-6.md) | – | dry-run only |
-| Laptop 7 Intel, Laptop 7 5G | ✓ | – (direct) | as Pro 10 | [13 of 16](docs/devices/surface-laptop-7-intel.md), [13 of 19](docs/devices/surface-laptop-7-5g.md) | – | dry-run only |
-| Laptop 7 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [11 of 18](docs/devices/surface-laptop-7-snapdragon.md) | – | dry-run only; no Linux path for its limits yet |
-| Laptop 13" (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [11 of 25](docs/devices/surface-laptop-13.md) | – | dry-run only; no Linux path for its limits yet |
-| Laptop Go 1 | ✓ | classic, untested | all from sysfs | [8 of 10](docs/devices/surface-laptop-go.md) | – | dry-run only |
-| Laptop Go 2 | ✓ | – (direct) | all from sysfs | [10 of 14](docs/devices/surface-laptop-go-2.md) | – | dry-run only |
-| Laptop Go 3 | ✓ | – (direct) | all from sysfs | [13 of 17](docs/devices/surface-laptop-go-3.md) | – | dry-run only |
-| Go 3 | ✓ | classic, untested | all from sysfs | [9 of 12](docs/devices/surface-go-3.md) | – | dry-run only |
-| Go 4 | ✓ | – (direct) | all from sysfs | [9 of 13](docs/devices/surface-go-4.md) | – | dry-run only |
-| Laptop Studio 1 | ✓ | classic, untested | battery EWMA level: debug device (root); dGPU power and temperature: NVML | [11 of 16](docs/devices/surface-laptop-studio.md) | – | dry-run only |
-| Laptop Studio 2 | ✓ | – (direct) | as Laptop Studio 1 | [15 of 25](docs/devices/surface-laptop-studio-2.md) | – | dry-run only |
+| Laptop 4 Intel | ✓ | – (direct) | all from sysfs | [11 of 12 + 1 not needed](docs/devices/surface-laptop-4-intel.md) | – | all outputs covered (written, or not needed on Linux); dry-run by default, untested on a device |
+| Laptop 5 | ✓ | – (direct) | all from sysfs | [14 of 16 + 2 not needed](docs/devices/surface-laptop-5.md) | – | all outputs covered (written, or not needed on Linux); dry-run by default, untested on a device |
+| Laptop 6 | ✓ | – (direct) | as Pro 10 | [15 of 17 + 2 not needed](docs/devices/surface-laptop-6.md) | – | all outputs covered (written, or not needed on Linux); dry-run by default, untested on a device |
+| Laptop 7 Intel, Laptop 7 5G | ✓ | – (direct) | as Pro 10 | [14 of 16 + 2 not needed](docs/devices/surface-laptop-7-intel.md), [14 of 19 + 2 not needed](docs/devices/surface-laptop-7-5g.md) | – | dry-run only |
+| Laptop 7 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [11 of 18 + 1 not needed](docs/devices/surface-laptop-7-snapdragon.md) | – | dry-run only; no Linux path for its limits yet |
+| Laptop 13" (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [11 of 25 + 1 not needed](docs/devices/surface-laptop-13.md) | – | dry-run only; no Linux path for its limits yet |
+| Laptop Go 1 | ✓ | classic, untested | all from sysfs | [10 of 10](docs/devices/surface-laptop-go.md) | – | all outputs covered (written, or not needed on Linux); dry-run by default, untested on a device |
+| Laptop Go 2 | ✓ | – (direct) | all from sysfs | [12 of 14 + 1 not needed](docs/devices/surface-laptop-go-2.md) | – | dry-run only |
+| Laptop Go 3 | ✓ | – (direct) | all from sysfs | [15 of 17 + 2 not needed](docs/devices/surface-laptop-go-3.md) | – | all outputs covered (written, or not needed on Linux); dry-run by default, untested on a device |
+| Go 3 | ✓ | classic, untested | all from sysfs | [10 of 12 + 1 not needed](docs/devices/surface-go-3.md) | – | dry-run only |
+| Go 4 | ✓ | – (direct) | all from sysfs | [11 of 13 + 2 not needed](docs/devices/surface-go-4.md) | – | all outputs covered (written, or not needed on Linux); dry-run by default, untested on a device |
+| Laptop Studio 1 | ✓ | classic, untested | battery EWMA level: debug device (root); dGPU power and temperature: NVML | [12 of 16 + 1 not needed](docs/devices/surface-laptop-studio.md) | – | dry-run only |
+| Laptop Studio 2 | ✓ | – (direct) | as Laptop Studio 1 | [16 of 25 + 2 not needed](docs/devices/surface-laptop-studio-2.md) | – | dry-run only |
 | 2025/26 models (MPTF) | – | – | – | – | – | not covered (Windows MPTF, [linux-surface#2384](https://github.com/linux-surface/linux-surface/issues/2384)) |
 
 Notes:
@@ -104,8 +104,10 @@ Notes:
   (`docs/specs/outputs.md` 8; not yet run on a device that has such an output). The fan outputs (`B620798F`) are sent as SAM requests
   through the debug device (root), and the kernel sends the fan profile and fan state (`docs/specs/outputs.md` 9; implemented and tested on
   fakes only, `scripts/fan-test.py` is the test for owners of a Pro 10, Laptop 6 or newer). The temperature thresholds of the arm64 Laptop 13" and
-  Pro 12" (302-311) stay off unless a profile opts in, so these two are not ready. Elsewhere still without a Linux path: battery mode and a few
-  SoC values (see the device pages). The counts in the table follow the device pages.
+  Pro 12" (302-311) stay off unless a profile opts in, so these two are not ready. Since 16.11.2026 (second change) the PL1 time window (`CF2F6076/61`) is written through powercap, the sensor offset (`A79674B4/509`) as a
+  SAM TMP request, and battery mode (`0B7B5350/70`) and `O_MINPWR2` (`110DF2A4/3`) are classed "not needed on Linux" with evidence
+  (`docs/research/12-remaining-outputs.md`); the Pro 10 has a profile (`tested = false`) and a tester checklist there. Elsewhere still without a Linux path: a few
+  SoC values of other interfaces (see the device pages). The counts in the table follow the device pages.
 - Nothing beyond the SB3 15" has run on a device. The newer input adapters are only tested on a fake sysfs and on this SB3.
 - **AMD and Snapdragon devices:** the blob runs and every input has a source, but Linux has no write path for these limits: powercap
   limits exist on Intel only. On Snapdragon the blobs regulate mainly through thermal throttle requests per CPU cluster and GPU; these now become cpufreq

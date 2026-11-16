@@ -34,27 +34,31 @@ flowchart LR
         I2_28B7BD85["<b>battery and power data</b><br/>I_BDR_EWMA1_LVL; I_BAT1_MAX_CHARGE"]
     end
     IN2 --> B
-    subgraph IN3["constant"]
-        I3_DEF1AB69["<b>Modern Standby</b><br/>I_MS_NOTIFY"]
+    subgraph IN3["estimate"]
+        I3_87008365["<b>client-computed channels</b><br/>I_CPU_TEMP_AVG"]
     end
     IN3 --> B
-    subgraph IN4["not provided"]
-        I4_87008365["<b>client-computed channels</b><br/>I_CPU_TEMP_AVG; I_AMBIENT_AI"]
+    subgraph IN4["constant"]
+        I4_DEF1AB69["<b>Modern Standby</b><br/>I_MS_NOTIFY"]
     end
     IN4 --> B
+    subgraph IN5["not provided"]
+        I5_87008365["<b>client-computed channels</b><br/>I_AMBIENT_AI"]
+    end
+    IN5 --> B
     B(["SMF blob<br/>101 lines, 13 block types"])
     subgraph OUT0["written"]
         O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
         O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_PARK"]
+        O0_A79674B4["<b>sensor offsets</b><br/>O_SEN9_OFFSET"]
         O0_B620798F["<b>fan and charging</b><br/>111 fan noise upper limit; O_FAN1_ACTIVE_SPL; O_FAN1_PROFILE<br/>O_FAN_CS_REQUEST"]
+        O0_CF2F6076["<b>SoC client (time window)</b><br/>O_CPU_AVG_TIME"]
     end
     B --> OUT0
-    subgraph OUT1["logged only"]
+    subgraph OUT1["not needed on Linux"]
         O1_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
         O1_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
-        O1_A79674B4["<b>sensor offsets</b><br/>O_SEN9_OFFSET"]
-        O1_CF2F6076["<b>SoC (not analysed)</b><br/>61 SoC value"]
     end
     B --> OUT1
 ```
@@ -66,9 +70,9 @@ A device can be controlled only when every output of its blob is written: a blob
 | Check | Result |
 |---|---|
 | Blob runs | ✓ |
-| Inputs with a Linux source | 18 of 20 (missing: `87008365/112`, `87008365/200`) |
-| Outputs written by Linux | 13 of 17 (not written: `0B7B5350/70`, `110DF2A4/3`, `A79674B4/509`, `CF2F6076/61`) |
-| Ready for control | no: dry-run only |
+| Inputs with a Linux source | 19 of 20 (no source, but it reaches no output: `87008365/200`) |
+| Outputs written by Linux | 15 of 17; not needed on Linux: `0B7B5350/70`, `110DF2A4/3` |
+| Ready for control | yes |
 
 ## Inputs
 
@@ -91,7 +95,7 @@ A device can be controlled only when every output of its blob is written: a blob
 | `8060B17F/2` | I_EXT_DISPLAY | external display connected | DRM connectors | provided | PL1 |
 | `8060B17F/3` | I_CAMERA | camera in use | video4linux runtime PM / open nodes | provided | PL1 |
 | `8060B17F/9` | I_SURF_DOCK | Surface Docks attached | USB IDs | provided | PL1 |
-| `87008365/112` | I_CPU_TEMP_AVG | averaged CPU temperature (client-computed) | – | not provided | – |
+| `87008365/112` | I_CPU_TEMP_AVG | averaged CPU temperature (client-computed) | `coretemp` package temperature, not averaged [H] (DV-7) | estimate | – |
 | `87008365/200` | I_AMBIENT_AI | estimated ambient temperature (client-computed) | – | not provided | – |
 | `DEF1AB69/100` | I_MS_NOTIFY | Modern Standby phase 1–5 | constant 4 | constant | PL1, PL2 |
 
@@ -105,14 +109,14 @@ A device can be controlled only when every output of its blob is written: a blob
 | `0B7B5350/54` | O_SYS_AVG | psys PL1, platform long-term | powercap `psys/long_term` | written | 45000 / 250000 / 15000 |
 | `0B7B5350/55` | O_SYS_MAX | psys PL2, platform short-term | powercap `psys/short_term` | written | 90000 / 250000 / 15000 |
 | `0B7B5350/59` | O_SYS_PEAK | PL3, platform peak with duty cycle | MSR `0x615` (root; held without EC data) | written | 90000 / 250000 / 15000 |
-| `0B7B5350/70` | O_BATT_MODE | battery mode | – | logged only | – |
+| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = no mains supply) | not needed on Linux: the Intel SoC client writes nothing for it (no register, SAM or ACPI request); it only hands a request flag to the Windows-only SMF core [C code, H flag meaning] | not needed on Linux | – |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
-| `110DF2A4/3` | O_MINPWR2 | minimum-power request | – | logged only | – |
+| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only, the power tracker only logs it [C] | not needed on Linux | – |
 | `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |
-| `A79674B4/509` | O_SEN9_OFFSET | offset for sensor 9 | – | logged only | – |
+| `A79674B4/509` | O_SEN9_OFFSET | virtual temperature offset of sensor 9, 0.1 K | SAM TMP `0x24` through the SSAM debug device (root; neutral frame 0 at the restore) | written | – |
 | `B620798F/111` | – | fan noise upper limit, SPL (fan 1) | SAM FAN `0x0c` through the SSAM debug device (root; neutral frame 0 at the restore) | written | – |
 | `B620798F/121` | O_FAN1_ACTIVE_SPL | fan noise floor, SPL (fan 1) | SAM FAN `0x12` through the SSAM debug device (root; neutral frame 0 at the restore) | written | – |
 | `B620798F/201` | O_FAN1_PROFILE | fan profile, 1-4 (fan 1) | SAM FAN `0x0e`, sent by the kernel (`surface_platform_profile`, from the platform profile); the daemon does not send it | written | – |
 | `B620798F/301` | O_FAN_CS_REQUEST | fan state, 1 normal / 2 standby | SAM FAN `0x0f`, sent by the kernel in its suspend hooks; the daemon never sends it | written | – |
-| `CF2F6076/61` | – | SoC value (not analysed) | – | logged only | – |
+| `CF2F6076/61` | O_CPU_AVG_TIME | PL1 time window, ms (rounded up to 4 steps per octave) | powercap `package-0/long_term` time window | written | – |

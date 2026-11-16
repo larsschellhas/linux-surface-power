@@ -175,6 +175,11 @@ missing source keeps the device in dry-run (`supervisor.md` 2.5). None of these 
 - Windows: "controller active (Xbox connection)" from the SMF client. At 1 the blob allows a 3 K higher skin limit.
 - Linux: 1 while a joystick input device from vendor `045e` or with "Xbox" in its name exists, else 0 [H: the Windows criterion].
 
+### 8.11 Averaged CPU temperature (`87008365/112`)
+- Windows: the Intel SoC client reads the package thermal status (MSR 0x1B1, bits 22:16) [C] and averages it [H: window unknown]. The blob uses it only for the fan noise floor (`B620798F/121`).
+- Linux: the `coretemp` "Package id 0" temperature, which reads the same register, in 0.1 K, not averaged (deviation DV-7). Provided where `coretemp` exists.
+- `87008365/200` (estimated ambient temperature) is still not provided; in the Pro 10 blob it reaches no output.
+
 ### 8.10 dGPU power and temperature (`1FB53D4C/3`, `2E8B14C2/101`)
 - Windows: the Surface GPU power controller gets both from the NVIDIA driver.
 - Linux: NVML (`nvmlDeviceGetPowerUsage`, `nvmlDeviceGetTemperature`), at most every 2 s and only while another process has an

@@ -44,7 +44,7 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
 6. **Outputs without a Linux path (2.6) [D]:** control is allowed only when every output of the blob is written: a powercap or MSR
    target, the dGPU stand-in, a thermal action, a frequency cap for a throttle request, or a fan and charging output with a path on this
    machine: a SAM request through the debug device (root and `surface_aggregator_cdev`), or the kernel's own path for 201 and 301
-   (`outputs.md` 9). Otherwise the blob would regulate, for example, the CPU while its fan,
+   (`outputs.md` 9), or an output that needs none, with evidence (`outputs.md` 10). Otherwise the blob would regulate, for example, the CPU while its fan,
    throttle or safety outputs go nowhere. The daemon then runs in dry-run and logs the outputs. `--allow-partial-outputs` overrides
    this for field tests; the status file lists the outputs in `outputs_without_linux_path`.
 7. **Conflicts:** if thermald is active (`systemctl is-active thermald`, or its D-Bus name), the daemon refuses to start (FR-S6). systemd `Conflicts=` normally prevents this.

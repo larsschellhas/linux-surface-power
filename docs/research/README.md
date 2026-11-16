@@ -21,6 +21,7 @@ Markers used in the summaries:
 | [09-newer-blobs.md](09-newer-blobs.md) | Block types of the newer blobs, corpus check, core variant per device, where the inputs come from |
 | [10-outputs.md](10-outputs.md) | What the outputs do on Windows (thermal policy: throttle, hibernate, shutdown), rule for control |
 | [11-fan-charging.md](11-fan-charging.md) | The fan and charging outputs `B620798F`: channel meaning, Windows receiver, SAM commands, Linux path, safe test procedure |
+| [12-remaining-outputs.md](12-remaining-outputs.md) | PL1 time window, sensor offset, battery mode and `O_MINPWR2` (the last four Pro 10 outputs): Windows receivers, Linux paths, "not needed" evidence, Pro 10 tester checklist |
 
 ## Raw material (`raw/`, local only)
 

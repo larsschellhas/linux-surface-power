@@ -35,11 +35,14 @@ flowchart LR
         O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_CPU0; O_WTMF_CPU1; O_WTMF_CPU2<br/>O_WTMF_CPU3; O_WTMF_GFX"]
     end
     B --> OUT0
-    subgraph OUT1["logged only"]
+    subgraph OUT1["not needed on Linux"]
         O1_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
-        O1_9BBB8910["<b>thermal throttle requests</b><br/>O_MDM_SKIN"]
     end
     B --> OUT1
+    subgraph OUT2["logged only"]
+        O2_9BBB8910["<b>thermal throttle requests</b><br/>O_MDM_SKIN"]
+    end
+    B --> OUT2
 ```
 
 ## Readiness
@@ -50,7 +53,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 10 of 10 |
-| Outputs written by Linux | 7 of 9 (not written: `110DF2A4/3`, `9BBB8910/103`) |
+| Outputs written by Linux | 7 of 9; not needed on Linux: `110DF2A4/3` (not written: `9BBB8910/103`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -74,7 +77,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|---|---|---|---|
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
-| `110DF2A4/3` | O_MINPWR2 | minimum-power request | – | logged only | – |
+| `110DF2A4/3` | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only, the power tracker only logs it [C] | not needed on Linux | – |
 | `9BBB8910/1` | O_WTMF_CPU0 | throttle request for one CPU, % (100 = none) | cpufreq `scaling_max_freq` of its policy | written | 100 / 100 / 0 |
 | `9BBB8910/2` | O_WTMF_CPU1 | throttle request for one CPU, % (100 = none) | cpufreq `scaling_max_freq` of its policy | written | 100 / 100 / 0 |
 | `9BBB8910/3` | O_WTMF_CPU2 | throttle request for one CPU, % (100 = none) | cpufreq `scaling_max_freq` of its policy | written | 100 / 100 / 0 |

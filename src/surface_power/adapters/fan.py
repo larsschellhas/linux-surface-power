@@ -7,6 +7,7 @@ The commands, units and send rules are in docs/research/11-fan-charging.md. In s
   - a failed request is tried again after the rate limit; three failures in a row make the channel log-only;
   - the EC's values cannot be read back, so restore = send the neutral frame (0) for every channel that was sent. The frame is
     recorded in the snapshot before the first send of the channel (supervisor.py).
+The same stage also sends the sensor offsets `A79674B4/5xx` (TMP 0x24, docs/research/12), with the same rules and the neutral frame 0.
 The fan profile (201..203) and the fan state (301) are NOT sent here: the linux-surface kernel sends them (surface_platform_profile,
 suspend hooks). 301 = 2 (standby) is never sent by the daemon. The temperature thresholds (302-311) are off unless a device
 profile opts in (`fan_thresholds = true`).
@@ -21,6 +22,7 @@ from ..loader.model import ChannelRef, OutputChannel
 from .inputs import SSAM_CDEV, CdevTransport
 
 FAN_GUID = "B620798F-6FB0-42EF-B9B3-D2370402E089"
+SEN_OFFSET_GUID = "A79674B4-7147-436E-874D-B69F3F14C83A"   # sensor offsets: O_SEN<n>_OFFSET = channel 500 + n (docs/research/12)
 TC_TMP, TC_FAN = 0x03, 0x05
 TC_NAMES = {TC_FAN: "FAN", TC_TMP: "TMP"}
 RATE_MS = 5000          # at most one request per channel per 5 s (the Windows evaluation instance)
@@ -63,15 +65,22 @@ class Spec:
     tc: int
     cid: int
     iid: int
-    fmt: str                 # "u8", "u16" or "f32"
+    fmt: str                 # "u8", "u16", "f32" or "vts" (sensor byte + float32 offset in K, from 0.1 K)
     hi: float                # hard upper bound of the value (on top of the blob range)
     dead: int = 1            # dead band: a new request only if the value moved by at least this much
     neutral: int | None = 0  # value of the restore frame; None: no neutral value is known
     route: str = "sam"       # "sam", "kernel-profile", "kernel-suspend", "optin" (SAM, off unless the profile opts in), "none"
+    guid: str = FAN_GUID
+    lo: float = 0            # hard lower bound (only the sensor offsets are signed)
 
     @property
     def tc_name(self) -> str:
         return TC_NAMES[self.tc]
+
+    @property
+    def key(self) -> str:
+        """Snapshot key of the restore frame: `fan:<channel>` for the fan interface, `sam:<guid8>/<channel>` otherwise."""
+        return f"fan:{self.channel}" if self.guid == FAN_GUID else f"sam:{self.guid[:8]}/{self.channel}"
 
 
 def _build() -> dict[int, Spec]:
@@ -97,6 +106,27 @@ def _build() -> dict[int, Spec]:
 SPECS = _build()
 OPT_IN = frozenset(c for c, sp in SPECS.items() if sp.route == "optin")
 
+# Sensor offsets (A79674B4/5xx): the Windows SMF client sends them as TMP 0x24, instance = sensor number, payload = the sensor number
+# as u8 and the offset as float32 (K), value x 0.1 [C, docs/research/12 2.3]. Only sensor 9 occurs in the corpus. The blob range is
+# missing (no output line); the hard bound is +-5 K, the corpus has -2 K to +2 K. Neutral = offset 0.
+VTS_SCALE = 0.1
+EXTRA: dict[ChannelRef, Spec] = {
+    ChannelRef(SEN_OFFSET_GUID, 500 + n): Spec(500 + n, TC_TMP, 0x24, n, "vts", 50, neutral=0, guid=SEN_OFFSET_GUID, lo=-50)
+    for n in range(1, 13)
+}
+
+
+def spec_for(ref: ChannelRef) -> Spec | None:
+    """The send specification of an output channel, or None if this adapter does not handle it."""
+    if ref.guid == FAN_GUID:
+        return SPECS.get(ref.channel)
+    return EXTRA.get(ref)
+
+
+def handles(ref: ChannelRef) -> bool:
+    """True for every output this adapter owns (the fan interface and the sensor offsets)."""
+    return ref.guid == FAN_GUID or ref in EXTRA
+
 
 def payload(spec: Spec, value: float) -> bytes:
     """The payload for a value: u8, u16 LE or float32 LE (11-fan-charging.md 3.1)."""
@@ -104,6 +134,8 @@ def payload(spec: Spec, value: float) -> bytes:
         return bytes([int(min(max(round(value), 0), 255))])
     if spec.fmt == "u16":
         return struct.pack("<H", int(min(max(round(value), 0), 65535)))
+    if spec.fmt == "vts":
+        return bytes([spec.iid]) + struct.pack("<f", float(value) * VTS_SCALE)
     return struct.pack("<f", float(value))
 
 
@@ -111,8 +143,8 @@ def frame_for(spec: Spec, value: float) -> Frame:
     return Frame(spec.tc, spec.iid, spec.cid, payload(spec, value))
 
 
-def neutral_frame(channel: int) -> Frame | None:
-    sp = SPECS.get(channel)
+def neutral_frame(channel: int | Spec) -> Frame | None:
+    sp = channel if isinstance(channel, Spec) else SPECS.get(channel)
     if sp is None or sp.neutral is None:
         return None
     return frame_for(sp, sp.neutral)
@@ -226,8 +258,8 @@ class FanStage:
         self._logged: set = set()
         can = bool(self.transport.can_write())
         needs_root = (not can) and bool(getattr(self.transport, "needs_root", lambda: False)())
-        for ref in sorted(r for r in channels if r.guid == FAN_GUID):
-            sp = SPECS.get(ref.channel)
+        for ref in sorted(r for r in channels if handles(r)):
+            sp = spec_for(ref)
             if sp is None:
                 self.notes.append(f"{ref}: unknown fan or charging channel, log-only")
                 continue
@@ -292,7 +324,7 @@ class FanStage:
         rng = self.ranges.get(ref)
         if rng is not None:
             x = int(min(max(x, round(rng.min)), round(rng.max)))
-        return int(min(max(x, 0), spec.hi))
+        return int(min(max(x, spec.lo), spec.hi))
 
     def _event(self, prio: str, text: str, key=None) -> None:
         if key is not None:
@@ -310,7 +342,7 @@ class FanStage:
         for ref, v in values.items():
             c = self.chans.get(ref)
             if c is None:
-                if ref.guid == FAN_GUID:
+                if handles(ref):
                     out[ref] = FanResult(ref, "log-only", int(round(v)), None, False)
                 continue
             sp = c.spec
@@ -352,10 +384,10 @@ class FanStage:
 
     def _send(self, ref: ChannelRef, c: _Chan, frame: Frame) -> bool:
         """Record the neutral frame first (a crash after the send must find it), then send."""
-        n = neutral_frame(c.spec.channel)
+        n = neutral_frame(c.spec)
         if self.on_touch is not None and not c.recorded:
             try:
-                self.on_touch(f"fan:{c.spec.channel}", n)
+                self.on_touch(c.spec.key, n)
             except OSError as e:
                 self._event("error", f"fan output {ref}: restore frame not recorded ({e}); nothing sent")
                 return False

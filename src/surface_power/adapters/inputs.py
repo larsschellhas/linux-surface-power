@@ -602,6 +602,25 @@ class ProximitySensor(Source):
         return {self.ref: 0}
 
 
+class CpuTempAverage(Source):
+    """`87008365/112` (I_CPU_TEMP_AVG): the Windows SoC client reads the package thermal status (MSR 0x1B1, bits 22:16) [C] and
+    averages it [H: window unknown]. Linux `coretemp` "Package id 0" reads the same register, so it gives the instantaneous value
+    (deviation DV-7, spec inputs 8.10). The blob only uses it to raise the fan noise floor above ~71 C."""
+
+    def __init__(self, root: str = "/"):
+        self.ref = ChannelRef(COMPOSITE, 112)
+        self.path = None
+        for d in _hwmon_dirs(root, "coretemp"):
+            for lab in glob.glob(os.path.join(d, "temp*_label")):
+                if _read(lab) == "Package id 0":
+                    self.path = lab[:-len("_label")] + "_input"
+        self.channels = {self.ref} if self.path else set()
+
+    def read(self, now_ms):
+        v = _int(self.path) if self.path else None
+        return {self.ref: mc_to_dk(v) if v is not None else None}
+
+
 class XboxController(Source):
     """`87008365/5` (Laptop Studio 2): 1 while an Xbox controller is connected, else 0. Windows reports "controller
     active (Xbox connection)" through the SMF client; a joystick input device from Microsoft (vendor 045e) or one

@@ -14,7 +14,8 @@ from ..adapters import gpu
 from ..adapters import inputs as inp
 from ..adapters.actions import ThermalActions
 from ..adapters.cpufreq import THROTTLE, ThrottleStage
-from ..adapters.fan import FAN_GUID, TC_FAN, FanStage
+from ..adapters import notneeded
+from ..adapters.fan import TC_FAN, FanStage, handles as fan_handles
 from ..adapters.outputs import OutputStage
 from ..engine.graph import build_graph
 from ..loader import container, parser
@@ -74,7 +75,7 @@ def main(argv=None, fan_transport=None) -> int:
     sources = [inp.HwmonTemperatures(root), inp.SliderState(root), inp.Batteries(root), inp.Posture(root, lambda: None),
                inp.DisplayBrightness(root), inp.PlatformEvents(root), inp.BatteryCurrent(root), inp.StandbyPhase(root),
                inp.UsbSourcePower(root), inp.DgpuOnBattery(root), inp.ProximitySensor(root),
-               inp.XboxController(root), inp.DgpuSensors(root)]
+               inp.XboxController(root), inp.DgpuSensors(root), inp.CpuTempAverage(root)]
     provided = set().union(*(s.channels for s in sources))
     # EC power data (spec inputs 6): from the kernel attributes if present, else only through the debug device.
     pp = inp.PlatformPower(root)
@@ -111,7 +112,7 @@ def main(argv=None, fan_transport=None) -> int:
     stage = OutputStage(root, graph.output_ranges, dry_run=True, pl3=prof.pl3 if prof else None,
                         pl4=prof.pl4 if prof else None)
     throttle = ThrottleStage(root, [r for r in graph.outputs if r.guid == THROTTLE], dry_run=True)
-    fan = FanStage(root, [r for r in graph.outputs if r.guid == FAN_GUID], graph.output_ranges, transport=fan_transport,
+    fan = FanStage(root, [r for r in graph.outputs if fan_handles(r)], graph.output_ranges, transport=fan_transport,
                    dry_run=True, thresholds=bool(prof and prof.fan_thresholds))
     dgpu_ref = inp.ChannelRef("0B7B5350-BB8C-4459-8D4A-A75C57073801", 201)
     stand_in = gpu.find_nvidia_gpu(root) is not None          # the stand-in needs an NVIDIA dGPU
@@ -131,10 +132,12 @@ def main(argv=None, fan_transport=None) -> int:
             kind = f"writable ({what})" if throttle.has_target(ref) else "no Linux path (logged only)"
             if not throttle.has_target(ref):
                 missing.append(ref)
-        elif ref.guid == FAN_GUID:
+        elif fan_handles(ref):
             kind = fan.describe(ref)
             if not fan.has_path(ref, report=True):
                 missing.append(ref)
+        elif notneeded.reason(ref, root):
+            kind = "not needed on Linux: " + notneeded.reason(ref, root)
         elif ref == dgpu_ref and stand_in:
             kind = "clock-cap stand-in (DO-1)" + ("" if prof and prof.dgpu_clock_cap else ", off in this profile")
             if not (prof and prof.dgpu_clock_cap):

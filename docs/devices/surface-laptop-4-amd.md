@@ -39,11 +39,11 @@ flowchart LR
     B --> OUT0
     subgraph OUT1["no Linux path"]
         O1_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK"]
+        O1_CF2F6076["<b>SoC client (time window)</b><br/>O_CPU_AVG_TIME"]
     end
     B --> OUT1
     subgraph OUT2["logged only"]
         O2_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
-        O2_CF2F6076["<b>SoC (not analysed)</b><br/>61 SoC value"]
     end
     B --> OUT2
 ```
@@ -81,8 +81,8 @@ A device can be controlled only when every output of its blob is written: a blob
 | `0B7B5350/51` | O_CPU_AVG | PL1, package long-term | none on AMD (Intel RAPL only) | no Linux path | 15000 / 31000 / 4000 |
 | `0B7B5350/52` | O_CPU_MAX | PL2, package short-term | none on AMD (Intel RAPL only) | no Linux path | 30000 / 61000 / 4000 |
 | `0B7B5350/53` | O_CPU_PEAK | PL4, package peak | none on AMD (Intel RAPL only) | no Linux path | 70000 / 70000 / 5000 |
-| `0B7B5350/70` | O_BATT_MODE | battery mode | – | logged only | – |
+| `0B7B5350/70` | O_BATT_MODE | battery mode (1 = no mains supply) | – | logged only | – |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
 | `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |
-| `CF2F6076/61` | – | SoC value (not analysed) | – | logged only | – |
+| `CF2F6076/61` | O_CPU_AVG_TIME | PL1 time window, ms (rounded up to 4 steps per octave) | none on AMD (Intel RAPL only) | no Linux path | – |

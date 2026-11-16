@@ -37,21 +37,30 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 | | 54 | psys PL1 | `intel-rapl:1/constraint_0_power_limit_uw` (zone named `psys`) |
 | | 55 | psys PL2 | `intel-rapl:1/constraint_1_power_limit_uw` |
 | | 59 | PL3 | MSR 0x615, see 4 |
-| | 70 | battery mode | log-only |
+| | 70 | battery mode | not needed on Linux (10) |
 | | 201 | dGPU limit | log-only (FR-O5): `nvidia-smi -pl` is not supported on the SB3 GPU [M]. Opt-in stand-in: clock cap (6, DO-1) |
 | | 205 | system budget (Laptop Studio 2) | log-only |
 | `9BBB8910` | 1–5, 20–22, 62 | throttle requests for CPUs, clusters, GPU and the aggregator device | cpufreq or GPU frequency cap (8) |
 | | 103–105, 200 | modem sensors, NPU | log-only (no Linux interface known) |
 | `110DF2A4` | 1, 2 | thermal policy: hibernate (`O_HOT`) and critical shutdown (`O_CRT`) requests | thermal actions (7) |
-| | 3 | minimum-power request | log-only |
+| | 3 | minimum-power flags (`O_MINPWR2`) | not needed on Linux (10) |
 | `B620798F` | 101–103, 111–116, 121–126, 306, 312 | fan limits | SAM request through the SSAM debug device (9) |
 | | 201–203, 301 | fan profile, fan state | the kernel sends them (9.3) |
 | | 302–311 | fan, PROCHOT and charge-rate temperatures | off unless the profile opts in (9.4) |
+| `CF2F6076` | 61 | PL1 time window, ms | powercap `package-0/long_term` `constraint_0_time_window_us` (3.2) |
+| `A79674B4` | 501-512 (509 in the corpus) | virtual-temperature sensor offset, 0.1 K | SAM TMP `0x24` through the SSAM debug device (9.8) |
 | other | – | WTMF and so on (L3/L4) | log-only (FR-O6, FR-O7) |
 
 - **Zone lookup:** zones are found by name (`package-0`, `psys`), not by index. A missing zone makes its channels log-only, with one message.
-- **PL1 time window:** the daemon does not write it. It checks it against the firmware value from the snapshot and restores it if someone else changed it, because a foreign short window would change PL1's effect (`supervisor.md` 3).
+- **PL1 time window:** written only where the blob has `CF2F6076/61` (3.2); otherwise the daemon leaves it alone, and the snapshot restores it.
 - **Enable bits:** writes never change `enabled`. A disabled zone is reported. The daemon does not enable it.
+
+### 3.2 PL1 time window (`CF2F6076/61`) [C for the meaning, H for the unit]
+- Windows: the Intel SoC client writes it into bits 23:17 of the PL1 register, rounded up to 4 steps per octave (`../research/12-remaining-outputs.md` 2.1).
+- Linux: `OutputStage` target `pl1_window` on `package-0/long_term`'s `constraint_0_time_window_us`. The blob's ms become µs, are clamped to 1.0-112 s and
+  rounded up to the same 28 steps (1.0 s, 1.25 s, ... 112 s), so 30 000 ms gives 32 s as on Windows. Written on change only, read back; the read-back
+  may be coarser, so a foreign change needs a difference above 15 %. The file is in the snapshot (restored on exit, emergency, yield) and the output is
+  log-only where the file is missing. Dry-run computes the value and writes nothing.
 
 ### 3.1 Holding PL4 and PL3 while their EC inputs are invalid [D]
 PL4 and PL3 are computed from the EC power data on most devices. Without them the blob falls back to values far below the firmware
@@ -196,3 +205,20 @@ Dry-run computes the frames and sends nothing. The status file shows `would send
 
 ### 9.7 Test tool
 `scripts/fan-test.py` runs the safe procedure of `../research/11-fan-charging.md` 8 for one channel (or only `--probe` on any Surface). It uses the same frames as the adapter.
+
+### 9.8 Sensor offsets (`A79674B4/5xx`) [C for the command, H for the effect]
+Sent by the same stage as the fan outputs (9.1): TMP `0x24`, instance = sensor number (channel - 500), payload = sensor number (u8) + float32 K (value x 0.1), flags 0.
+Hard bound +-5 K (the blob has no range for it), neutral frame = offset 0 (recorded in the snapshot as `sam:A79674B4/509`), status target `SAM TMP 0x24 (cdev)`.
+In the Pro 10 blob it is constantly 0; other blobs use -2.0 to +1.5 K. Effect on the EC not measured.
+
+## 10. Outputs that need no Linux path (`adapters/notneeded.py`)
+An output is listed only with [C] evidence that no Windows receiver does anything with it that Linux could do. The readiness rule counts it as covered
+(`supervisor.md` 2.6) but the status file, `surface-power-report`, the daemon log and the device pages say "not needed on Linux: <reason>"; the status file
+target is that text. Nothing is ever dropped silently.
+
+| Output | Reason | Scope |
+|---|---|---|
+| `0B7B5350/70` battery mode | the Intel SoC client writes nothing for it, it only returns a request flag to the Windows-only SMF core [C code, H flag meaning] | Intel CPUs; AMD and Qualcomm clients not analysed |
+| `110DF2A4/3` `O_MINPWR2` | no client registers it (thermal policy takes 1 and 2); the power tracker only logs it [C] | all platforms |
+
+Details and checked drivers: `../research/12-remaining-outputs.md`. New entries need the same evidence.

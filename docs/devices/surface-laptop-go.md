@@ -35,13 +35,10 @@ flowchart LR
     subgraph OUT0["written"]
         O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
+        O0_A79674B4["<b>sensor offsets</b><br/>O_SEN9_OFFSET"]
+        O0_CF2F6076["<b>SoC client (time window)</b><br/>O_CPU_AVG_TIME"]
     end
     B --> OUT0
-    subgraph OUT1["logged only"]
-        O1_A79674B4["<b>sensor offsets</b><br/>O_SEN9_OFFSET"]
-        O1_CF2F6076["<b>SoC (not analysed)</b><br/>61 SoC value"]
-    end
-    B --> OUT1
 ```
 
 ## Readiness
@@ -52,8 +49,8 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 11 of 11 |
-| Outputs written by Linux | 8 of 10 (not written: `A79674B4/509`, `CF2F6076/61`) |
-| Ready for control | no: dry-run only |
+| Outputs written by Linux | 10 of 10 |
+| Ready for control | yes |
 
 ## Inputs
 
@@ -83,5 +80,5 @@ A device can be controlled only when every output of its blob is written: a blob
 | `0B7B5350/59` | O_SYS_PEAK | PL3, platform peak with duty cycle | MSR `0x615` (root; held without EC data) | written | 65000 / 101000 / 20000 |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
-| `A79674B4/509` | O_SEN9_OFFSET | offset for sensor 9 | – | logged only | – |
-| `CF2F6076/61` | – | SoC value (not analysed) | – | logged only | – |
+| `A79674B4/509` | O_SEN9_OFFSET | virtual temperature offset of sensor 9, 0.1 K | SAM TMP `0x24` through the SSAM debug device (root; neutral frame 0 at the restore) | written | – |
+| `CF2F6076/61` | O_CPU_AVG_TIME | PL1 time window, ms (rounded up to 4 steps per octave) | powercap `package-0/long_term` time window | written | – |
