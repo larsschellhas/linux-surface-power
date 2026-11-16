@@ -1,27 +1,26 @@
 # Architecture design
 
-Version 0.2, 14.11.2026. Status: agreed direction (see requirements, section 6). High-level design only; details go into `../specs/`.
+Version 0.3, 16.11.2026. Status: agreed direction (see requirements, section 6). High-level design only; details go into `../specs/`.
 
 ## Overview
 
+```mermaid
+flowchart LR
+    SRC["efivarfs / file"] --> LO
+    subgraph D["surface-powerd (root, systemd, Type=notify)"]
+        LO["loader<br/>decode A/B/C · preprocess · parse · validate · graph"] --> EN
+        AI["adapters-in<br/>channel → Linux source, 1 Hz, EC requests, validity"] --> EN["engine<br/>stages, instances, dividers, validity, reset, PID variant"]
+        EN --> SU["supervisor<br/>snapshot/restore, hard limits, emergency rules,<br/>foreign changes, suspend/resume, watchdog, dry-run"]
+        SU --> AO["adapters-out<br/>clamped writes; log-only outputs"]
+        EN --> MO["monitor<br/>journal, status.json, time series"]
+    end
+    HW["hwmon, SSAM, power_supply,<br/>platform_profile, dtx, lid, DRM, USB, NVML"] --> AI
+    AO --> PC["powercap, MSR"]
+    MO --> NT["surface-power-notify<br/>(user session)"]
+    RS["surface-power-reset<br/>(ExecStopPost)"] -. restores snapshot .-> PC
 ```
-                 ┌──────────────────────────── surface-powerd (root, systemd, Type=notify) ───────────────────────────┐
- efivarfs / file │ loader      blob → decode (A/B/C) → preprocess (macros, expressions) → parse → validate → graph    │
-                 │   │                                                                                                │
- hwmon, SSAM,    │ adapters-in  channel → Linux source, 1 Hz sensors, EC requests, validity    ──► engine ──► outputs │
- power_supply,   │              (temperatures, slider state, platform power, battery, posture, brightness)    │         │
- platform_profile│                                                                                            ▼         │
- dtx, lid        │ engine      stages, 1000/5000 ms instances, dividers, timer start/stop, validity, reset, PID variant │
-                 │                                                                                            │         │
-                 │ supervisor  firmware snapshot/restore, hard limits, emergency rules, foreign changes,       ◄───────┘
-                 │             suspend/resume, watchdog, dry-run                                                         │
-                 │   │                                                                                                   │
- powercap, MSR ◄─┤ adapters-out clamped writes: PL1/PL2/PL4, psys, PL3 (if allowed); log-only outputs (dGPU, battery mode)│
-                 │ monitor     journal, status.json, time series                                                        │
-                 └──────────────────────────────────────────────────────────────────────────────────────────────────────┘
- ExecStopPost: surface-power-reset (restores the firmware snapshot)        user session: surface-power-notify (status.json → notifications)
- tools (no root): surface-power-blob (dump/inspect/diagram), surface-power-replay, surface-power-report
-```
+
+Tools without root: `surface-power-blob` (dump, inspect, diagram), `surface-power-replay`, `surface-power-report`.
 
 ## Components
 

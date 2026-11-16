@@ -131,7 +131,7 @@ GUID, channel, default, max, min
 - A line with 5 fields is an output line; a line with 10 fields is an input line [D: told apart by field count].
 
 ### 5.2a Other channel lines
-Newer blobs define composite sensors (interface `87008365`) with 14 or 19 fields. Their layout is not analysed. The parser keeps them as "other channel" lines and warns [D]. They give no validity range.
+Newer blobs carry further channel lines with other field counts, mostly on interface `87008365` (e.g. 14 or 19 fields). They are configurations that the SMF core passes to the client that computes the channel: the ambient-temperature estimate (`/200`, with polynomial coefficients), the averaged CPU temperature (`/112`) and similar [C, Windows clients]. Their field layout is not analysed. The parser keeps them as "other channel" lines and warns [D]. They give no validity range.
 
 ### 5.2b Placeholder input
 Some blobs pass a constant (e.g. a date-like number) through a pass-through block whose input is the placeholder channel `99999999-9999-9999-9999-999999999999/1`. No client provides it, so it stays invalid and the block outputs its constant default [C, blob text].
