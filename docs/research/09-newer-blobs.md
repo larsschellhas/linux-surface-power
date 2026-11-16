@@ -72,7 +72,9 @@ stays in dry-run on that device (`../specs/supervisor.md` 2.5), even though the 
 
 Sources of the facts:
 - the blobs (macro names, value ranges, how the blocks use the value) [C];
-- the Windows clients of the Laptop 7 Intel and Laptop 4 AMD driver packages (which client provides the value and what it measures) [C];
+- the Windows clients of the Laptop 7 Intel, Laptop 7 Snapdragon and Laptop 4 AMD driver packages (which client provides the value and
+  what it measures) [C];
+- the public ACPI dumps of linux-surface (`acpidumps`) for the affected devices [C];
 - this SB3 (whether Linux has a matching sysfs entry) [M].
 
 The Linux sources are candidates until an adapter has been compared on a device that needs it [H].
@@ -83,19 +85,21 @@ The Linux sources are candidates until an adapter has been compared on a device 
 | `8060B17F/2` | `I_EXT_DISPLAY` | 37 / 27 | 1 while a wired external monitor is connected, else 0. Reported by the user-mode service. | `/sys/class/drm/card*-*/status` = `connected` for any connector except `eDP`/`LVDS`/`DSI` [M: `DP-1 connected` here] |
 | `8060B17F/3` | `I_CAMERA` | 34 / 25 | 1 while an application uses a camera, else 0 (Windows sensor-activity monitor). | Runtime-PM state of the camera device: `power/runtime_status` = `active` while streaming [M: a USB webcam here shows `suspended` when idle]. The built-in IPU cameras need a check on a device. |
 | `8060B17F/9` | `I_SURF_DOCK` | 19 / 11 | Number of attached Surface Dock USB hubs: Microsoft vendor 045E with product 0900, 0857 or 09A9. It counts up on attach and down on removal. | USB devices with `idVendor` 045e and one of these `idProduct` values below `/sys/bus/usb/devices` |
-| `28B7BD85/12` | `I_BCDR1_I` | 29 / 20 | Battery discharge rate in mA. It is signed in some blobs (range ±14400), and one blob smooths it over ±15000 mA. The system client reads it from the power tracker, which gets it from a battery driver that is not in the local packages. | `power_supply` `current_now`, else `power_now` / `voltage_now`. The sign convention is open: Linux reports positive values for both directions on some drivers [H]. |
-| `28B7BD85/13` | `I_BDR_EWMA1_LVL` | 24 / 16 | An integer level 0–16 that selects controller sets. It comes from the same battery driver. The power tracker does not compute it. | open: needs the battery driver (not in the local packages) |
-| `28B7BD85/16` | `I_BAT1_MAX_CHARGE` | 12 / 9 | A value that a conditional table compares with bands up to 25001 or 55001, next to the input power limit (mW) [H: a charge power in mW]. Same battery driver. | open: needs the battery driver |
-| `DEF1AB69/100` | `I_MS_NOTIFY` | 24 / 16 | A level 1–5. The interface belongs to the Surface thermal-policy driver on the ACPI thermal zone `TPOL` (`MSHW0187`). That driver reads Windows thermal-zone values from the devices that the ACPI method `INPS` lists, and turns SMF outputs into Windows thermal requests for the devices that `OPTS` lists. The SB3 has `TPOL` with `OPTS` only. | open: needs the ACPI tables (`INPS`) of a device whose blob reads it |
-| `049E36F2/9` | `I_USB_SOURCE_PWR` | 8 / 8 | Power data item of the power tracker, mW (ranges 0–16000/32000). A block combines it with the input power limit [H: power the device supplies to USB peripherals]. The providing driver is not in the local packages. | candidates: `/sys/class/typec` port power role and PD contracts; open |
+| `28B7BD85/12` | `I_BCDR1_I` | 29 / 20 | Battery current in mA, signed. The Surface battery client computes it from the EC's `_BST` data: rate (mW) · 1000 / present voltage (mV). It is positive while the battery state is exactly "discharging" and negative otherwise. The blobs smooth it (±15000 mA) and compare it with fractions of the battery's C rate. | `power_supply`: `power_now` / `voltage_now` (µW / µV → mA), positive when `status` is `Discharging`, else negative. `current_now` where a driver has it. |
+| `28B7BD85/13` | `I_BDR_EWMA1_LVL` | 24 / 16 | A level from the EC: "battery discharge rate EWMA level", one byte. The battery client reads it with the SAM battery command `0x1A` and re-reads it on the SAM battery event with the same ID. The blob uses it to select a controller set. | SAM battery (target category 2), command `0x1A`, one-byte response, through the same request path that `surface_battery` uses for `0x53` (kernel#195). Until a kernel patch adds it to sysfs: the SSAM debug device (root) [H: not tried on an affected device]. |
+| `28B7BD85/16` | `I_BAT1_MAX_CHARGE` | 12 / 9 | A flag 0/1 from the EC: the battery reached its maximum charge level for the current state. SAM battery command `0x69`, one byte, re-read on the SAM battery event `0x69`. In the blobs a conditional table matches it as exactly 0 or 1; the bands up to 25001/55001 belong to the input power limit next to it. | SAM battery command `0x69`, as channel 13 |
+| `DEF1AB69/100` | `I_MS_NOTIFY` | 24 / 16 | The Modern Standby phase, from the Surface ACPI platform extension driver (ACPI `MSHW0299`, device `SAPD`). The firmware forwards each call of the Microsoft low-power `_DSM` (UUID `11e00d56-…`, function n) as `Notify(SAPD, 0xC0 + n)`. The driver maps: display off (3) → 1; sleep entry (5) or Modern Standby entry (7) → 2 on a Modern Standby system, else 5; sleep exit (6) → 3 if the last level was 2 (maintenance), else 5; everything else → 4. While a Windows power setting it registers reads 0, the level is 4 [H: the setting's meaning is not identified]. The blob macros name the levels: 1 screen off, 2 sleep, 3 maintenance, 4 normal (global PL1 maximum), 5 legacy sleep. Pro 9 Intel, Pro 10, Laptop 6 and others have this `_DSM` forwarding in their DSDT (`acpidumps`). | Constant 4 while the daemon runs and the display is on. 1 while the internal panel is off (backlight `bl_power` ≠ 0 or the eDP connector off). 2/3/5 only occur during suspend, where the daemon does not run. Linux's `s2idle` calls the same `_DSM` functions on suspend [C: `drivers/acpi/x86/s2idle.c`]. |
+| `049E36F2/9` | `I_USB_SOURCE_PWR` | 8 / 8 | Power the device supplies through its USB-C ports, mW. The Surface service reads the energy-meter channel `USBC_TOTAL`, which the Qualcomm platform driver provides on the Snapdragon models, and sends it through the power tracker. A block subtracts it from the input power limit. | No direct Linux source known. Candidate as an upper bound: per port with a sink partner, the negotiated contract (`/sys/class/usb_power_delivery`) or the Type-C current level (`/sys/class/typec/port*/power_operation_mode`) times 5 V [H]. An overestimate lowers the limit, so it errs on the safe side. |
 | `1FB53D4C/3` | `_I_DGPU_PWR` | 2 / 2 | dGPU power (Laptop Studio). | NVML / `nvidia-smi --query-gpu=power.draw` |
-| `1FB53D4C/31` | not named | 2 / 2 | range 0–8, Laptop Studio dGPU blobs | open |
-| `87008365/5`, `/113` | composite sensors | 2 / 2, 1 / 1 | the 14/19-field channel definitions, not analysed (`../specs/blob-format.md` 5.2a) | open |
+| `1FB53D4C/31` | not named | 2 / 2 | range 0–8, Laptop Studio dGPU blobs. The interface also carries display brightness and NPU use; on Windows the Surface service and the SMF clients write it. The Surface service of these devices talks to the NVIDIA driver for Dynamic Boost [H: the channel is related to it]. | open |
+| `87008365/5`, `/113` | composite sensors | 2 / 2, 1 / 1 | Defined in the blob itself by 14/19-field channel lines (`../specs/blob-format.md` 5.2a). The interface also carries `I_CPU_TEMP_AVG` and `I_AMBIENT_AI`; the SMF clients and the Surface service write it. | open: the definition lines need analysis; possibly computed by the core from other channels [H] |
 
-- **Ready for adapters:** display brightness, external display, camera, dock, and battery current with a sign check. These four channels and
-  channel 12 cover most devices in the README overview.
-- **Need more material:** channels 13 and 16 and USB source power come from Surface battery and USB-C drivers that are not in the local
-  package extracts (they were not kept). `I_MS_NOTIFY` needs an ACPI dump of an affected device.
+- **Ready for adapters:** display brightness, external display, camera, dock, battery current, and `I_MS_NOTIFY` (4, or 1 with the
+  panel off).
+- **Need a kernel addition first:** channels 13 and 16. Both are one-byte SAM battery queries (`0x1A`, `0x69`) next to the DPTF query
+  that kernel#195 exposes. Until then the SSAM debug device can serve them with root.
+- **Approximation only:** USB source power on the Snapdragon models. Linux has no measured value; the PD contract gives an upper bound.
+- **Open:** `1FB53D4C/31` and the composite sensors (Laptop Studio, Pro 9 Intel, Laptop 5).
 
 ## 5. Start-up observation [C, engine run]
 
