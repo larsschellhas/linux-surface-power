@@ -135,16 +135,34 @@ SLIDER_MAP = {
 }
 
 
+def platform_profile(root: str) -> tuple[str | None, str]:
+    """The platform profile and where it came from. `/sys/firmware/acpi/platform_profile` is the legacy attribute that the
+    kernel keeps for the registered handlers (Fedora/Bazzite devices show only this one); else the first class device
+    `/sys/class/platform-profile/*/profile`, a Surface one first."""
+    legacy = os.path.join(root, "sys/firmware/acpi/platform_profile")
+    v = _read(legacy)
+    if v:
+        return v, "/sys/firmware/acpi/platform_profile"
+    cls = sorted(glob.glob(os.path.join(root, "sys/class/platform-profile/*")),
+                 key=lambda d: ("surface" not in (_read(os.path.join(d, "name")) or ""), d))
+    for d in cls:
+        v = _read(os.path.join(d, "profile"))
+        if v:
+            return v, "/sys/class/platform-profile/" + os.path.basename(d)
+    return None, ""
+
+
 class SliderState(Source):
     def __init__(self, root: str = "/"):
         self.root = root
         self.ref = ChannelRef(SYSTEM, 1)
         self.channels = {self.ref}
         self.profile: str | None = None
+        self.profile_source = ""
         self.ac: bool | None = None
 
     def read(self, now_ms):
-        self.profile = _read(os.path.join(self.root, "sys/firmware/acpi/platform_profile"))
+        self.profile, self.profile_source = platform_profile(self.root)
         self.ac = _ac_online(self.root)
         pair = SLIDER_MAP.get(self.profile or "")
         if pair is None or self.ac is None:
@@ -331,6 +349,46 @@ class CdevTransport:
         return self._call(tc, tid, cid, iid, b"", True)
 
 
+class RequestGate:
+    """Consecutive failures per EC request. A command the EC does not know times out on every request (kernel#195 review),
+    so after FAIL_LIMIT failures in a row it is not sent again until reset() (resume)."""
+
+    FAIL_LIMIT = 3
+
+    def __init__(self):
+        self.fails: dict[str, int] = {}
+
+    def open(self, key: str) -> bool:
+        return self.fails.get(key, 0) < self.FAIL_LIMIT
+
+    def record(self, key: str, ok: bool) -> bool:
+        """Note one outcome. True if this failure closed the gate."""
+        if ok:
+            self.fails[key] = 0
+            return False
+        self.fails[key] = self.fails.get(key, 0) + 1
+        return self.fails[key] == self.FAIL_LIMIT
+
+    def reset(self) -> None:
+        self.fails.clear()
+
+
+def ask(transport, gate: RequestGate, key: str, what: str, log, tid: int, cid: int, min_len: int = 1) -> bytes | None:
+    """One EC request through the gate. None without an answer (also while the gate is closed, or the device node is
+    missing, which the daemon reports once at start)."""
+    available = getattr(transport, "available", None)
+    if (available is not None and not available()) or not gate.open(key):
+        return None
+    data = transport.request(tid, cid)
+    if data is not None and len(data) >= min_len:
+        gate.record(key, True)
+        return data
+    if gate.record(key, False) and log:
+        log("warning", f"{what}: no answer {gate.FAIL_LIMIT} times in a row; the command is not sent again until the next "
+                       "resume and its inputs stay invalid")
+    return None
+
+
 class PlatformPower(Source):
     """`0x53` fields of SAM (battery 1) and KIP (battery 2) and the PSU size (spec inputs 6).
 
@@ -342,6 +400,8 @@ class PlatformPower(Source):
     """
 
     REFRESH_MS = 60000
+    ADAPTER_RETRY_MS = 5000          # an adapter rating of 0 on AC is asked again after this long, three times
+    ADAPTER_RETRIES = 3
     # (offset in the 0x53 answer, struct format, kernel attribute, channel offset within the battery's block)
     FIELDS = ((1, "<I", "max_platform_power_mw", 2), (5, "<I", "max_steady_state_power_mw", 3),
               (9, "<H", "high_freq_impedance_mohm", 4), (11, "<H", "no_load_voltage_mv", 5),
@@ -354,10 +414,28 @@ class PlatformPower(Source):
         self.transport = transport if transport is not None else CdevTransport(os.path.join(root, SSAM_CDEV.lstrip("/")))
         self.channels = {ChannelRef(POWER, base + f[3]) for *_, base in self.BATTERIES for f in self.FIELDS} | {self.ARTG}
         self.values: dict[ChannelRef, float | None] = {ref: None for ref in self.channels}
+        self.wanted: set[ChannelRef] | None = None
+        self.gate = RequestGate()
+        self.log = None                                  # set by the daemon: log(priority, text)
+        self.answers: dict[int, bytes | None] = {}       # last 0x53 answer per SSAM target (report)
+        self.artg_raw: int | None = None                 # last answer to the adapter rating request, as sent (report)
+        self.zero_tries = 0
+        self.retry_soon = False
         self.next_ms: int | None = None
         self.artg_next_ms: int | None = None
         self.ac: bool | None = None
         self.ok = False
+
+    def restrict(self, wanted: set[ChannelRef]) -> None:
+        """Ask the EC only for what the blob reads: a battery or command the device does not have times out."""
+        self.wanted = set(wanted)
+
+    def _batteries(self):
+        return [b for b in self.BATTERIES
+                if self.wanted is None or any(ChannelRef(POWER, b[2] + f[3]) in self.wanted for f in self.FIELDS)]
+
+    def _want_artg(self) -> bool:
+        return self.wanted is None or self.ARTG in self.wanted
 
     def _psy(self, *parts: str) -> str:
         return os.path.join(self.root, "sys/class/power_supply", *parts)
@@ -373,7 +451,21 @@ class PlatformPower(Source):
     @property
     def needs_cdev(self) -> bool:
         """True if any value still has to come through the SSAM debug device."""
-        return self._sysfs_artg() is None or any(self._sysfs_battery(n) is None for _, n, _ in self.BATTERIES)
+        return ((self._want_artg() and self._sysfs_artg() is None)
+                or any(self._sysfs_battery(n) is None for _, n, _ in self._batteries()))
+
+    def _adapter(self, v: int | None, ac: bool | None) -> int | None:
+        """The adapter rating. 0 means "no adapter" and is valid on battery (the blob reads exactly 0 there). On AC it
+        cannot be true: the EC does not know the rating yet [H], so it counts as unknown and is asked again soon."""
+        if v == 0 and ac is True:
+            self.zero_tries += 1
+            self.retry_soon = self.zero_tries <= self.ADAPTER_RETRIES
+            if self.zero_tries == self.ADAPTER_RETRIES + 1 and self.log:
+                self.log("warning", "adapter rating reads 0 mW while on AC; treated as unknown (input invalid), asked again "
+                                    "every 60 s")
+            return None
+        self.zero_tries = 0
+        return v
 
     def _read_sysfs(self, now_ms: int, ac: bool | None) -> None:
         before = tuple(self.values[ChannelRef(POWER, base + 8)] for *_, base in self.BATTERIES)
@@ -390,33 +482,42 @@ class PlatformPower(Source):
         # input power of a battery moves) and otherwise every 60 s.
         after = tuple(self.values[ChannelRef(POWER, base + 8)] for *_, base in self.BATTERIES)
         if self.artg_next_ms is None or now_ms >= self.artg_next_ms or ac != self.ac or after != before:
-            self.values[self.ARTG] = _int(p)            # ENODATA (no rating known) reads as None
-            self.artg_next_ms = now_ms + self.REFRESH_MS
+            self.retry_soon = False
+            self.values[self.ARTG] = self._adapter(_int(p), ac)            # ENODATA (no rating known) reads as None
+            self.artg_next_ms = now_ms + (self.ADAPTER_RETRY_MS if self.retry_soon else self.REFRESH_MS)
 
-    def refresh(self) -> None:
-        """Requests through the debug device for everything the kernel does not provide."""
-        for tid, name, base in self.BATTERIES:
+    def refresh(self, ac: bool | None = None) -> None:
+        """Requests through the debug device for everything the kernel does not provide and the blob reads."""
+        self.retry_soon = False
+        for tid, name, base in self._batteries():
             if self._sysfs_battery(name):
                 continue
-            data = self.transport.request(tid, 0x53)
+            data = ask(self.transport, self.gate, f"0x53/{tid}", f"EC request 0x53 (battery target {tid})", self.log,
+                       tid, 0x53, 21)
+            self.answers[tid] = data
             for off, fmt, _, ch in self.FIELDS:
-                self.values[ChannelRef(POWER, base + ch)] = (struct.unpack_from(fmt, data, off)[0]
-                                                            if data and len(data) >= 21 else None)
-        if not self._sysfs_artg():
-            artg = self.transport.request(1, 0x0F)
-            v = struct.unpack_from("<I", artg, 0)[0] if artg and len(artg) >= 4 else None
-            self.values[self.ARTG] = None if v in (None, 0x80000000) else v
+                self.values[ChannelRef(POWER, base + ch)] = struct.unpack_from(fmt, data, off)[0] if data else None
+        if self._want_artg() and not self._sysfs_artg():
+            artg = ask(self.transport, self.gate, "0x0f", "EC request 0x0f (adapter rating)", self.log, 1, 0x0F, 4)
+            raw = struct.unpack_from("<I", artg, 0)[0] if artg else None
+            self.artg_raw = raw
+            self.values[self.ARTG] = None if raw in (None, 0x80000000) else self._adapter(raw, ac)
+        self.ok = self.values[ChannelRef(POWER, 8)] is not None
 
     def request_refresh(self) -> None:
-        """Force a refresh at the next read, e.g. after resume."""
+        """Force a refresh at the next read, e.g. after resume. A command that stopped answering is tried again once."""
         self.next_ms = None
         self.artg_next_ms = None
+        self.zero_tries = 0
+        self.gate.reset()
 
     def read(self, now_ms):
         ac = _ac_online(self.root)
+        if ac != self.ac:
+            self.zero_tries = 0
         if self.needs_cdev and (self.next_ms is None or now_ms >= self.next_ms or ac != self.ac):
-            self.refresh()
-            self.next_ms = now_ms + self.REFRESH_MS
+            self.refresh(ac)
+            self.next_ms = now_ms + (self.ADAPTER_RETRY_MS if self.retry_soon else self.REFRESH_MS)
         self._read_sysfs(now_ms, ac)
         self.ac = ac
         self.ok = self.values[ChannelRef(POWER, 8)] is not None
@@ -559,16 +660,26 @@ class BatteryEcState(Source):
         available = getattr(self.transport, "available", None)
         ok = available() if available else True
         self.channels = {ChannelRef(POWER, ch) for ch, _ in self.QUERIES} if ok else set()
+        self.queries = self.QUERIES
         self.values: dict[ChannelRef, float | None] = {ref: None for ref in self.channels}
         self.next_ms: int | None = None
+        self.gate = RequestGate()
+        self.log = None                                  # set by the daemon: log(priority, text)
+
+    def restrict(self, wanted: set[ChannelRef]) -> None:
+        """Send only the queries whose channel the blob reads (0x69 on a device whose blob never reads it would time out)."""
+        self.queries = tuple(q for q in self.QUERIES if ChannelRef(POWER, q[0]) in wanted)
+        self.values = {ChannelRef(POWER, ch): None for ch, _ in self.queries if ChannelRef(POWER, ch) in self.channels}
 
     def request_refresh(self) -> None:
         self.next_ms = None
+        self.gate.reset()
 
     def read(self, now_ms):
         if self.next_ms is None or now_ms >= self.next_ms:
-            for ch, cid in self.QUERIES:
-                data = self.transport.request(1, cid)
+            for ch, cid in self.queries:
+                data = ask(self.transport, self.gate, f"0x{cid:02x}", f"EC request 0x{cid:02x} (battery state {ch})", self.log,
+                           1, cid)
                 self.values[ChannelRef(POWER, ch)] = data[0] if data else None
             self.next_ms = now_ms + self.REFRESH_MS
         return dict(self.values)

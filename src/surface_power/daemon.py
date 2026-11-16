@@ -133,6 +133,8 @@ class Daemon:
         dtx = (lambda: None) if root != "/" else inp.dtx_device_mode
         self.platform = inp.PlatformPower(root, transport=transport)
         self.battery_ec = inp.BatteryEcState(root, transport=transport)
+        if not args.no_ec:
+            self.platform.log = self.battery_ec.log = self.log
         self.gpu_probe = gpu.ClientProbe(root, gpu.find_nvidia_gpu(root))   # shared: one /proc scan per 10 s at most
         sources = [inp.HwmonTemperatures(root), inp.SliderState(root), inp.Batteries(root), inp.Posture(root, dtx),
                    self.platform, inp.DisplayBrightness(root), inp.PlatformEvents(root), inp.BatteryCurrent(root),
@@ -244,6 +246,7 @@ class Daemon:
         self.results = {}
         self.values = {}
         self.before_pause = None
+        self.writers_next_ms = 0
 
         tested = "tested" if (p and p.tested) else ("untested profile" if p else "no profile")
         self.log("notice", f"device {self.device.product!r} ({tested}), blob form {self.loaded.form}, "
@@ -261,12 +264,20 @@ class Daemon:
                 and any(r.guid == inp.POWER for r in self.graph.inputs)):
             self.log("warning", f"{self.platform.transport.path} missing and no kernel DPTF attributes: load the module "
                                 "surface_aggregator_cdev; until then the EC power data are invalid")
+        self.writers = supervisor.limit_writers(root)
+        self._warn_writers()
         for note in self.outputs.notes + self.throttle.notes + self.fan.notes + self.prochot.notes:
             self.log("info", note)
         for r, why in self.not_needed.items():
             self.log("info", f"output {r}: not needed on Linux: {why}")
 
     # --- helpers ---
+    def _warn_writers(self) -> None:
+        if self.writers:
+            self.log("warning", f"{', '.join(self.writers)} running: it writes power limits itself, so the limits in "
+                                "sysfs differ from the computed ones" + (" (this run writes nothing)" if self.mode != "control"
+                                                                          else ""))
+
     def _fan_touch(self, key: str, frame) -> None:
         """Before the first send of a fan channel: put its neutral frame into the snapshot (restore without read-back)."""
         if self.snapshot is None:
@@ -330,6 +341,12 @@ class Daemon:
         if self.state == "paused":
             _sd_notify("WATCHDOG=1")               # freezing tasks can take 20 s; the watchdog must not fire meanwhile
             return
+        if now_ms >= self.writers_next_ms:
+            self.writers_next_ms = now_ms + 60000
+            now_writers = supervisor.limit_writers(self.args.root)
+            if now_writers != self.writers:
+                self.writers = now_writers
+                self._warn_writers()
         self.values = self.reader.read(now_ms)
         runs = self.sched.step(now_ms, self.values)
         rounded = self.engine.rounded_outputs()
@@ -446,6 +463,8 @@ class Daemon:
             "inputs": [{"channel": str(r), "value": v, "valid": v is not None} for r, v in sorted(self.values.items())],
             "events": list(self.journal.events),
         }
+        if self.writers:
+            status["competing_writers"] = self.writers
         if self.dgpu:
             status["dgpu"] = self.dgpu.status()
         if self.actions.channels & set(self.graph.outputs):

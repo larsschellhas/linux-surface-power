@@ -47,7 +47,7 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
    (`outputs.md` 9), or an output that needs none, with evidence (`outputs.md` 10). Otherwise the blob would regulate, for example, the CPU while its fan,
    throttle or safety outputs go nowhere. The daemon then runs in dry-run and logs the outputs. `--allow-partial-outputs` overrides
    this for field tests; the status file lists the outputs in `outputs_without_linux_path`.
-7. **Conflicts:** if thermald is active (`systemctl is-active thermald`, or its D-Bus name), the daemon refuses to start (FR-S6). systemd `Conflicts=` normally prevents this.
+7. **Conflicts:** if thermald is active (`systemctl is-active thermald`, or its D-Bus name), the daemon refuses to start (FR-S6). systemd `Conflicts=` normally prevents this. In every mode, the daemon logs a warning and writes `competing_writers` to the status file while thermald, tuned, TLP or power-profiles-daemon runs (checked at start and every 60 s): they write limits too, so the sysfs values of a dry-run differ from the computed ones. `surface-power-report` prints the same warning.
 
 ## 3. Snapshot and restore (FR-S1, FR-S2)
 - **Contents:** before the first write, the supervisor saves every value it may write:

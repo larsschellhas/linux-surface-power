@@ -74,6 +74,25 @@ def thermald_running(root: str = "/") -> bool:
     return False
 
 
+# Daemons that write package power limits (RAPL) or frequency caps themselves and so confound a dry-run's measurements.
+LIMIT_WRITERS = ("thermald", "tuned", "tlp", "power-profiles-")   # comm is cut at 15 characters: power-profiles-daemon
+
+
+def limit_writers(root: str = "/") -> list[str]:
+    """Names of running processes that write power limits themselves (thermald, tuned, TLP, power-profiles-daemon)."""
+    found = set()
+    for path in glob.glob(os.path.join(root, "proc/[0-9]*/comm")):
+        try:
+            with open(path) as f:
+                comm = f.read().strip()
+        except OSError:
+            continue
+        for name in LIMIT_WRITERS:
+            if comm == name or (name.endswith("-") and comm.startswith(name)):
+                found.add(name.rstrip("-") + ("-daemon" if name.endswith("-") else ""))
+    return sorted(found)
+
+
 def detect(root: str = "/") -> Device:
     dmi = os.path.join(root, "sys/class/dmi/id")
     smf = _smf_present(root)

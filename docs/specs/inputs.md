@@ -55,6 +55,7 @@ Readings outside the input-line range (`blob-format.md` 5.1) are invalid (FR-I2)
 - **AC detection:** `power_supply` of type `Mains` (on the SB3 `ADP1`), `online == 1`. If no such supply exists, `0x0d` PSRC is used.
 - **Low-power on AC:** Windows has no energy saver on AC. `low-power` on AC therefore maps to state 1, the Windows "Recommended" setting.
 - **States 8 – 10:** game mode, mixed reality and a service flag have no Linux counterpart and are never produced.
+- **Source:** `/sys/firmware/acpi/platform_profile` (the legacy attribute; on Fedora/Bazzite it is the only one, Surface Pro 9 field report). Where it is missing, the first `/sys/class/platform-profile/*/profile`, a `surface` device first.
 - **Change detection:** a profile change is seen at the next 1 Hz read and causes an asynchronous run (`engine.md` 3.3, AC-I3).
 
 ## 4. Posture and lid (FR-I6)
@@ -107,7 +108,11 @@ The same payload also arrives as an EC event on some devices (surface-aggregator
   - on every change of the AC state (`power_supply` uevent, or the 1 Hz read seeing a change);
   - after resume;
   - otherwise every 60 s [D].
-- **Validity:** a failed request makes its channels invalid. They are never 0.
+- **Validity:** a failed request makes its channels invalid. They are never 0. A 0 in an answer is a value, with one exception below.
+- **Only what the blob reads:** a command the EC does not know times out (kernel#195 review). The daemon sends `0x53` per battery only if the blob reads a channel of that battery, `0x0f` only for `28B7BD85/7`, `0x1A` only for `/13` and `0x69` only for `/16`. The Pro 9 blob reads `/13` but not `/16`, so it never gets `0x69`; it has no base battery (KIP), so it never gets the second `0x53`.
+- **No retry forever:** a request that gets no answer three times in a row is not sent again until the next resume (one more try then). The input stays invalid and one warning says which command it was. A missing debug device is not counted (it is reported once at start).
+- **Adapter rating 0 on AC [H]:** the Pro 9 report tool read 0 mW with the charger connected, the daemon 38745 mW (a 39 W supply). On battery 0 is valid: the blob reads exactly 0 as "no adapter" (psys PL1 100 W, battery mode 1). On AC it cannot be true, so the daemon counts it as unknown (invalid), asks again after 5 s up to three times, then every 60 s. Cause of the first 0 not shown; the report tool had just sent a `0x69` that timed out (which it no longer sends there) [H]. `0x80000000` ("not present") stays invalid.
+- **Zero fields on the Pro 9 [H]:** the `0x53` answer is complete (21 bytes), but available input power (`/8`) and rest of platform (`/6`) read 0 on AC. The daemon uses them as 0. In the Pro 9 blob they reach only PL4: with a peak power of 142 W the clamp (130 W) hides them; with a low peak power (e.g. 40 W) a 0 in `/8` lowers PL4 a lot (peak 40 W: PL4 34 W with `/8` 0, 93 W with 45.7 W). Whether Windows takes these two fields from the `0x53` EVENT instead of the request is not shown (the event has the same layout on the SP7/Laptop 3, surface-aggregator-module#29). The daemon does not listen to events through the debug device (it needs the event ioctls, not used elsewhere): open point, to be decided with a Pro 9 `0x53` event log.
 - **Transport, in this order:**
   1. **A kernel interface, when present.** Planned as an SSAM client driver in linux-surface. It exposes the same values as sysfs attributes and is upstreamable (OD-3).
   2. **The debug character device `/dev/surface/aggregator`.** This is interim: it needs root and the `surface_aggregator_cdev` module. Without either transport, these channels are invalid and the result is the Windows fallback (psys 23 / 34.5 W on the SB3, `engine.md` 7).
@@ -147,7 +152,7 @@ missing source keeps the device in dry-run (`supervisor.md` 2.5). None of these 
   The EC also sends events with the same command IDs when the values change.
 - Interim transport: the debug device (section 6), every 10 s and after resume [D]. Without the debug device the channels are
   not provided. A kernel attribute next to `dptf_battery` is planned (OD-3).
-- [H] Not yet requested on an affected device.
+- [M] `0x1A` answers on the Surface Pro 9 (value 20 at 90 % charge, tester). `0x69` gives no answer there, and its blob does not read `/16`: the daemon sends only the query whose channel the blob reads.
 
 ### 8.5 Standby phase (`DEF1AB69/100`)
 - Windows: the Surface ACPI platform extension forwards the Microsoft low-power `_DSM` calls (`Notify(SAPD, 0xC0 + n)`) and maps them

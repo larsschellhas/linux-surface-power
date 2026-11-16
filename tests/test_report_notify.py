@@ -112,3 +112,69 @@ class NotifyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReportEcTest(unittest.TestCase):
+    """--with-ec on a Pro 9 like device (field report): reads per field, and only the commands the blob needs."""
+
+    def setUp(self):
+        self.fs = FakeSys()
+        b = BlobBuilder()
+        for c in (2, 3, 6, 7, 8, 13):
+            b.line(G["pass_through"], c, [(POWER, c)], [(VN, c)], [1000], stage=1)
+        b.line(G["pass_through"], 20, [(VN, 2)], [(LIMITS, 51)], [30000], stage=1)
+        self.blob = self.fs.path("blob.txt")
+        with open(self.blob, "w") as f:
+            f.write(b.text())
+        self.sent = []
+        self.rating = [0, 38745]
+
+        outer = self
+
+        class Ec:
+            def available(self):
+                return True
+
+            def request(self, tid, cid, iid=1):
+                import struct
+                outer.sent.append((tid, cid))
+                if (tid, cid) == (1, 0x53):
+                    return bytes([1]) + struct.pack("<IIHHII", 142770, 82840, 100, 8000, 0, 0)
+                if cid == 0x0F:
+                    return outer.rating.pop(0).to_bytes(4, "little")
+                if cid == 0x1A:
+                    return bytes([20])
+                return None                                          # everything else times out
+
+        self.ec = Ec()
+
+    def tearDown(self):
+        self.fs.cleanup()
+
+    def run_report(self):
+        out = io.StringIO()
+        old, report.SLEEP = report.SLEEP, lambda s: None
+        try:
+            with contextlib.redirect_stdout(out):
+                report.main(["--root", self.fs.root, "--blob", self.blob, "--with-ec"], ec_transport=self.ec)
+        finally:
+            report.SLEEP = old
+        return out.getvalue()
+
+    def test_fields_adapter_and_unneeded_commands(self):
+        text = self.run_report()
+        self.assertIn("EC 0x53 request, battery 1 (SAM): answered 21 bytes; peak power 142770 mW", text)
+        self.assertIn("available input power 0 mW (zero)", text)
+        self.assertNotIn("no answer", text)
+        self.assertIn("first request 0 mW on AC, second request after 2 s 38745 mW", text)
+        self.assertIn("EC adapter rating request: answered 38745 mW", text)
+        self.assertIn("EC battery state answers: 13=20", text)
+        self.assertIn("not sent: the blob does not read it", text)
+        self.assertIn("28B7BD85/8: provided", text)                  # a field that reads 0 still answered
+        self.assertIn("28B7BD85/7: provided", text)
+        self.assertEqual(sorted(set(self.sent)), [(1, 0x0F), (1, 0x1A), (1, 0x53)])   # no 0x69, no second battery
+        self.assertIn("platform profile: performance (/sys/firmware/acpi/platform_profile)", text)
+
+    def test_warns_about_limit_writers(self):
+        self.fs.write("proc/321/comm", "thermald")
+        self.assertIn("WARNING: thermald running", self.run_report())

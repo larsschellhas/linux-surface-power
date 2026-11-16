@@ -1,5 +1,6 @@
 """Tests for the input and output adapters on a fake sysfs (spec inputs, outputs; AC-I4, AC-O1, AC-S7)."""
 import os
+import struct
 import unittest
 
 from fakesys import FakeSys
@@ -18,9 +19,11 @@ class FakeTransport:
     def __init__(self, fail=False):
         self.fail = fail
         self.calls = 0
+        self.sent = []                                             # (target, command) of every request
 
     def request(self, tid, cid, iid=1):
         self.calls += 1
+        self.sent.append((tid, cid))
         if self.fail:
             return None
         if cid == 0x53:
@@ -265,6 +268,122 @@ class InputsTest(unittest.TestCase):
             def available(self):
                 return False
         self.assertEqual(inputs.BatteryEcState(self.fs.root, transport=Absent()).channels, set())
+
+    # --- EC requests: only what the blob reads, and no endless retries of a command that times out (kernel#195) ---
+
+    def test_ec_requests_only_for_wanted_channels(self):
+        """Pro 9 blob: battery 1 fields, adapter rating and 0x1A, but no base battery and no 0x69."""
+        tr = FakeTransport()
+        pp = inputs.PlatformPower(self.fs.root, transport=tr)
+        be = inputs.BatteryEcState(self.fs.root, transport=tr)
+        wanted = {ref(POWER, c) for c in (1, 2, 3, 6, 7, 8, 13)}
+        pp.restrict(wanted)
+        be.restrict(wanted)
+        pp.read(0)
+        be.read(0)
+        self.assertEqual(sorted(tr.sent), [(1, 0x0F), (1, 0x1A), (1, 0x53)])
+        self.assertEqual(be.read(20000)[ref(POWER, 13)], 7)
+        self.assertNotIn(ref(POWER, 16), be.read(20000))
+
+    def test_failing_command_is_given_up_until_resume(self):
+        class Dead(FakeTransport):
+            def request(self, tid, cid, iid=1):
+                if cid == 0x69:
+                    self.sent.append((tid, cid))
+                    return None
+                return super().request(tid, cid, iid)
+        tr, logs = Dead(), []
+        be = inputs.BatteryEcState(self.fs.root, transport=tr)
+        be.log = lambda prio, text: logs.append((prio, text))
+        for t in range(10):
+            v = be.read(t * 10000)
+        self.assertEqual(tr.sent.count((1, 0x69)), 3)              # not every 10 s forever
+        self.assertEqual(tr.sent.count((1, 0x1A)), 10)             # a command that answers is not affected
+        self.assertIsNone(v[ref(POWER, 16)])
+        self.assertEqual(v[ref(POWER, 13)], 7)
+        self.assertEqual(len(logs), 1)
+        self.assertIn("0x69", logs[0][1])
+        be.request_refresh()                                       # resume: one more chance
+        be.read(200000)
+        self.assertEqual(tr.sent.count((1, 0x69)), 4)
+
+    def test_platform_power_gives_up_on_a_silent_battery(self):
+        tr = FakeTransport(fail=True)
+        pp = inputs.PlatformPower(self.fs.root, transport=tr)
+        logs = []
+        pp.log = lambda prio, text: logs.append(text)
+        for t in range(8):
+            pp.read(t * 60000)
+        self.assertEqual(len([1 for tid, cid in tr.sent if cid == 0x53 and tid == 1]), 3)
+        self.assertEqual(len([1 for tid, cid in tr.sent if cid == 0x0F]), 3)
+        self.assertEqual(len(logs), 3)                             # once per command: two batteries, adapter rating
+
+    def test_missing_debug_device_is_not_a_failure(self):
+        class Absent(FakeTransport):
+            def available(self):
+                return False
+        tr = Absent()
+        pp = inputs.PlatformPower(self.fs.root, transport=tr)
+        pp.log = lambda *a: self.fail("reported at start by the daemon, not per request")
+        pp.read(0)
+        self.assertEqual(tr.sent, [])
+
+    def test_zero_fields_in_the_0x53_answer_are_values(self):
+        """Pro 9 (field report): available input power and rest of platform read 0 on AC; the rest of the answer is fine."""
+        class Pro9(FakeTransport):
+            def request(self, tid, cid, iid=1):
+                self.sent.append((tid, cid))
+                if cid == 0x53:
+                    return bytes([1]) + struct.pack("<IIHHII", 142770, 82840, 100, 8000, 0, 0)
+                return None
+        pp = inputs.PlatformPower(self.fs.root, transport=Pro9())
+        pp.restrict({ref(POWER, c) for c in (2, 3, 6, 8)})
+        v = pp.read(0)
+        self.assertEqual((v[ref(POWER, 2)], v[ref(POWER, 3)], v[ref(POWER, 6)], v[ref(POWER, 8)]), (142770, 82840, 0, 0))
+        self.assertEqual(pp.answers[1][0], 1)
+
+    def test_adapter_rating_zero_on_ac_is_unknown_on_battery_valid(self):
+        class Rating(FakeTransport):
+            value = 0
+
+            def request(self, tid, cid, iid=1):
+                if cid == 0x0F:
+                    self.sent.append((tid, cid))
+                    return self.value.to_bytes(4, "little")
+                return super().request(tid, cid, iid)
+        tr = Rating()
+        pp = inputs.PlatformPower(self.fs.root, transport=tr)
+        pp.restrict({ref(POWER, 7)})
+        self.assertIsNone(pp.read(0)[ref(POWER, 7)])               # AC (fake system) and 0: not known yet
+        self.assertIsNone(pp.read(4000)[ref(POWER, 7)])
+        pp.read(5000)                                              # asked again after 5 s ...
+        pp.read(10000)
+        pp.read(15000)
+        n = len(tr.sent)
+        self.assertEqual(n, 4)                                     # ... three more times, then every 60 s again
+        pp.read(20000)
+        self.assertEqual(len(tr.sent), n)
+        tr.value = 38745
+        self.assertEqual(pp.read(75000)[ref(POWER, 7)], 38745)
+        self.fs.write("sys/class/power_supply/ADP1/online", 0)     # battery: 0 means no adapter and counts
+        tr.value = 0
+        self.assertEqual(pp.read(76000)[ref(POWER, 7)], 0)
+        tr.value = 0x80000000                                      # "not present": invalid
+        pp.request_refresh()
+        self.assertIsNone(pp.read(77000)[ref(POWER, 7)])
+
+    def test_platform_profile_legacy_and_class_path(self):
+        """Fedora/Bazzite shows only /sys/firmware/acpi/platform_profile, other kernels the class device."""
+        self.assertEqual(inputs.platform_profile(self.fs.root), ("performance", "/sys/firmware/acpi/platform_profile"))
+        os.remove(self.fs.path("sys/firmware/acpi/platform_profile"))
+        self.assertEqual(inputs.platform_profile(self.fs.root)[0], None)
+        self.fs.write("sys/class/platform-profile/platform-profile-0/name", "thinkpad")
+        self.fs.write("sys/class/platform-profile/platform-profile-0/profile", "low-power")
+        self.fs.write("sys/class/platform-profile/platform-profile-1/name", "surface_platform_profile")
+        self.fs.write("sys/class/platform-profile/platform-profile-1/profile", "balanced")
+        self.assertEqual(inputs.platform_profile(self.fs.root),
+                         ("balanced", "/sys/class/platform-profile/platform-profile-1"))
+        self.assertEqual(inputs.SliderState(self.fs.root).read(0)[ref(SYSTEM, 1)], 1)    # balanced on AC
 
     def test_standby_phase_is_normal(self):
         self._connector("eDP-1", "connected", "disabled", "Off")

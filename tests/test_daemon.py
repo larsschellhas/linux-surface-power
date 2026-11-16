@@ -270,6 +270,19 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(d.mode, "dry-run")
         d.stop()
 
+    def test_warns_when_a_limit_writer_runs(self):
+        """A dry-run next to thermald, tuned or power-profiles-daemon: say so, the measured limits are not the computed ones."""
+        for pid, comm in ((4242, "thermald"), (4243, "power-profiles-")):
+            self.fs.write(f"proc/{pid}/comm", comm)
+        out = io.StringIO()
+        args = ["--root", self.fs.root, "--blob", self.blob, "--run-dir", self.run.name, "--state-dir", self.state.name,
+                "--no-ec", "--dry-run"]
+        d = daemon.Daemon(daemon.parse_args(args), monitor.Journal(stream=out))
+        d.cycle(0)
+        self.assertIn("power-profiles-daemon, thermald running", out.getvalue())
+        self.assertEqual(self.status()["competing_writers"], ["power-profiles-daemon", "thermald"])
+        d.stop()
+
     def test_unsupported_device_exits_without_writes(self):  # AC-S8
         self.fs.write("sys/class/dmi/id/sys_vendor", "LENOVO")
         with self.assertRaises(daemon.Idle):
