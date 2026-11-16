@@ -28,8 +28,8 @@ PrivateTmp=yes
 PrivateNetwork=yes
 NoNewPrivileges=yes
 RestrictAddressFamilies=AF_UNIX
-# DAC_OVERRIDE for powercap and the SSAM cdev; add CAP_SYS_RAWIO only if PL3 via MSR is enabled.
-CapabilityBoundingSet=CAP_DAC_OVERRIDE
+# DAC_OVERRIDE for powercap and the SSAM cdev; SYS_RAWIO to read PL3 in MSR 0x615 as the control unit does (nothing is written).
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SYS_RAWIO
 MemoryMax=100M
 
 [Install]
