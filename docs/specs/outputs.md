@@ -44,7 +44,10 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 | | 103–105, 200 | modem sensors, NPU | log-only (no Linux interface known) |
 | `110DF2A4` | 1, 2 | thermal policy: hibernate (`O_HOT`) and critical shutdown (`O_CRT`) requests | thermal actions (7) |
 | | 3 | minimum-power request | log-only |
-| other | – | fan, WTMF and so on (L3/L4) | log-only (FR-O6, FR-O7) |
+| `B620798F` | 101–103, 111–116, 121–126, 306, 312 | fan limits | SAM request through the SSAM debug device (9) |
+| | 201–203, 301 | fan profile, fan state | the kernel sends them (9.3) |
+| | 302–311 | fan, PROCHOT and charge-rate temperatures | off unless the profile opts in (9.4) |
+| other | – | WTMF and so on (L3/L4) | log-only (FR-O6, FR-O7) |
 
 - **Zone lookup:** zones are found by name (`package-0`, `psys`), not by index. A missing zone makes its channels log-only, with one message.
 - **PL1 time window:** the daemon does not write it. It checks it against the firmware value from the snapshot and restores it if someone else changed it, because a foreign short window would change PL1's effect (`supervisor.md` 3).
@@ -148,3 +151,48 @@ while no Windows state in the SB3 blob allows more than 50 W.
 - **Other writers (conflict):** `scaling_max_freq` and the GPU maximum are also written by users (`cpupower frequency-set -u`, `echo`), TLP and some desktop tools. thermald and power-profiles-daemon mostly limit through the cpufreq cooling device or `energy_performance_preference`, which does not touch `scaling_max_freq`, but they can change the effective maximum all the same. The daemon does not see such limits [H]. It detects a change of its own files: it logs a warning, writes its cap again, and three changes within 60 s make it yield like for power limits (`supervisor.md` 5). thermald is already refused at start (FR-S6).
 - **Status:** `status.json` shows the target of a throttle output as `cpufreq cap`, `GPU freq cap` (with ` (dry-run)` in dry-run, `firmware` in emergency, yielded and paused) or `no Linux path`. The list `throttle` gives, per target, the file, baseline, current value and the dry-run value. `surface-power-report` prints `writable (cpufreq cap)`, `writable (GPU freq cap)` or `no Linux path (logged only)`.
 - **Not verified:** no device in our corpus with a `9BBB8910` output other than the Intel `/62` is available to us. The SB3 15" blob has none. The cpufreq mechanism itself is the same on the SB3, so `scripts/throttle-test.py` checks the write path, the restore and the effective frequency there and on any other device (the tester needs root and stops the daemon first).
+
+## 9. Fan and charging outputs (`B620798F`) [C for the commands, H for their effect]
+The commands, units and send rules come from the analysis of the Windows receiver (`../research/11-fan-charging.md`). Nothing here has run on a device that has such an output. The SB3 blob has none.
+
+### 9.1 Send rules (`adapters/fan.py`)
+- **One request per channel,** a write without a response: category FAN `0x05` (TMP `0x03` for 308–311), target ID 1, instance = the fan number (1 for 301 and 302–312), flags 0, payload u8, u16 little endian or float32 little endian (temperatures in 0.1 K).
+- **Clamp:** the value is clamped to the blob's output range, then to a hard bound per type (rpm 10000, SPL 100, u8 255, u16 65535).
+- **Dead band:** a new request goes out only if the value moved by at least 100 rpm (101–103) or 1 (all others).
+- **Rate limit:** at most one request per channel per 5 s. The first cycle after start, after resume and after an emergency sends everything again.
+- **Failure:** a failed request leaves the last-sent value unchanged and is tried again after the rate limit. Three failures in a row make the channel log-only, with a note in the log and in the status file.
+- **No read-back:** status 0 only shows that the EC acknowledged the frame, not that it knows the command [M, SB3].
+
+### 9.2 Channels and paths
+| Channel | Command | Path |
+|---|---|---|
+| 101–103 | FAN `0x0b`, u16, rpm | `SAM FAN 0x0b (cdev)` |
+| 111–113, 121–123 | FAN `0x0c`, `0x12`, float32, SPL | `SAM FAN 0x0c (cdev)`, `SAM FAN 0x12 (cdev)` |
+| 114–116, 124–126 | FAN `0x15`, `0x14`, u8, sones | `SAM FAN 0x15 (cdev)`, `SAM FAN 0x14 (cdev)` |
+| 306, 312 | FAN `0x1c` float32, `0x16` u8 | `SAM FAN 0x1c (cdev)`, `SAM FAN 0x16 (cdev)` |
+| 201 | FAN `0x0e`, profile 1–4 | `kernel (platform profile)` |
+| 202, 203 | FAN `0x0e` for fan 2 and 3 | `no Linux path` [H: the kernel sends the profile for fan 1 only; not checked] |
+| 301 | FAN `0x0f`, state | `kernel (suspend)` |
+| 302, 304, 305, 307, 308–311 | FAN `0x19`, `0x1a`, `0x1b`, `0x1d`; TMP `0x25`–`0x28`, u16 | `disabled (profile opt-in)` |
+
+The path is a property of this machine. An output counts as written (`supervisor.md` 2.6) only if its path exists: the debug device must be writable (root, module `surface_aggregator_cdev` loaded), or, for 201 and 301, the kernel path must exist. Otherwise the output is `no Linux path`, and a blob that has it cannot control. `--no-ec` switches the debug device off.
+
+### 9.3 Fan profile and fan state are the kernel's
+`surface_platform_profile` (linux-surface kernel) sends FAN `0x0e` at every platform profile change on nodes with `has_fan`, and FAN `0x0f` (standby / normal) in its suspend hooks. These are channels 201 and 301 with the Windows numbers. The daemon does **not** send them. It never sends 301 = 2, because standby while the system runs may stop the fan.
+- **Detection:** the kernel path exists if the driver `surface_platform_profile` is bound to its SSAM device (`/sys/bus/surface_aggregator/drivers/surface_platform_profile/<device>`, or a `platform-profile` class node of that name). The property `has_fan` is not visible in sysfs. A hwmon `surface_fan` is only evidence for it, so the path counts as present when the driver is bound, and the fan support is [H].
+- **Log:** when the blob's 201 differs from the value the kernel sends for the current platform profile (low-power 1, balanced 2, balanced-performance 3, performance 4), the daemon logs it once per pair. The platform profile is the one the slider input uses (`inputs.md` 3).
+
+### 9.4 Temperature thresholds are off
+Channels 302–311 (fan-on, ramp, maximum and critical temperature, PROCHOT, charge-rate temperatures) exist only on the arm64 Laptop 13" and Pro 12". The frames are built, but the stage sends them only if the device profile sets `outputs.fan_thresholds = true`. No shipped profile does. Disabled means log-only, the status shows `disabled (profile opt-in)`, and the output does not count as written, so such a blob stays in dry-run. A wrong value can hurt the hardware or the battery. These channels have no neutral value: once sent, only a reboot undoes them [H]. The daemon logs this when it sends one.
+
+### 9.5 Restore without read-back
+- **Neutral frames:** 0 for the rpm, SPL and sones channels (0 means "no floor" or "no limit" [H]).
+- **Record first:** before the first send of a channel the neutral frame goes into the snapshot (`supervisor.md` 3). If it cannot be saved, nothing is sent.
+- **When:** on exit, on an unhandled exception, on sleep, in emergency and when yielding, by `Snapshot.restore()`. After a crash the reset tool (`surface-power-reset`) or a successor daemon sends the recorded frames. A frame that could not be sent stays in the snapshot.
+- **Last resort:** a reboot [H: the EC returns to its defaults at boot].
+
+### 9.6 Dry-run and status
+Dry-run computes the frames and sends nothing. The status file shows `would send SAM FAN 0x12 (cdev)`, `kernel (platform profile)`, `kernel (suspend)`, `disabled (profile opt-in)` or `no Linux path`, and the list `fan` with the sent value and the frame (`would`, hex) per channel. `surface-power-report` prints the same kinds. With `--with-ec` it also sends the two read-only requests FAN `0x01` (instance 1, rpm) and FAN `0x13` (instance 0, system SPL).
+
+### 9.7 Test tool
+`scripts/fan-test.py` runs the safe procedure of `../research/11-fan-charging.md` 8 for one channel (or only `--probe` on any Surface). It uses the same frames as the adapter.

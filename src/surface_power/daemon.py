@@ -22,6 +22,7 @@ from . import monitor, supervisor
 from .adapters import inputs as inp
 from .adapters.actions import ThermalActions
 from .adapters.cpufreq import THROTTLE, ThrottleStage
+from .adapters.fan import FAN_GUID, FanStage, NullTransport
 from .adapters import gpu
 from .adapters.gpu import ClockCapStandIn
 from .adapters.outputs import OutputStage
@@ -87,7 +88,7 @@ def _celsius(dk: float) -> float:
 
 
 class Daemon:
-    def __init__(self, args, journal: monitor.Journal | None = None):
+    def __init__(self, args, journal: monitor.Journal | None = None, fan_transport=None):
         self.args = args
         self.journal = journal or monitor.Journal()
         self.log = self.journal.log
@@ -152,6 +153,15 @@ class Daemon:
         self.throttle = ThrottleStage(root, throttle_refs, dry_run=(self.mode != "control"))
         self.throttle_preview = ThrottleStage(root, throttle_refs, dry_run=True)
 
+        # Fan and charging outputs (spec outputs 9): SAM requests through the debug device, or the kernel's own path.
+        fan_refs = [r for r in self.graph.outputs if r.guid == FAN_GUID]
+        if fan_transport is None:
+            fan_transport = NullTransport() if args.no_ec else None
+        fkw = dict(transport=fan_transport, thresholds=bool(p and p.fan_thresholds))
+        self.fan = FanStage(root, fan_refs, self.graph.output_ranges, dry_run=(self.mode != "control"),
+                            on_touch=self._fan_touch, **fkw)
+        self.fan_preview = FanStage(root, fan_refs, self.graph.output_ranges, dry_run=True, **fkw)
+
         # dGPU stand-in (DO-1, per profile): with it, the dGPU limit counts as a written output.
         self.dgpu = None
         self.dgpu_note = ""
@@ -160,6 +170,7 @@ class Daemon:
         self.actions = ThermalActions()
         written |= self.actions.channels & set(self.graph.outputs)
         written |= {r for r in throttle_refs if self.throttle.has_target(r)}
+        written |= {r for r in fan_refs if self.fan.has_path(r)}
         # PL4 and PL3 keep their value while an EC input on their path is invalid: their fallback would be far below the
         # firmware value (Pro 10: PL4 20 W instead of 45 W) [D].
         lines_ = self.loaded.parsed.algorithms
@@ -201,6 +212,7 @@ class Daemon:
             self.mode = self.state = "dry-run"
             self.outputs.dry_run = True
             self.throttle.dry_run = True
+            self.fan.dry_run = True
             if self.dgpu:
                 self.dgpu.dry_run = True
         self.snapshot = None
@@ -208,6 +220,7 @@ class Daemon:
             keys = [k for k in self.outputs.snapshot_keys() + self.throttle.snapshot_keys()
                     if k.startswith("msr:") or os.path.exists(k)]
             self.snapshot, inherited = supervisor.Snapshot.take(args.run_dir, keys)
+            self.snapshot.transport = self.fan.transport
             self.throttle.set_baseline(self.snapshot.values)
             if inherited:
                 self.log("warning", "kept the firmware snapshot of a predecessor that did not stop cleanly")
@@ -237,10 +250,16 @@ class Daemon:
                 and any(r.guid == inp.POWER for r in self.graph.inputs)):
             self.log("warning", f"{self.platform.transport.path} missing and no kernel DPTF attributes: load the module "
                                 "surface_aggregator_cdev; until then the EC power data are invalid")
-        for note in self.outputs.notes + self.throttle.notes:
+        for note in self.outputs.notes + self.throttle.notes + self.fan.notes:
             self.log("info", note)
 
     # --- helpers ---
+    def _fan_touch(self, key: str, frame) -> None:
+        """Before the first send of a fan channel: put its neutral frame into the snapshot (restore without read-back)."""
+        if self.snapshot is None:
+            raise OSError("no snapshot")
+        self.snapshot.record_fan(key, frame)
+
     def _series_columns(self) -> list[str]:
         cols = ["t_ms", "kind", "state"] + [str(r) for r in sorted(self.graph.inputs)]
         for c in self.graph.controllers:
@@ -273,6 +292,7 @@ class Daemon:
             errors = self.snapshot.restore()
             self.outputs.forget()
             self.throttle.forget()
+            self.fan.forget()
             for e in errors:
                 self.log("error", f"restore failed: {e}")
         self.state = state
@@ -326,6 +346,10 @@ class Daemon:
         else:
             self.results = self.preview.apply(rounded, hold)
         self.results.update((self.throttle if self.state == "control" else self.throttle_preview).apply(rounded, hold))
+        fan = self.fan if self.state == "control" else self.fan_preview
+        self.results.update(fan.apply(rounded, now_ms))
+        for prio, text in fan.drain_events():
+            self.log(prio, text)
         for prio, text in self.actions.step(now_ms, rounded, armed=(self.mode == "control")):
             self.log(prio, text)
         if self.dgpu:
@@ -362,6 +386,13 @@ class Daemon:
                 if self.state == "control":
                     return what
                 return "firmware" if self.state in ("emergency", "yielded", "paused") else f"{what} (dry-run)"
+            if ref.guid == FAN_GUID:
+                what = self.fan.describe(ref)
+                if not self.fan.sends(ref):
+                    return what                                  # kernel path, disabled or no path: the same in every state
+                if self.state == "control":
+                    return what
+                return "firmware" if self.state in ("emergency", "yielded", "paused") else f"would send {what}"
             res = self.results.get(ref)
             if res is not None and res.kind == "held":
                 return "held (EC inputs invalid)"
@@ -394,6 +425,8 @@ class Daemon:
             status["thermal_actions"] = self.actions.status()
         if self.throttle.targets:
             status["throttle"] = (self.throttle if self.state == "control" else self.throttle_preview).status()
+        if self.fan.chans:
+            status["fan"] = (self.fan if self.state == "control" else self.fan_preview).status()
         if self.unwritten:
             status["outputs_without_linux_path"] = [str(r) for r in self.unwritten]
         monitor.write_status(self.args.run_dir, status)
@@ -424,6 +457,8 @@ class Daemon:
         self.platform.request_refresh()
         self.battery_ec.request_refresh()
         self.state = self.before_pause or self.mode
+        self.fan.forget()                           # everything is sent again on the first cycle after resume
+        self.fan_preview.forget()
         if self.state == "control":
             self.outputs.forget()
             self.throttle.forget()
@@ -432,6 +467,9 @@ class Daemon:
         if self.dgpu:
             self.dgpu.release()
         if self.snapshot:
+            if self.snapshot.fan_unrestorable:
+                self.log("warning", "fan or charging thresholds were sent that have no neutral value: "
+                                    + ", ".join(sorted(self.snapshot.fan_unrestorable)) + "; only a reboot undoes them")
             errors = self.snapshot.restore()
             for e in errors:
                 self.log("error", f"restore failed: {e}")

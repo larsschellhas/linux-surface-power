@@ -14,6 +14,7 @@ from ..adapters import gpu
 from ..adapters import inputs as inp
 from ..adapters.actions import ThermalActions
 from ..adapters.cpufreq import THROTTLE, ThrottleStage
+from ..adapters.fan import FAN_GUID, TC_FAN, FanStage
 from ..adapters.outputs import OutputStage
 from ..engine.graph import build_graph
 from ..loader import container, parser
@@ -24,7 +25,19 @@ MODULES = ("surface_aggregator", "surface_aggregator_cdev", "surface_temp", "sur
            "surface_charger", "surface_platform_profile")
 
 
-def main(argv=None) -> int:
+def fan_probe(transport) -> list[str]:
+    """Read-only probe of the fan commands (11-fan-charging.md 8.1): FAN 0x01 iid 1 (rpm) and FAN 0x13 iid 0 (system SPL)."""
+    import struct
+    if not transport.can_write():
+        return ["fan probe: skipped (the debug device is missing or needs root)"]
+    rpm = transport.read(TC_FAN, 0x01, 1)
+    spl = transport.read(TC_FAN, 0x13, 0)
+    return ["fan probe (read only): "
+            f"FAN 0x01 iid 1 rpm: {struct.unpack('<H', rpm[:2])[0] if rpm and len(rpm) >= 2 else 'no answer'}; "
+            f"FAN 0x13 iid 0 system SPL: {round(struct.unpack('<f', spl[:4])[0], 3) if spl and len(spl) >= 4 else 'no answer'}"]
+
+
+def main(argv=None, fan_transport=None) -> int:
     ap = argparse.ArgumentParser(prog="surface-power-report", description="Validation report without blob content.")
     ap.add_argument("--blob", help="blob file (default: the UEFI variable)")
     ap.add_argument("--with-ec", action="store_true", help="also check whether EC requests answer (needs root)")
@@ -87,6 +100,8 @@ def main(argv=None) -> int:
         if pp.ok:
             provided |= pp.channels
             via_cdev -= pp.channels
+    if args.with_ec:
+        lines += fan_probe(fan.transport)
     lines.append("inputs:")
     for ref in sorted(graph.inputs):
         if ref.guid == inp.PLACEHOLDER:
@@ -96,6 +111,8 @@ def main(argv=None) -> int:
     stage = OutputStage(root, graph.output_ranges, dry_run=True, pl3=prof.pl3 if prof else None,
                         pl4=prof.pl4 if prof else None)
     throttle = ThrottleStage(root, [r for r in graph.outputs if r.guid == THROTTLE], dry_run=True)
+    fan = FanStage(root, [r for r in graph.outputs if r.guid == FAN_GUID], graph.output_ranges, transport=fan_transport,
+                   dry_run=True, thresholds=bool(prof and prof.fan_thresholds))
     dgpu_ref = inp.ChannelRef("0B7B5350-BB8C-4459-8D4A-A75C57073801", 201)
     stand_in = gpu.find_nvidia_gpu(root) is not None          # the stand-in needs an NVIDIA dGPU
     lines.append("outputs:")
@@ -114,6 +131,10 @@ def main(argv=None) -> int:
             kind = f"writable ({what})" if throttle.has_target(ref) else "no Linux path (logged only)"
             if not throttle.has_target(ref):
                 missing.append(ref)
+        elif ref.guid == FAN_GUID:
+            kind = fan.describe(ref)
+            if not fan.has_path(ref, report=True):
+                missing.append(ref)
         elif ref == dgpu_ref and stand_in:
             kind = "clock-cap stand-in (DO-1)" + ("" if prof and prof.dgpu_clock_cap else ", off in this profile")
             if not (prof and prof.dgpu_clock_cap):
@@ -122,7 +143,7 @@ def main(argv=None) -> int:
             kind = "no Linux path (logged only)"
             missing.append(ref)
         lines.append(f"  {ref}: {kind}")
-    for note in stage.notes + throttle.notes:
+    for note in stage.notes + throttle.notes + fan.notes:
         lines.append(f"  note: {note}")
     lines.append("ready for control: " + ("yes" if not missing else
                  f"no, {len(missing)} of {len(graph.outputs)} outputs have no Linux path"))

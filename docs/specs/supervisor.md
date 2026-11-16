@@ -42,7 +42,9 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
    - **Documented deviation with a Windows fallback:** never blocks control. This is the case for the display brightness (DV-3).
    - **Gets a Linux target later:** once an output gets one (e.g. a dGPU stand-in), its inputs become required automatically.
 6. **Outputs without a Linux path (2.6) [D]:** control is allowed only when every output of the blob is written: a powercap or MSR
-   target, the dGPU stand-in, a thermal action, or a frequency cap for a throttle request (`outputs.md`). Otherwise the blob would regulate, for example, the CPU while its fan,
+   target, the dGPU stand-in, a thermal action, a frequency cap for a throttle request, or a fan and charging output with a path on this
+   machine: a SAM request through the debug device (root and `surface_aggregator_cdev`), or the kernel's own path for 201 and 301
+   (`outputs.md` 9). Otherwise the blob would regulate, for example, the CPU while its fan,
    throttle or safety outputs go nowhere. The daemon then runs in dry-run and logs the outputs. `--allow-partial-outputs` overrides
    this for field tests; the status file lists the outputs in `outputs_without_linux_path`.
 7. **Conflicts:** if thermald is active (`systemctl is-active thermald`, or its D-Bus name), the daemon refuses to start (FR-S6). systemd `Conflicts=` normally prevents this.
@@ -52,7 +54,10 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
   - package PL1, PL2, PL4 with their time windows;
   - psys PL1, PL2;
   - the MSR 0x615 value, if PL3 is written (snapshot key `msr:<device>@0x615`, the full register as hex);
-  - `scaling_max_freq` of the cpufreq policies and the GPU maximum-frequency file, if throttle requests are written (`outputs.md` 8).
+  - `scaling_max_freq` of the cpufreq policies and the GPU maximum-frequency file, if throttle requests are written (`outputs.md` 8);
+  - for the fan and charging outputs (`outputs.md` 9), which cannot be read back: the neutral frame of every channel the daemon has
+    sent (key `fan:<channel>`, section `fan` of the file). It is written before the first send of the channel. Channels without a
+    known neutral value (the opt-in temperature thresholds) are listed as `unrestorable`.
 
   The file is `/run/surface-power/snapshot.json`, written atomically (write a temp file, then rename).
 - **Predecessor:** if a snapshot from a crashed predecessor exists, it is kept and used as is. The current values may be the daemon's own.
@@ -62,7 +67,8 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
   - on `PrepareForSleep(true)`;
   - on entering emergency or yielded.
 
-  Order: time window before PL1. Only values that differ are written.
+  Order: time window before PL1. Only values that differ are written. The fan frames are always sent (nothing can be compared),
+  once, and then dropped from the snapshot; the daemon sends everything again on the first cycle after a resume or after the emergency ends.
 - **After restore on exit:** the snapshot is deleted.
 - **Reset tool:** `surface-power-reset` (`ExecStopPost`) restores from the file if it still exists, then deletes it. It does not import the engine.
 
@@ -93,6 +99,7 @@ A profile is a small TOML file in `profiles/`. It holds no limit values (G-2). F
   - `inputs.overrides`: channel → source, for example a different hwmon sensor;
   - `inputs.panel_max_nits`: optional;
   - `outputs.pl3`: `false` by default;
+  - `outputs.fan_thresholds`: `false` by default; `true` lets the daemon send the fan, PROCHOT and charge-rate temperature thresholds (302-311, `outputs.md` 9). No shipped profile sets it;
   - `outputs.narrow`: optional upper limits per target (FR-S7, only narrowing).
 - **Status:** `tested`, `true` when the device was validated against Windows (NFR-1).
 

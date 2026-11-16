@@ -16,6 +16,7 @@ from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
+from surface_power.adapters import fan  # noqa: E402
 from surface_power.engine.graph import build_graph, outputs_reached_by  # noqa: E402
 from surface_power.engine.registry import INTERNAL_NODE  # noqa: E402
 from surface_power.loader import container, parser  # noqa: E402
@@ -190,37 +191,52 @@ def output_info(ref: ChannelRef, platform: str = "intel"):
                     "GPU maximum frequency (i915, xe or devfreq; where the machine has one)", "written")
         return (ms, "throttle request, % (100 = none)", "–", "log")
     if g == "B620798F":
-        return (FANS.get(c, ""), *FAN_CMDS.get(c, ("fan or charging setting for the EC", "candidate: EC through SAM (command not known)")), "log")
+        return (FANS.get(c, ""), *FAN_CMDS.get(c, ("fan or charging setting for the EC", "no Linux path (command not known)", "noplat")))
     info = OUTPUTS.get((g, c), ("", "not analysed", "–", "log"))
     if platform != "intel" and g == LIMITS and info[3] in ("written", "optional") and c != 201:
         return (info[0], info[1], f"none on {PLATFORM_NAMES[platform]} (Intel RAPL only)", "noplat")
     return info
 
 
-# B620798F channel -> (meaning, Linux path); research/11-fan-charging.md. Not written yet: no adapter (log-only).
-def _fan(lo, hi, meaning, cmd):
-    return {c: (meaning + (f" (fan {c - lo + 1})" if hi > lo else ""), cmd) for c in range(lo, hi + 1)}
+# B620798F channel -> (meaning, Linux path, status); research/11-fan-charging.md, spec outputs 9. The commands come from
+# `adapters/fan.py` (SPECS), so this table cannot drift from the adapter.
+def _fan(lo, hi, meaning):
+    return {c: meaning + (f" (fan {c - lo + 1})" if hi > lo else "") for c in range(lo, hi + 1)}
 
 
-FAN_CMDS = {
-    **_fan(101, 103, "minimum fan speed, rpm", "SAM FAN `0x0b` through the SSAM debug device (no adapter yet)"),
-    **_fan(111, 113, "fan noise upper limit, SPL", "SAM FAN `0x0c` through the SSAM debug device (no adapter yet)"),
-    **_fan(114, 116, "fan loudness upper limit, sones", "SAM FAN `0x15` through the SSAM debug device (no adapter yet)"),
-    **_fan(121, 123, "fan noise floor, SPL", "SAM FAN `0x12` through the SSAM debug device (no adapter yet)"),
-    **_fan(124, 126, "active fan loudness, sones", "SAM FAN `0x14` through the SSAM debug device (no adapter yet)"),
-    **_fan(201, 203, "fan profile, 1-4", "SAM FAN `0x0e`; kernel `surface_platform_profile` sends it from the platform profile"),
-    301: ("fan state, 1 normal / 2 standby", "SAM FAN `0x0f`; kernel suspend hooks send it"),
-    302: ("fan-on temperature, 0.1 K", "SAM FAN `0x19` through the SSAM debug device (no adapter yet)"),
-    304: ("fan ramp temperature, 0.1 K", "SAM FAN `0x1a` through the SSAM debug device (no adapter yet)"),
-    305: ("fan maximum temperature, 0.1 K", "SAM FAN `0x1b` through the SSAM debug device (no adapter yet)"),
-    306: ("maximum fan SPL", "SAM FAN `0x1c` through the SSAM debug device (no adapter yet)"),
-    307: ("fan critical temperature, 0.1 K", "SAM FAN `0x1d` through the SSAM debug device (no adapter yet)"),
-    308: ("PROCHOT temperature, 0.1 K", "SAM TMP `0x25` through the SSAM debug device (no adapter yet)"),
-    309: ("battery temperature limit for normal charge rate, 0.1 K", "SAM TMP `0x26` through the SSAM debug device (no adapter yet)"),
-    310: ("battery temperature limit for slow charge rate, 0.1 K", "SAM TMP `0x27` through the SSAM debug device (no adapter yet)"),
-    311: ("battery temperature limit for trickle charge, 0.1 K", "SAM TMP `0x28` through the SSAM debug device (no adapter yet)"),
-    312: ("MCU fan loudness limit, sones", "SAM FAN `0x16` through the SSAM debug device (no adapter yet)"),
+FAN_MEANING = {
+    **_fan(101, 103, "minimum fan speed, rpm"), **_fan(111, 113, "fan noise upper limit, SPL"),
+    **_fan(114, 116, "fan loudness upper limit, sones"), **_fan(121, 123, "fan noise floor, SPL"),
+    **_fan(124, 126, "active fan loudness, sones"), **_fan(201, 203, "fan profile, 1-4"),
+    301: "fan state, 1 normal / 2 standby", 302: "fan-on temperature, 0.1 K", 304: "fan ramp temperature, 0.1 K",
+    305: "fan maximum temperature, 0.1 K", 306: "maximum fan SPL", 307: "fan critical temperature, 0.1 K",
+    308: "PROCHOT temperature, 0.1 K", 309: "battery temperature limit for normal charge rate, 0.1 K",
+    310: "battery temperature limit for slow charge rate, 0.1 K", 311: "battery temperature limit for trickle charge, 0.1 K",
+    312: "MCU fan loudness limit, sones",
 }
+
+
+def fan_info(c):
+    """(meaning, Linux path, status) of a B620798F channel."""
+    sp = fan.SPECS.get(c)
+    if sp is None:
+        return ("fan or charging setting for the EC", "no Linux path (command not known)", "noplat")
+    cmd = f"SAM {sp.tc_name} `0x{sp.cid:02x}`"
+    meaning = FAN_MEANING.get(c, "fan or charging setting for the EC")
+    if sp.route == "kernel-profile":
+        return (meaning, f"{cmd}, sent by the kernel (`surface_platform_profile`, from the platform profile); the daemon does "
+                         "not send it", "written")
+    if sp.route == "kernel-suspend":
+        return (meaning, f"{cmd}, sent by the kernel in its suspend hooks; the daemon never sends it", "written")
+    if sp.route == "none":
+        return (meaning, "no Linux path: the kernel sends the profile for fan 1 only [H]", "noplat")
+    if sp.route == "optin":
+        return (meaning, f"{cmd} through the SSAM debug device; off unless the device profile sets `fan_thresholds = true`",
+                "optional")
+    return (meaning, f"{cmd} through the SSAM debug device (root; neutral frame 0 at the restore)", "written")
+
+
+FAN_CMDS = {c: fan_info(c) for c in fan.SPECS}
 
 
 def name(ref):

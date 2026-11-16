@@ -274,6 +274,62 @@ class CdevTransport:
         finally:
             os.close(fd)
 
+    # --- generic requests (fan and charging outputs, adapters/fan.py) ---
+
+    def can_write(self) -> bool:
+        """True if this process may open the device node for writing (root, module loaded)."""
+        return os.path.exists(self.path) and os.access(self.path, os.W_OK)
+
+    def needs_root(self) -> bool:
+        """The node exists, but this user may not open it."""
+        return os.path.exists(self.path) and not os.access(self.path, os.W_OK) and os.geteuid() != 0
+
+    def _call(self, tc: int, tid: int, cid: int, iid: int, payload: bytes, want_response: bool) -> bytes | None:
+        """One request. Returns the answer (b"" without one), or None on any error or a non-zero status."""
+        import ctypes
+        import fcntl
+
+        class Buf(ctypes.Structure):
+            _pack_ = 1
+            _fields_ = [("data", ctypes.c_uint64), ("length", ctypes.c_uint16), ("pad", ctypes.c_uint8 * 6)]
+
+        class Req(ctypes.Structure):
+            _pack_ = 1
+            _fields_ = [("tc", ctypes.c_uint8), ("tid", ctypes.c_uint8), ("cid", ctypes.c_uint8), ("iid", ctypes.c_uint8),
+                        ("flags", ctypes.c_uint16), ("status", ctypes.c_int16), ("payload", Buf), ("response", Buf)]
+
+        ioctl_request = (3 << 30) | (ctypes.sizeof(Req) << 16) | (0xA5 << 8) | 1
+        try:
+            fd = os.open(self.path, os.O_RDWR)
+        except OSError:
+            return None
+        try:
+            out = ctypes.create_string_buffer(64)
+            data = ctypes.create_string_buffer(bytes(payload), max(1, len(payload)))
+            r = Req(tc=tc, tid=tid, cid=cid, iid=iid, flags=1 if want_response else 0)   # flags 0: write, no response
+            r.payload.data = ctypes.addressof(data)
+            r.payload.length = len(payload)
+            if want_response:
+                r.response.data = ctypes.addressof(out)
+                r.response.length = 64
+            fcntl.ioctl(fd, ioctl_request, r)
+            if r.status != 0:
+                return None
+            return out.raw[:r.response.length] if want_response else b""
+        except OSError:
+            return None
+        finally:
+            os.close(fd)
+
+    def send(self, tc: int, cid: int, iid: int, payload: bytes, tid: int = 1) -> bool:
+        """A write request without a response (flags 0). True if the EC acknowledged the frame on the transport; that does
+        not show that the EC knows the command."""
+        return self._call(tc, tid, cid, iid, payload, False) is not None
+
+    def read(self, tc: int, cid: int, iid: int = 1, tid: int = 1) -> bytes | None:
+        """A read request with a response, for any target category."""
+        return self._call(tc, tid, cid, iid, b"", True)
+
 
 class PlatformPower(Source):
     """`0x53` fields of SAM (battery 1) and KIP (battery 2) and the PSU size (spec inputs 6).

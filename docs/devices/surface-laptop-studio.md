@@ -49,6 +49,7 @@ flowchart LR
         O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
         O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_PARK"]
+        O0_B620798F["<b>fan and charging</b><br/>101 minimum fan speed; 102 minimum fan speed"]
     end
     B --> OUT0
     subgraph OUT1["optional (profile)"]
@@ -57,7 +58,6 @@ flowchart LR
     B --> OUT1
     subgraph OUT2["logged only"]
         O2_0B7B5350["<b>power limits</b><br/>O_BATT_MODE; 71 not analysed; 205 GPU power controller limit"]
-        O2_B620798F["<b>fan and charging</b><br/>101 minimum fan speed; 102 minimum fan speed"]
         O2_CF2F6076["<b>SoC (not analysed)</b><br/>61 SoC value"]
     end
     B --> OUT2
@@ -71,7 +71,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 18 of 19 (missing: `87008365/112`) |
-| Outputs written by Linux | 9 of 16 (not written: `0B7B5350/70`, `0B7B5350/71`, `0B7B5350/201`, `0B7B5350/205`, `B620798F/101`, `B620798F/102`, `CF2F6076/61`) |
+| Outputs written by Linux | 11 of 16 (not written: `0B7B5350/70`, `0B7B5350/71`, `0B7B5350/201`, `0B7B5350/205`, `CF2F6076/61`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -115,6 +115,6 @@ A device can be controlled only when every output of its blob is written: a blob
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
 | `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |
-| `B620798F/101` | – | minimum fan speed, rpm (fan 1) | SAM FAN `0x0b` through the SSAM debug device (no adapter yet) | logged only | – |
-| `B620798F/102` | – | minimum fan speed, rpm (fan 2) | SAM FAN `0x0b` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/101` | – | minimum fan speed, rpm (fan 1) | SAM FAN `0x0b` through the SSAM debug device (root; neutral frame 0 at the restore) | written | – |
+| `B620798F/102` | – | minimum fan speed, rpm (fan 2) | SAM FAN `0x0b` through the SSAM debug device (root; neutral frame 0 at the restore) | written | – |
 | `CF2F6076/61` | – | SoC value (not analysed) | – | logged only | – |

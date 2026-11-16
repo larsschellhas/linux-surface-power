@@ -8,7 +8,9 @@ import os
 import tomllib
 from dataclasses import dataclass, field
 
+from .adapters import fan as fanmod
 from .adapters import msr
+from .adapters.inputs import SSAM_CDEV, CdevTransport
 from .loader.model import ChannelRef
 
 PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "profiles")
@@ -94,6 +96,7 @@ class Profile:
     narrow: dict = field(default_factory=dict)
     panel_max_nits: float | None = None
     dgpu_clock_cap: bool = False      # opt-in stand-in DO-1 (spec outputs 6)
+    fan_thresholds: bool = False      # opt-in: send the fan / PROCHOT / charge-rate temperature thresholds (spec outputs 9)
 
 
 def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
@@ -112,7 +115,8 @@ def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
         out.append(Profile(os.path.basename(path), m.get("product_name"), sku, e.get("variant", "direct"),
                            bool(d.get("tested", False)), d.get("blob", {}).get("source", "efivar"),
                            o.get("pl3"), o.get("pl4"), dict(o.get("narrow", {})),
-                           d.get("inputs", {}).get("panel_max_nits"), bool(o.get("dgpu_clock_cap", False))))
+                           d.get("inputs", {}).get("panel_max_nits"), bool(o.get("dgpu_clock_cap", False)),
+                           bool(o.get("fan_thresholds", False))))
     return out
 
 
@@ -135,12 +139,21 @@ def _read_any(key: str) -> str | None:
 
 
 class Snapshot:
-    """Firmware values of every file we may write, saved before the first write (atomic JSON in the run directory)."""
+    """Firmware values of every file we may write, saved before the first write (atomic JSON in the run directory).
+
+    The fan and charging outputs cannot be read back (spec outputs 9). For them the snapshot holds the neutral frames of
+    every channel that was sent, written before its first send, and the channels that have no neutral value.
+    """
 
     FILE = "snapshot.json"
 
-    def __init__(self, path: str, values: dict[str, str]):
+    def __init__(self, path: str, values: dict[str, str], fan: dict[str, dict] | None = None,
+                 fan_unrestorable: list[str] | None = None, fan_device: str = SSAM_CDEV):
         self.path, self.values = path, values
+        self.fan = fan or {}                         # key "fan:101" -> frame (Frame.to_dict) to send at the restore
+        self.fan_unrestorable = fan_unrestorable or []
+        self.fan_device = fan_device
+        self.transport = None                        # for tests and the daemon; default: the debug device in `fan_device`
 
     @classmethod
     def take(cls, run_dir: str, files: list[str]) -> tuple["Snapshot", bool]:
@@ -152,27 +165,47 @@ class Snapshot:
                 return snap, True
         values = {f: v for f in files if (v := _read_any(f)) is not None}
         os.makedirs(run_dir, exist_ok=True)
-        tmp = path + ".tmp"
+        snap = cls(path, values)
+        snap.save()
+        return snap, False
+
+    def save(self) -> None:
+        data = {"version": 1, "values": self.values}
+        if self.fan or self.fan_unrestorable:
+            data["fan"] = {"device": self.fan_device, "frames": self.fan, "unrestorable": self.fan_unrestorable}
+        tmp = self.path + ".tmp"
         with open(tmp, "w") as fh:
-            json.dump({"version": 1, "values": values}, fh, indent=1)
-        os.replace(tmp, path)
-        return cls(path, values), False
+            json.dump(data, fh, indent=1)
+        os.replace(tmp, self.path)
 
     @classmethod
     def load(cls, path: str) -> "Snapshot | None":
         try:
             with open(path) as fh:
                 data = json.load(fh)
-            return cls(path, dict(data["values"]))
-        except (OSError, ValueError, KeyError):
+            fan = data.get("fan", {})
+            return cls(path, dict(data["values"]), dict(fan.get("frames", {})), list(fan.get("unrestorable", [])),
+                       fan.get("device", SSAM_CDEV))
+        except (OSError, ValueError, KeyError, AttributeError, TypeError):
             return None
+
+    def record_fan(self, key: str, frame: "fanmod.Frame | None") -> None:
+        """Note, before the first send of a fan channel, what the restore has to send. Raises OSError if it cannot be saved."""
+        if frame is None:
+            if key not in self.fan_unrestorable:
+                self.fan_unrestorable.append(key)
+                self.save()
+            return
+        if self.fan.get(key) != frame.to_dict():
+            self.fan[key] = frame.to_dict()
+            self.save()
 
     def order(self) -> list[str]:
         """Time windows before power limits, so that PL1 never runs with a foreign short window."""
         return sorted(self.values, key=lambda p: (0 if p.endswith("_time_window_us") else 1, p))
 
     def restore(self) -> list[str]:
-        """Write back every value that differs. Returns error texts (empty on success)."""
+        """Write back every value that differs and send the neutral fan frames. Returns error texts (empty on success)."""
         errors = []
         for p in self.order():
             want = self.values[p]
@@ -188,6 +221,18 @@ class Snapshot:
                     fh.write(want)
             except OSError as e:
                 errors.append(f"{p}: {e.strerror}")
+        if self.fan:
+            transport = self.transport or CdevTransport(self.fan_device)
+            for key in sorted(self.fan):
+                if fanmod.send_frame(transport, fanmod.Frame.from_dict(self.fan[key])):
+                    del self.fan[key]
+                else:
+                    errors.append(f"{key}: neutral frame not sent")
+            if os.path.exists(self.path):
+                try:
+                    self.save()                      # what went out is no longer ours
+                except OSError:
+                    pass
         return errors
 
     def remove(self) -> None:

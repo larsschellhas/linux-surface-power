@@ -3,6 +3,7 @@
 16.11.2026. `10-outputs.md` listed these outputs as "passed to the EC/MCU, commands not analysed". This file records what
 the Windows receiver does with them and what a Linux path needs. Markers as in `README.md`. Nothing here was run on a device that
 has these outputs: this machine is a Surface Book 3, whose blob has none [M]. All SAM facts are read from the Windows drivers.
+The daemon's output path (implemented 16.11.2026, tested on fakes only) is in `../specs/outputs.md` 9; the test tool is `scripts/fan-test.py`.
 
 ## 1. Summary
 
@@ -11,26 +12,27 @@ charging channels (309–311) are battery temperature thresholds that reduce the
 
 | Channel | Windows name | Meaning | Unit, range | SAM command (TC, CID) | Linux path |
 |---|---|---|---|---|---|
-| 101–103 | – | minimum fan speed, fan 1–3 | rpm, 0–10000, step 100 | FAN `0x0b`, u16 | via cdev |
-| 111–113 | – | upper limit of fan noise, fan 1–3 | SPL, 0–100 [H: dB(A)], float32 | FAN `0x0c`, float32 | via cdev |
-| 121–123 | `O_FAN1_ACTIVE_SPL` | lower limit of fan noise ("active" SPL), fan 1–3 | SPL, float32 | FAN `0x12`, float32 | via cdev |
-| 114–116 | `O_FAN1_MAX_SONES` | upper limit of fan loudness, fan 1–3 | sones, u8 | FAN `0x15`, u8 | via cdev |
-| 124–126 | `O_FAN1_ACTIVE_SONES` | active fan loudness (floor), fan 1–3 | sones, u8 | FAN `0x14`, u8 | via cdev |
-| 201–203 | `O_FAN1_PROFILE` | fan profile, fan 1–3 | 1–4 (Windows allows up to 30) | FAN `0x0e`, u8 | exists (kernel, `has_fan`) and via cdev |
-| 301 | `O_FAN_CS_REQUEST` | fan state: 1 normal, 2 standby (sleep) | 1–2 | FAN `0x0f`, u8 | exists (kernel, suspend hooks) |
-| 312 | `O_MCU_FAN_MAX_SONES` | loudness limit of the MCU fan | sones, u8 | FAN `0x16`, u8 | via cdev |
-| 302 | `O_MCU_FAN_ON_TEMP` | temperature where the fan starts | 0.1 K, 3131–3451 | FAN `0x19`, u16 | via cdev |
-| 304 | `O_MCU_FAN_RAMP_TEMP` | temperature where the fan ramps up | 0.1 K | FAN `0x1a`, u16 | via cdev |
-| 305 | `O_MCU_FAN_MAX_TEMP` | temperature where the fan reaches its maximum | 0.1 K | FAN `0x1b`, u16 | via cdev |
-| 306 | – | maximum fan SPL (no blob uses it) | float32 | FAN `0x1c`, float32 | via cdev |
-| 307 | `O_MCU_FAN_CRITICAL_TEMP` | temperature of the fan's critical mode | 0.1 K | FAN `0x1d`, u16 | via cdev |
-| 308 | `O_MCU_PROCHOT_TEMP` | PROCHOT assert temperature | 0.1 K | **TMP** `0x25`, u16 | via cdev |
-| 309 | `O_NORMAL_CHARGE_TEMP` | battery temperature up to which charging is at the normal rate | 0.1 K | **TMP** `0x26`, u16 | via cdev |
-| 310 | `O_SLOW_CHARGE_TEMP` | … slow rate | 0.1 K | **TMP** `0x27`, u16 | via cdev |
-| 311 | `O_TRICKLE_CHARGE_TEMP` | … trickle rate | 0.1 K | **TMP** `0x28`, u16 | via cdev |
+| 101–103 | – | minimum fan speed, fan 1–3 | rpm, 0–10000, step 100 | FAN `0x0b`, u16 | daemon via cdev |
+| 111–113 | – | upper limit of fan noise, fan 1–3 | SPL, 0–100 [H: dB(A)], float32 | FAN `0x0c`, float32 | daemon via cdev |
+| 121–123 | `O_FAN1_ACTIVE_SPL` | lower limit of fan noise ("active" SPL), fan 1–3 | SPL, float32 | FAN `0x12`, float32 | daemon via cdev |
+| 114–116 | `O_FAN1_MAX_SONES` | upper limit of fan loudness, fan 1–3 | sones, u8 | FAN `0x15`, u8 | daemon via cdev |
+| 124–126 | `O_FAN1_ACTIVE_SONES` | active fan loudness (floor), fan 1–3 | sones, u8 | FAN `0x14`, u8 | daemon via cdev |
+| 201–203 | `O_FAN1_PROFILE` | fan profile, fan 1–3 | 1–4 (Windows allows up to 30) | FAN `0x0e`, u8 | kernel (`has_fan`); not sent by the daemon |
+| 301 | `O_FAN_CS_REQUEST` | fan state: 1 normal, 2 standby (sleep) | 1–2 | FAN `0x0f`, u8 | kernel (suspend hooks); never sent by the daemon |
+| 312 | `O_MCU_FAN_MAX_SONES` | loudness limit of the MCU fan | sones, u8 | FAN `0x16`, u8 | daemon via cdev |
+| 302 | `O_MCU_FAN_ON_TEMP` | temperature where the fan starts | 0.1 K, 3131–3451 | FAN `0x19`, u16 | via cdev, opt-in (`fan_thresholds`), off by default |
+| 304 | `O_MCU_FAN_RAMP_TEMP` | temperature where the fan ramps up | 0.1 K | FAN `0x1a`, u16 | via cdev, opt-in (`fan_thresholds`), off by default |
+| 305 | `O_MCU_FAN_MAX_TEMP` | temperature where the fan reaches its maximum | 0.1 K | FAN `0x1b`, u16 | via cdev, opt-in (`fan_thresholds`), off by default |
+| 306 | – | maximum fan SPL (no blob uses it) | float32 | FAN `0x1c`, float32 | daemon via cdev |
+| 307 | `O_MCU_FAN_CRITICAL_TEMP` | temperature of the fan's critical mode | 0.1 K | FAN `0x1d`, u16 | via cdev, opt-in (`fan_thresholds`), off by default |
+| 308 | `O_MCU_PROCHOT_TEMP` | PROCHOT assert temperature | 0.1 K | **TMP** `0x25`, u16 | via cdev, opt-in (`fan_thresholds`), off by default |
+| 309 | `O_NORMAL_CHARGE_TEMP` | battery temperature up to which charging is at the normal rate | 0.1 K | **TMP** `0x26`, u16 | via cdev, opt-in (`fan_thresholds`), off by default |
+| 310 | `O_SLOW_CHARGE_TEMP` | … slow rate | 0.1 K | **TMP** `0x27`, u16 | via cdev, opt-in (`fan_thresholds`), off by default |
+| 311 | `O_TRICKLE_CHARGE_TEMP` | … trickle rate | 0.1 K | **TMP** `0x28`, u16 | via cdev, opt-in (`fan_thresholds`), off by default |
 
-- **Verdicts:** "exists" = a kernel driver sends the same command today. "via cdev" = no kernel driver, but the SSAM debug device can
-  send it as root. Nothing needs a kernel patch to work; a patch is only needed for a clean sysfs interface (6).
+- **Verdicts:** "kernel" = a kernel driver sends the same command today; the daemon does not send it. "daemon via cdev" = no kernel
+  driver, the daemon sends it through the SSAM debug device as root. Nothing needs a kernel patch to work; a patch is only needed for a
+  clean sysfs interface (6). 302–311 are implemented but stay off unless a device profile opts in.
 - **Confidence:** the command layout, category, command ID and payload are [C], read from the Windows drivers of three device families (Pro 10, Pro 11 Intel, Pro 12 arm64). What
   the EC does with the value is [H] everywhere except 201 and 301, whose numbers equal what Linux already sends. On the SB3, the
   profile and fan-state commands are accepted and change nothing [M], but the SB3 blob does not use them.
@@ -119,8 +121,8 @@ No driver sends FAN `0x0b`, `0x0c`, `0x12`, `0x14`–`0x16`, `0x19`–`0x1d`, or
 ### 5.3 User space through the debug device [C for the interface, M for FAN 0x0e/0x0f on the SB3]
 - `/dev/surface/aggregator` (module `surface_aggregator_cdev`) is root only (mode `0600`). The request ioctl takes the category,
   target ID, command ID, instance ID, flags and a payload; flags 0 is a sequenced write without a response, flag 1 expects a response.
-- The existing `CdevTransport` (`src/surface_power/adapters/inputs.py`) is read only and fixed to the battery category. For writes it
-  needs the category, a payload buffer and `flags = 0`. A write request returns status 0 as soon as the EC acknowledges the frame
+- `CdevTransport` (`src/surface_power/adapters/inputs.py`) had a read path fixed to the battery category (unchanged). It now also has
+  `send(category, command, instance, payload)` (write, `flags = 0`, payload buffer) and `read(category, ...)` for the probe. A write request returns status 0 as soon as the EC acknowledges the frame
   on the transport. **Status 0 does not show that the EC knows the command** [M, SB3]: only the fan speed or a limit shows it.
 - This is the same interim route the daemon already uses for EC inputs (NFR-11). It does not need a kernel patch.
 
@@ -132,11 +134,13 @@ No driver sends FAN `0x0b`, `0x0c`, `0x12`, `0x14`–`0x16`, `0x19`–`0x1d`, or
 - A device with an older EC firmware than its Windows driver may ignore a command and still return status 0 [H].
 
 ## 6. Options for a clean interface [H]
-- **Interim, in the daemon:** send through the debug device as above, one adapter for the channels the device's blob writes.
+- **Interim, in the daemon (done):** send through the debug device as above, one adapter (`adapters/fan.py`) for the channels the device's
+  blob writes, except 201 and 301, which the kernel sends.
 - **Kernel:** a fan-limits interface does not map onto hwmon (`fan1_min` is an alarm threshold, not a floor). A custom attribute group
   next to `surface_fan` would be new ABI, so it should only be proposed after a measured effect.
-- **Profile and standby (201, 301):** the existing driver is enough while the daemon follows the platform profile. A separate fan
-  profile, independent of the TMP profile, still needs the debug device.
+- **Profile and standby (201, 301):** the existing driver is enough while the daemon follows the platform profile. The daemon only logs
+  when the blob's 201 differs from what the kernel sends for the current platform profile. A separate fan profile, independent of
+  the TMP profile, would need the debug device; it is not implemented.
 
 ## 7. Risks
 - **No read back, no snapshot.** The EC's current values cannot be read. "Restore" means sending the neutral value (3.1 and 8), and
@@ -149,7 +153,7 @@ No driver sends FAN `0x0b`, `0x0c`, `0x12`, `0x14`–`0x16`, `0x19`–`0x1d`, or
 - **Wrong instance or command** on a different EC firmware is undefined. A frame with an unknown command can be acknowledged and ignored.
 - Everything on this page is for a device you own, at your own risk, with AC power and a charged battery.
 
-## 8. Proposed safe test procedure (for a user with a device that has these channels)
+## 8. Safe test procedure (for a user with a device that has these channels; implemented as `scripts/fan-test.py`)
 Goal: find out whether a channel does anything, and nothing else. Run as root, with no other thermal tool or daemon running.
 
 ### 8.1 Read-only probe (no writes)
@@ -202,6 +206,12 @@ finally:
 - The effect on a real Pro 10 or Laptop 6: not measured. The probe in 8.1 and the test in 8.2 are the next step.
 - Unit of the SPL values (dB(A)) and the exact role of 121 versus 111 [H]: the Windows driver names them "minimum" and "maximum" SPL.
 - Whether FAN `0x13` and the read-only probe work on the SB3 and on older ECs [H]. Not run here: the debug device needs root.
+  `scripts/fan-test.py --probe` and `surface-power-report --with-ec` send exactly these two read requests.
+- Whether the daemon's neutral frame (0) really returns the EC to its own control for each channel [H]. The test tool checks the fan
+  speed for 60 s after the restore, but only a tester with the device can say.
+- Fans 2 and 3 (Laptop Studio 2): the kernel's profile command is not known to address them, so 202 and 203 have no Linux path [H].
+- Channels 302–311 have no known neutral value; the opt-in is therefore irreversible without a reboot [H].
+- `has_fan` is not visible in sysfs, so "the kernel sends 201 and 301" is assumed whenever `surface_platform_profile` is bound [H].
 - The instance ID of FAN `0x16` in the Pro 10 and Laptop 6 clients is never set (a Windows bug [C]); newer clients send instance 1.
 - Charging: 309–311 only reduce the charge rate with battery temperature. A charge-level limit is not in this interface. Output
   `0B7B5350/70` ("battery mode") is not analysed.

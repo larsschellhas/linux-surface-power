@@ -52,6 +52,7 @@ flowchart LR
     subgraph OUT0["written"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
         O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_GFX; O_WTMF_E_CORES_C1; O_WTMF_P_CORES_C2<br/>O_WTMF_P_CORES_C3; O_WTMF_PARK"]
+        O0_B620798F["<b>fan and charging</b><br/>101 minimum fan speed; 111 fan noise upper limit; O_FAN1_PROFILE<br/>O_FAN_CS_REQUEST"]
     end
     B --> OUT0
     subgraph OUT1["no Linux path"]
@@ -63,7 +64,6 @@ flowchart LR
         O2_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
         O2_87008365["<b>client-computed channels</b><br/>O_FAST_MAXIM_POLLING; 250 not analysed"]
         O2_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_NPU"]
-        O2_B620798F["<b>fan and charging</b><br/>101 minimum fan speed; 111 fan noise upper limit; O_FAN1_PROFILE<br/>O_FAN_CS_REQUEST"]
     end
     B --> OUT2
 ```
@@ -76,7 +76,7 @@ A device can be controlled only when every output of its blob is written: a blob
 |---|---|
 | Blob runs | ✓ |
 | Inputs with a Linux source | 18 of 21 (missing: `049E36F2/2`, `049E36F2/6`, `87008365/112`) |
-| Outputs written by Linux | 7 of 18 (not written: `0B7B5350/54`, `0B7B5350/55`, `0B7B5350/70`, `110DF2A4/3`, `87008365/220`, `87008365/250`, `9BBB8910/200`, `B620798F/101`, `B620798F/111`, `B620798F/201`, `B620798F/301`) |
+| Outputs written by Linux | 11 of 18 (not written: `0B7B5350/54`, `0B7B5350/55`, `0B7B5350/70`, `110DF2A4/3`, `87008365/220`, `87008365/250`, `9BBB8910/200`) |
 | Ready for control | no: dry-run only |
 
 ## Inputs
@@ -123,7 +123,7 @@ A device can be controlled only when every output of its blob is written: a blob
 | `9BBB8910/22` | O_WTMF_P_CORES_C3 | throttle request for a CPU cluster, % (100 = none) | cpufreq `scaling_max_freq` of the cluster | written | – |
 | `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |
 | `9BBB8910/200` | O_WTMF_NPU | throttle request, % (100 = none) | – | logged only | – |
-| `B620798F/101` | – | minimum fan speed, rpm (fan 1) | SAM FAN `0x0b` through the SSAM debug device (no adapter yet) | logged only | – |
-| `B620798F/111` | – | fan noise upper limit, SPL (fan 1) | SAM FAN `0x0c` through the SSAM debug device (no adapter yet) | logged only | – |
-| `B620798F/201` | O_FAN1_PROFILE | fan profile, 1-4 (fan 1) | SAM FAN `0x0e`; kernel `surface_platform_profile` sends it from the platform profile | logged only | – |
-| `B620798F/301` | O_FAN_CS_REQUEST | fan state, 1 normal / 2 standby | SAM FAN `0x0f`; kernel suspend hooks send it | logged only | – |
+| `B620798F/101` | – | minimum fan speed, rpm (fan 1) | SAM FAN `0x0b` through the SSAM debug device (root; neutral frame 0 at the restore) | written | – |
+| `B620798F/111` | – | fan noise upper limit, SPL (fan 1) | SAM FAN `0x0c` through the SSAM debug device (root; neutral frame 0 at the restore) | written | – |
+| `B620798F/201` | O_FAN1_PROFILE | fan profile, 1-4 (fan 1) | SAM FAN `0x0e`, sent by the kernel (`surface_platform_profile`, from the platform profile); the daemon does not send it | written | – |
+| `B620798F/301` | O_FAN_CS_REQUEST | fan state, 1 normal / 2 standby | SAM FAN `0x0f`, sent by the kernel in its suspend hooks; the daemon never sends it | written | – |

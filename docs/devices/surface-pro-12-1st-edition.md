@@ -54,18 +54,21 @@ flowchart LR
         O0_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_GFX; O_WTMF_E_CORES_C1; O_WTMF_P_CORES_C2<br/>O_WTMF_PARK"]
     end
     B --> OUT0
-    subgraph OUT1["no Linux path"]
-        O1_0B7B5350["<b>power limits</b><br/>O_SYS_MAX"]
+    subgraph OUT1["optional (profile)"]
+        O1_B620798F["<b>fan and charging</b><br/>O_MCU_PROCHOT_TEMP; O_NORMAL_CHARGE_TEMP; O_SLOW_CHARGE_TEMP<br/>O_TRICKLE_CHARGE_TEMP"]
     end
     B --> OUT1
-    subgraph OUT2["logged only"]
-        O2_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
-        O2_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
-        O2_87008365["<b>client-computed channels</b><br/>O_FAST_MAXIM_POLLING; O_CAMERA_AINR"]
-        O2_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_NPU"]
-        O2_B620798F["<b>fan and charging</b><br/>O_MCU_PROCHOT_TEMP; O_NORMAL_CHARGE_TEMP; O_SLOW_CHARGE_TEMP<br/>O_TRICKLE_CHARGE_TEMP"]
+    subgraph OUT2["no Linux path"]
+        O2_0B7B5350["<b>power limits</b><br/>O_SYS_MAX"]
     end
     B --> OUT2
+    subgraph OUT3["logged only"]
+        O3_0B7B5350["<b>power limits</b><br/>O_BATT_MODE"]
+        O3_110DF2A4["<b>thermal notifications</b><br/>O_MINPWR2"]
+        O3_87008365["<b>client-computed channels</b><br/>O_FAST_MAXIM_POLLING; O_CAMERA_AINR"]
+        O3_9BBB8910["<b>thermal throttle requests</b><br/>O_WTMF_NPU"]
+    end
+    B --> OUT3
 ```
 
 ## Readiness
@@ -122,7 +125,7 @@ A device can be controlled only when every output of its blob is written: a blob
 | `9BBB8910/21` | O_WTMF_P_CORES_C2 | throttle request for a CPU cluster, % (100 = none) | cpufreq `scaling_max_freq` of the cluster | written | – |
 | `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |
 | `9BBB8910/200` | O_WTMF_NPU | throttle request, % (100 = none) | – | logged only | – |
-| `B620798F/308` | O_MCU_PROCHOT_TEMP | PROCHOT temperature, 0.1 K | SAM TMP `0x25` through the SSAM debug device (no adapter yet) | logged only | – |
-| `B620798F/309` | O_NORMAL_CHARGE_TEMP | battery temperature limit for normal charge rate, 0.1 K | SAM TMP `0x26` through the SSAM debug device (no adapter yet) | logged only | – |
-| `B620798F/310` | O_SLOW_CHARGE_TEMP | battery temperature limit for slow charge rate, 0.1 K | SAM TMP `0x27` through the SSAM debug device (no adapter yet) | logged only | – |
-| `B620798F/311` | O_TRICKLE_CHARGE_TEMP | battery temperature limit for trickle charge, 0.1 K | SAM TMP `0x28` through the SSAM debug device (no adapter yet) | logged only | – |
+| `B620798F/308` | O_MCU_PROCHOT_TEMP | PROCHOT temperature, 0.1 K | SAM TMP `0x25` through the SSAM debug device; off unless the device profile sets `fan_thresholds = true` | optional (profile) | – |
+| `B620798F/309` | O_NORMAL_CHARGE_TEMP | battery temperature limit for normal charge rate, 0.1 K | SAM TMP `0x26` through the SSAM debug device; off unless the device profile sets `fan_thresholds = true` | optional (profile) | – |
+| `B620798F/310` | O_SLOW_CHARGE_TEMP | battery temperature limit for slow charge rate, 0.1 K | SAM TMP `0x27` through the SSAM debug device; off unless the device profile sets `fan_thresholds = true` | optional (profile) | – |
+| `B620798F/311` | O_TRICKLE_CHARGE_TEMP | battery temperature limit for trickle charge, 0.1 K | SAM TMP `0x28` through the SSAM debug device; off unless the device profile sets `fan_thresholds = true` | optional (profile) | – |

@@ -32,7 +32,10 @@ Processor Aggregator Device (`PAGD`, matched with `/62` [H]), so only the Snapdr
   where powercap reports it and PL3 through MSR 0x615 (both held while their EC inputs are invalid), and the dGPU limit through the
   clock-cap stand-in.
 - **Fans and charging (`B620798F`):** the SMF client sends each channel as one SAM command to the EC (FAN and TMP categories); the
-  commands, units and a safe test procedure are in [`11-fan-charging.md`](11-fan-charging.md). No adapter writes them yet.
+  commands, units and a safe test procedure are in [`11-fan-charging.md`](11-fan-charging.md). Since 16.11.2026 the daemon sends the
+  limits (101–103, 111–116, 121–126, 306, 312) through the SSAM debug device (`../specs/outputs.md` 9); 201 and 301 are sent by the
+  linux-surface kernel (`surface_platform_profile`), and the temperature thresholds 302–311 stay off unless a device profile opts in.
+  Implemented and tested on fakes only: no device with these outputs has run it (`scripts/fan-test.py` is the test for a tester).
 - **Sensor offsets (`A79674B4`):** passed to the EC/MCU by the SMF client [C, GUID references], commands not analysed.
 - **`CF2F6076`, `349D0E39`:** SoC-specific values for the IHV CPU client and the AMD driver, not analysed.
 - **`87008365/220, 250, 300`:** the Surface service (power-meter polling, camera noise reduction), not relevant for limits.
