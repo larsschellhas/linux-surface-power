@@ -123,27 +123,79 @@ def find_nvidia_gpu(root: str = "/") -> str | None:
 
 
 def other_nvidia_client(root: str = "/") -> bool:
-    """True if a process other than this one has /dev/nvidia* open (needs root to see all processes)."""
+    """True if a process other than this one has /dev/nvidia* open (needs root to see all processes).
+
+    Plain scandir/readlink with an early exit: the glob version cost ~70 ms per scan on the SB3 [M]."""
     own = str(os.getpid())
-    for fd in glob.glob(os.path.join(root, "proc/[0-9]*/fd/*")):
-        if fd.split(os.sep)[-3] == own:
-            continue
+    proc = os.path.join(root, "proc")
+    try:
+        pids = [e.name for e in os.scandir(proc) if e.name.isdigit() and e.name != own]
+    except OSError:
+        return False
+    for pid in pids:
+        fd_dir = os.path.join(proc, pid, "fd")
         try:
-            if os.readlink(fd).startswith("/dev/nvidia"):
-                return True
+            with os.scandir(fd_dir) as it:
+                for e in it:
+                    try:
+                        if os.readlink(e.path).startswith("/dev/nvidia"):
+                            return True
+                    except OSError:
+                        continue                    # the descriptor went away
         except OSError:
-            continue                                # the process or descriptor went away
+            continue                                # the process went away, or no permission
     return False
+
+
+PROBE_MS = 10000          # rescan for other NVIDIA clients at most every 10 s; a scan of /proc/*/fd costs a few ms CPU [M]
+
+
+def runtime_status(root: str, pci: str) -> str | None:
+    try:
+        with open(os.path.join(root, "sys/bus/pci/devices", pci, "power/runtime_status")) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+class ClientProbe:
+    """Whether another process keeps the NVIDIA GPU awake, shared by the stand-in and the dGPU sensors.
+
+    A runtime-suspended GPU has no client that matters: then there is no scan at all. Otherwise the result of a scan of
+    /proc/*/fd is kept for PROBE_MS; when the GPU wakes up, it is scanned at once. A client that opens an already awake GPU is
+    seen within 10 s."""
+
+    def __init__(self, root: str, pci: str | None, interval_ms: int = PROBE_MS):
+        self.root, self.pci, self.interval_ms = root, pci, interval_ms
+        self.was_suspended = True
+        self.checked_ms: int | None = None
+        self.result = False
+
+    def has_client(self, now_ms: int) -> bool:
+        if self.pci is None:
+            return False
+        if runtime_status(self.root, self.pci) == "suspended":
+            self.was_suspended = True
+            return False
+        # The GPU just woke up: usually because a client opened it, so look at once instead of after the interval.
+        woke = self.was_suspended
+        self.was_suspended = False
+        if woke or self.checked_ms is None or now_ms - self.checked_ms >= self.interval_ms:
+            self.result = other_nvidia_client(self.root)
+            self.checked_ms = now_ms
+        return self.result
 
 
 class ClockCapStandIn:
     """Regulates the dGPU power to the target with a clock cap, sampling only while another client keeps the GPU awake."""
 
-    def __init__(self, root: str = "/", nvml_factory: Callable[[str], object] = Nvml, dry_run: bool = False):
+    def __init__(self, root: str = "/", nvml_factory: Callable[[str], object] = Nvml, dry_run: bool = False,
+                 probe: ClientProbe | None = None):
         self.root = root
         self.factory = nvml_factory
         self.dry_run = dry_run
         self.pci = find_nvidia_gpu(root)
+        self.probe = probe or ClientProbe(root, self.pci)
         self.enabled = self.pci is not None
         self.cap: int | None = None           # what is set on the GPU (None: no cap)
         self.would_cap: int | None = None     # dry-run: what would be set
@@ -151,9 +203,23 @@ class ClockCapStandIn:
         self.last: Sample | None = None
         self.target: float | None = None
         self.error: str | None = None if self.pci else "no NVIDIA GPU found"
+        self.session = None                   # open NVML session while another client keeps the GPU awake
 
-    def _other_client(self) -> bool:
-        return other_nvidia_client(self.root)
+    def _open(self):
+        """NVML init costs ~20 ms CPU [M]: keep one session while a client keeps the GPU awake anyway."""
+        if self.session is None:
+            self.session = self.factory(self.pci).__enter__()
+        return self.session
+
+    def close(self) -> None:
+        """End the NVML session, so that the GPU can go to sleep (no client, stop, sleep)."""
+        if self.session is not None:
+            try:
+                self.session.__exit__(None, None, None)
+            except NvmlError:
+                pass
+            self.session = None
+
 
     def _fail(self, e: Exception) -> None:
         self.enabled = False
@@ -167,35 +233,41 @@ class ClockCapStandIn:
         if target_w is None:
             self.release()
             return
-        if now_ms < self.next_ms or not self._other_client():
-            return                                  # never wake the GPU; a set cap stays in force across D3cold
+        if now_ms < self.next_ms:
+            return
+        if not self.probe.has_client(now_ms):
+            self.close()                            # never keep the GPU awake; a set cap stays in force across D3cold
+            return
         self.next_ms = now_ms + SAMPLE_MS
         try:
-            with self.factory(self.pci) as nv:
-                s = nv.read()
-                self.last = s
-                current = self.would_cap if self.dry_run else self.cap
-                new = None if target_w >= s.default_limit_w else next_cap(
-                    current, s.power_w, target_w, s.clock_mhz, s.min_clock_mhz, s.max_clock_mhz)
-                if self.dry_run:
-                    self.would_cap = new
-                elif new != self.cap:
-                    nv.reset_cap() if new is None else nv.set_cap(new)
-                    self.cap = new
+            nv = self._open()
+            s = nv.read()
+            self.last = s
+            current = self.would_cap if self.dry_run else self.cap
+            new = None if target_w >= s.default_limit_w else next_cap(
+                current, s.power_w, target_w, s.clock_mhz, s.min_clock_mhz, s.max_clock_mhz)
+            if self.dry_run:
+                self.would_cap = new
+            elif new != self.cap:
+                nv.reset_cap() if new is None else nv.set_cap(new)
+                self.cap = new
         except NvmlError as e:
+            self.close()
             self._fail(e)
 
     def release(self) -> None:
         """Remove the cap (daemon stop, emergency, yield, sleep, invalid target)."""
         self.would_cap = None
         if self.cap is None or not self.enabled:
+            self.close()
             return
         try:
-            with self.factory(self.pci) as nv:
-                nv.reset_cap()
+            self._open().reset_cap()
             self.cap = None
         except NvmlError as e:
             self._fail(e)
+        finally:
+            self.close()
 
     def status(self) -> dict:
         s = self.last

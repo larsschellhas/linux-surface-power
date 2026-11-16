@@ -95,6 +95,10 @@ class HwmonTemperatures(Source):
                     self.paths[ChannelRef(TEMP, 102)] = lab[:-len("_label")] + "_input"
         self.channels = set(self.paths)
 
+    def restrict(self, wanted: set[ChannelRef]) -> None:
+        """Read only the channels the blob uses: each surface_thermal read is an EC request (~2 ms) [M]."""
+        self.paths = {r: p for r, p in self.paths.items() if r in wanted}
+
     def read(self, now_ms):
         out = {}
         for ref, p in self.paths.items():
@@ -103,11 +107,21 @@ class HwmonTemperatures(Source):
         return out
 
 
+_MAINS: dict[str, str] = {}      # root -> the Mains supply's directory, found once (the glob runs twice per second otherwise)
+
+
 def _ac_online(root: str) -> bool | None:
+    d = _MAINS.get(root)
+    if d is not None:
+        v = _int(os.path.join(d, "online"))
+        if v is not None:
+            return v == 1
+        del _MAINS[root]                                # gone (e.g. USB-C PD supply re-enumerated): search again
     for d in sorted(glob.glob(os.path.join(root, "sys/class/power_supply/*"))):
         if _read(os.path.join(d, "type")) == "Mains":
             v = _int(os.path.join(d, "online"))
             if v is not None:
+                _MAINS[root] = d
                 return v == 1
     return None
 
@@ -559,22 +573,22 @@ class DgpuSensors(Source):
 
     SAMPLE_MS = 2000
 
-    def __init__(self, root: str = "/", nvml_factory=None):
+    def __init__(self, root: str = "/", nvml_factory=None, probe=None):
         from . import gpu
         self.gpu = gpu
         self.root = root
         self.factory = nvml_factory or gpu.Nvml
         self.pci = gpu.find_nvidia_gpu(root)
+        self.probe = probe or gpu.ClientProbe(root, self.pci)
         self.power, self.temp = ChannelRef(STATE, 3), ChannelRef(TEMP, 101)
         self.channels = {self.power, self.temp} if self.pci else set()
         self.values: dict[ChannelRef, float | None] = {self.power: None, self.temp: None}
         self.next_ms = 0
 
     def read(self, now_ms):
-        status = _read(os.path.join(self.root, "sys/bus/pci/devices", self.pci, "power/runtime_status"))
-        if status == "suspended":
+        if self.gpu.runtime_status(self.root, self.pci) == "suspended":
             self.values = {self.power: 0, self.temp: None}
-        elif now_ms >= self.next_ms and self.gpu.other_nvidia_client(self.root):
+        elif now_ms >= self.next_ms and self.probe.has_client(now_ms):
             self.next_ms = now_ms + self.SAMPLE_MS
             try:
                 with self.factory(self.pci) as nv:
@@ -634,6 +648,9 @@ class InputReader:
         self.sources = sources
         provided = set().union(*(s.channels for s in sources)) if sources else set()
         self.unavailable = sorted(r for r in self.wanted - provided if r.guid != PLACEHOLDER)
+        for s in sources:
+            if hasattr(s, "restrict"):
+                s.restrict(self.wanted)
 
     def read(self, now_ms: int) -> dict[ChannelRef, float | None]:
         out: dict[ChannelRef, float | None] = {r: None for r in self.wanted}

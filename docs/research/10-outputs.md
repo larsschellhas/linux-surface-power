@@ -6,7 +6,7 @@ records what is known about the receivers. Markers as in `README.md`.
 ## 1. Rule for control [D]
 A device is ready for control only when Linux writes every output of its blob. A blob that regulates the CPU while its fan, throttle or
 safety outputs go nowhere runs with part of its design missing. The daemon enforces it (`../specs/supervisor.md` 2.6). By this rule no
-device is ready yet (16.11.2026); the SB3 15" lacks only PL3 and PL4, which its profile keeps off until they are measured.
+device was ready before 16.11.2026; the SB3 15" lacked only PL3 and PL4, which are measured and switched on now (4).
 
 ## 2. Thermal policy (`110DF2A4`, `9BBB8910`) [C, Windows thermal-policy driver]
 The Surface thermal-policy driver owns the ACPI thermal zone `TPOL` (`MSHW0187`) and takes these outputs:
@@ -34,3 +34,20 @@ frequency cap [H].
   EC commands are not analysed.
 - **`CF2F6076`, `349D0E39`:** SoC-specific values for the IHV CPU client and the AMD driver, not analysed.
 - **`87008365/220, 250, 300`:** the Surface service (power-meter polling, camera noise reduction), not relevant for limits.
+
+## 4. PL3 and PL4 on the SB3 15" [M, 16.11.2026]
+`scripts/pl34-test.py` as root, on AC, platform profile as set, each step with 6 s all-core load, RAPL power in 100 ms samples:
+
+| Step | Package max / mean (W) | psys max / mean (W) | Notes |
+|---|---|---|---|
+| Firmware: PL4 (powercap `peak_power`) 0, MSR `0x601` 0; PL3 65 W, enabled | 33.8 / 20.2 | 41.8 / 34.7 | baseline |
+| PL4 20 W | 12.0 / 10.2 | 23.4 / 21.9 | binds; read-back 20 W, MSR `0x601` = 160 units of 1/8 W |
+| PL4 107 W (the blob's value on AC) | 25.7 / 13.2 | 40.1 / 25.5 | written; lower means after the preceding runs [H: heat] |
+| PL4 back to 0 | – | – | read-back 0, MSR `0x601` 0 |
+| PL3 20 W, enable bit as found | 8.3 / 6.4 | 19.5 / 17.8 | binds, on the platform (psys) power |
+| PL3 100 W (the blob's value on AC) | 29.2 / 17.6 | 40.3 / 30.9 | written; time window and enable bit unchanged |
+| Restore | – | – | PL4 0, MSR `0x615` identical to the firmware value |
+
+- PL4 reads 0 on this device because the firmware sets none; writing a value sets MSR `0x601`, and writing 0 clears it again.
+- PL3 is a platform limit, as its Microsoft name (`O_SYS_PEAK`) says. Windows raises it from the firmware's 65 W to 100 W on AC.
+- Both are switched on in the SB3 profile. With them, the SB3 15" writes every output of its blob.

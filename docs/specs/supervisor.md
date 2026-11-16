@@ -110,7 +110,7 @@ The reference implementation uses only the Python standard library, so it does n
   the firmware values are not restored before sleep.
 
 ## 8. Watchdog (FR-S3)
-- **systemd watchdog:** `Type=notify`, `WatchdogSec=10`. The loop sends `WATCHDOG=1` once per cycle, only after a complete cycle.
+- **systemd watchdog:** `Type=notify`, `WatchdogSec=30`. The loop sends `WATCHDOG=1` once per cycle, only after a complete cycle, and also while paused for sleep. 30 s lies above the kernel's 20 s limit for freezing tasks: a suspend that hangs in the freezer (seen on the SB3 with a FUSE mount, 16.11.2026) stops the loop for up to 20 s [M].
 - **Restart limits:** `Restart=on-failure` with `StartLimitBurst=3`, `StartLimitIntervalSec=600`. After that the unit stays failed and the device stays on firmware values. `OnFailure=thermald.service` is offered as an option in the unit, not set by default [D].
 
 ## 9. Main loop

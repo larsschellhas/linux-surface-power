@@ -70,7 +70,9 @@ class StandInTest(unittest.TestCase):
         self.fs.cleanup()
 
     def stand_in(self, dry_run=False):
-        return gpu.ClockCapStandIn(self.fs.root, lambda pci: self.nvml, dry_run=dry_run)
+        # Probe without caching: these tests look at the control law, not at the scan interval (ProbeTest).
+        return gpu.ClockCapStandIn(self.fs.root, lambda pci: self.nvml, dry_run=dry_run,
+                                   probe=gpu.ClientProbe(self.fs.root, PCI, interval_ms=0))
 
     def client(self, pid=4242, device="/dev/nvidia0"):
         """Another process with an NVIDIA device open (what keeps the GPU awake)."""
@@ -113,6 +115,18 @@ class StandInTest(unittest.TestCase):
         self.no_clients()
         s.step(2000, 50.0)
         self.assertEqual(self.nvml.cap, 1260)
+
+    def test_one_session_while_a_client_is_there(self):
+        """NVML init is expensive: one session across samples, closed as soon as the client is gone."""
+        s = self.stand_in()
+        self.client()
+        for t in range(0, 10000, 2000):
+            s.step(t, 50.0)
+        self.assertEqual(self.nvml.sessions, 1)
+        self.assertIsNotNone(s.session)
+        self.no_clients()
+        s.step(10000, 50.0)
+        self.assertIsNone(s.session)
 
     def test_release(self):
         s = self.stand_in()
@@ -158,6 +172,48 @@ if __name__ == "__main__":
     unittest.main()
 
 
+class ProbeTest(unittest.TestCase):
+    """The /proc scan for other NVIDIA clients is expensive: none while the GPU sleeps, else at most every 10 s."""
+
+    def setUp(self):
+        self.fs = FakeSys()
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "active")
+        self.p = gpu.ClientProbe(self.fs.root, PCI)
+        self.scans = 0
+        real = gpu.other_nvidia_client
+
+        def counting(root):
+            self.scans += 1
+            return real(root)
+        self._real, gpu.other_nvidia_client = real, counting
+
+    def tearDown(self):
+        gpu.other_nvidia_client = self._real
+        self.fs.cleanup()
+
+    def test_scan_interval(self):
+        self.assertFalse(self.p.has_client(0))              # GPU awake at start: scanned at once
+        self.fs.link_raw("proc/4242/fd/7", "/dev/nvidia0")
+        self.assertFalse(self.p.has_client(5000))           # cached
+        self.assertTrue(self.p.has_client(10000))           # rescanned after 10 s
+        self.assertEqual(self.scans, 2)
+
+    def test_scan_when_the_gpu_wakes_up(self):
+        """A client opening the GPU wakes it: that is seen in the same second, not after the interval."""
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "suspended")
+        self.assertFalse(self.p.has_client(0))
+        self.fs.link_raw("proc/4242/fd/7", "/dev/nvidia0")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "active")
+        self.assertTrue(self.p.has_client(1000))
+        self.assertEqual(self.scans, 1)
+
+    def test_no_scan_while_suspended(self):
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "suspended")
+        for t in range(0, 60000, 1000):
+            self.assertFalse(self.p.has_client(t))
+        self.assertEqual(self.scans, 0)
+
+
 class DgpuSensorsTest(unittest.TestCase):
     """dGPU power and temperature as blob inputs (spec inputs 8.10)."""
 
@@ -171,7 +227,8 @@ class DgpuSensorsTest(unittest.TestCase):
         self.fs.write(f"{d}/power/runtime_status", "active")
         self.nv = FakeNvml(power=42.5)
         self.nv.temperature_c = lambda: 61
-        self.src = inputs.DgpuSensors(self.fs.root, nvml_factory=lambda pci: self.nv)
+        self.src = inputs.DgpuSensors(self.fs.root, nvml_factory=lambda pci: self.nv,
+                                      probe=gpu.ClientProbe(self.fs.root, PCI, interval_ms=0))
         self.p, self.t = inputs.ChannelRef(inputs.STATE, 3), inputs.ChannelRef(inputs.TEMP, 101)
 
     def tearDown(self):

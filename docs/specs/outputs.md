@@ -75,6 +75,11 @@ while no Windows state in the SB3 blob allows more than 50 W.
 
 - **Never wake the GPU.** Every NVML session opens the GPU and restarts its idle timer.
   - The stand-in therefore only opens NVML while another process already has an NVIDIA device node open (`/proc/<pid>/fd` → `/dev/nvidia*`). That process keeps the GPU awake anyway.
+  - **Cost of that check:** a scan of `/proc/*/fd` costs about 25 ms CPU [M, AC-L4 run 16.11.2026]. It is skipped while the GPU's
+    `power/runtime_status` is `suspended`. When the GPU wakes up (usually because a client opened it) it runs at once,
+    otherwise at most every 10 s; the stand-in and the dGPU sensors (`inputs.md` 8.10) share the result. Regulation comes first: a
+    client that opens an already awake GPU is seen within 10 s, and after the last client exits the stand-in may keep its NVML
+    session, and so the GPU, awake for up to 10 s [D]. The NVML session stays open between samples while a client is there (init costs ~20 ms CPU [M]).
   - If only the daemon itself has it open, that does not count.
   - `power/runtime_usage` turned out not to be a reliable indicator [M]: it read 2 with a CUDA client once and 1 another time.
   - Monitoring tools that hold the device open (e.g. GNOME Resources) count as clients. The GPU does not sleep while they run, with or without the stand-in.

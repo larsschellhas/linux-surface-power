@@ -12,7 +12,8 @@ StartLimitBurst=3
 Type=notify
 NotifyAccess=main
 ExecStart=/usr/bin/surface-powerd --dry-run
-WatchdogSec=10
+# Above the kernel's 20 s limit for freezing tasks before suspend, during which the daemon may not run.
+WatchdogSec=30
 TimeoutStopSec=10
 Restart=on-failure
 RestartSec=5

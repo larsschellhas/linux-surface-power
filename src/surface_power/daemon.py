@@ -21,6 +21,7 @@ import time
 from . import monitor, supervisor
 from .adapters import inputs as inp
 from .adapters.actions import ThermalActions
+from .adapters import gpu
 from .adapters.gpu import ClockCapStandIn
 from .adapters.outputs import OutputStage
 from .engine.engine import Engine
@@ -128,11 +129,12 @@ class Daemon:
         dtx = (lambda: None) if root != "/" else inp.dtx_device_mode
         self.platform = inp.PlatformPower(root, transport=transport)
         self.battery_ec = inp.BatteryEcState(root, transport=transport)
+        self.gpu_probe = gpu.ClientProbe(root, gpu.find_nvidia_gpu(root))   # shared: one /proc scan per 10 s at most
         sources = [inp.HwmonTemperatures(root), inp.SliderState(root), inp.Batteries(root), inp.Posture(root, dtx),
                    self.platform, inp.DisplayBrightness(root), inp.PlatformEvents(root), inp.BatteryCurrent(root),
                    self.battery_ec, inp.StandbyPhase(root), inp.UsbSourcePower(root),
                    inp.DgpuOnBattery(root), inp.ProximitySensor(root), inp.XboxController(root),
-                   inp.DgpuSensors(root)]
+                   inp.DgpuSensors(root, probe=self.gpu_probe)]
         self.cpu_ref = ChannelRef(inp.TEMP, 102)
         # Skin channels that controllers regulate on; the emergency rules watch them (spec supervisor 4).
         self.skin_refs = sorted({c.line.inputs[0] for c in self.graph.controllers if c.line.inputs[0].guid == inp.TEMP})
@@ -159,7 +161,7 @@ class Daemon:
         self.ec_guard = {out: [r for r in ec_inputs if out in outputs_reached_by(r, lines_)]
                          for out in (ChannelRef(LIMITS_GUID, 53), ChannelRef(LIMITS_GUID, 59)) if out in self.outputs.targets}
         if (args.dgpu_clock_cap or (p and p.dgpu_clock_cap)) and DGPU in self.graph.outputs:
-            self.dgpu = ClockCapStandIn(root, dry_run=(self.mode != "control"))
+            self.dgpu = ClockCapStandIn(root, dry_run=(self.mode != "control"), probe=self.gpu_probe)
             written.add(DGPU)
 
         # Inputs this system never provides (spec supervisor 2). They are fine as long as they only reach log-only outputs
@@ -282,6 +284,7 @@ class Daemon:
     # --- one cycle (spec supervisor 9) ---
     def cycle(self, now_ms: int) -> None:
         if self.state == "paused":
+            _sd_notify("WATCHDOG=1")               # freezing tasks can take 20 s; the watchdog must not fire meanwhile
             return
         self.values = self.reader.read(now_ms)
         runs = self.sched.step(now_ms, self.values)

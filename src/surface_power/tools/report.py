@@ -102,6 +102,9 @@ def main(argv=None) -> int:
         t = stage.targets.get(ref)
         if t is not None:
             kind = "writable (MSR, needs root)" if t.name == "pl3" else "writable (powercap)"
+        elif ref.channel == 59 and ref.guid == dgpu_ref.guid and os.geteuid() != 0 and os.path.exists(
+                os.path.join(root, "dev/cpu/0/msr")) and not (prof and prof.pl3 is False):
+            kind = "writable as root (MSR 0x615)"
         elif ref in ThermalActions.channels:
             kind = "thermal action (hibernate / power off)"
         elif ref == dgpu_ref and stand_in:

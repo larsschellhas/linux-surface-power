@@ -30,7 +30,7 @@ Start with [`docs/README.md`](docs/README.md): how it works, with diagrams, and 
 
 ## Status
 
-- **Specs and a Python reference implementation** (`docs/specs/`, `src/`, 258 unit tests):
+- **Specs and a Python reference implementation** (`docs/specs/`, `src/`, 263 unit tests):
   - Loader: reads all known blob forms; MPTF configurations (2025/26 models) are recognised and rejected.
   - Engine: all block types of the SMF blobs from 2020 to 2025, including expressions with channel references and the variable-setpoint PID, with the PID in both core variants. All 41 SMF blobs of the local corpus build completely (`docs/research/09-newer-blobs.md`).
   - Around it: adapters, supervisor, monitoring, the daemon and tools.
@@ -47,8 +47,8 @@ Start with [`docs/README.md`](docs/README.md): how it works, with diagrams, and 
   EC's battery EWMA level and max-charge flag, standby phase, USB-C source power (estimate), and the Laptop Studio's dGPU inputs. Every
   SMF blob now has a source for each input that reaches a limit. They are tested on a fake sysfs and partly on the SB3, not yet on the
   devices that need them.
-- **Next:** measure PL3 and PL4 on the SB3, then the outputs Linux does not write yet (`docs/research/10-outputs.md`): the throttle
-  requests and fans. Also reports from devices other than the SB3, and a kernel attribute for the
+- **Next:** the soak test (AC-L4) on the SB3 15" with all outputs, then the outputs Linux does not write yet on other devices
+  (`docs/research/10-outputs.md`): the throttle requests and fans. Also reports from devices other than the SB3, and a kernel attribute for the
   EC's battery EWMA level and max-charge flag.
 
 ## Device overview
@@ -68,8 +68,8 @@ packages (`scripts/corpus-report.py`, `docs/research/09-newer-blobs.md`). Only t
 
 | Device | Blob runs | Profile | Inputs | Outputs written | On device | State |
 |---|---|---|---|---|---|---|
-| Book 3 15" | ✓ | classic, tested after AC-L4 | all from sysfs and the EC data (kernel#195 or debug device) | [7 of 9](docs/devices/surface-book-3-15.md) | ✓ field tests match Windows; kernel#190, #195 pending | dry-run; PL1/PL2/psys and dGPU match Windows in field tests; PL3 and PL4 off in the profile until measured |
-| Book 3 13" | ✓ | classic (shared with 15") | all from sysfs | [7 of 9](docs/devices/surface-book-3-13.md) | – | dry-run only |
+| Book 3 15" | ✓ | classic, tested after AC-L4 | all from sysfs and the EC data (kernel#195 or debug device) | [9 of 9](docs/devices/surface-book-3-15.md) | ✓ field tests match Windows; kernel#190, #195 pending | all outputs written; dry-run by default until AC-L4 (soak test restarted 16.11.2026) |
+| Book 3 13" | ✓ | classic (shared with 15") | all from sysfs | [9 of 9](docs/devices/surface-book-3-13.md) | – | all outputs written; dry-run, not checked on a device |
 | Pro 7+ | ✓ | – (direct) | all from sysfs | [8 of 12](docs/devices/surface-pro-7-plus.md) | – | dry-run only |
 | Pro 8 | ✓ | classic, untested | battery EWMA level: debug device (root) | [8 of 14](docs/devices/surface-pro-8.md) | – | dry-run only |
 | Pro 9 Intel | ✓ | – (direct) | battery EWMA level: debug device (root) | [8 of 17](docs/devices/surface-pro-9-intel.md) | – | dry-run only |
@@ -97,11 +97,11 @@ packages (`scripts/corpus-report.py`, `docs/research/09-newer-blobs.md`). Only t
 
 Notes:
 - For devices with several blobs (sizes, LTE/Wi-Fi, iGPU/dGPU, LCD/OLED), the table covers all of them.
-- No device is ready for control by this rule yet. Since 16.11.2026 Linux also writes PL4 (where powercap reports it), PL3 (MSR
-  0x615, root) and the thermal-policy requests: at `O_HOT` / `O_CRT` = 2 the daemon hibernates (else suspends) or powers off, as
-  Windows does (on the SB3 from about 54 °C and 56 °C skin temperature). Still without a Linux path: the throttle requests per CPU
-  cluster and GPU, fans and charging, battery mode and a few SoC values (see the device pages). On the SB3 only PL3 and PL4 are left;
-  its profile keeps them off until they are measured.
+- Since 16.11.2026 Linux also writes PL4 (where powercap reports it, or where the profile switches it on), PL3 (MSR 0x615, root) and
+  the thermal-policy requests: at `O_HOT` / `O_CRT` = 2 the daemon hibernates (else suspends) or powers off, as Windows does (on the
+  SB3 from about 54 °C and 56 °C skin temperature). With PL3 and PL4 measured on the SB3 15", the Surface Book 3 is the first device
+  whose outputs are all written. Elsewhere still without a Linux path: the throttle requests per CPU cluster and GPU, fans and
+  charging, battery mode and a few SoC values (see the device pages).
 - Nothing beyond the SB3 15" has run on a device. The newer input adapters are only tested on a fake sysfs and on this SB3.
 - **AMD and Snapdragon devices:** the blob runs and every input has a source, but Linux has no write path for these limits: powercap
   limits exist on Intel only. On Snapdragon the blobs regulate mainly through thermal throttle requests per CPU cluster and GPU; cpufreq

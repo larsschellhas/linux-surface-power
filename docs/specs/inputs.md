@@ -114,6 +114,9 @@ The same payload also arrives as an EC event on some devices (surface-aggregator
 
 ## 7. Polling and cost (NFR-4)
 - **Sensors:** sysfs reads once per second. EC requests as in 6. No busy waiting.
+- **Only what the blob reads:** the temperature adapter reads only the `surface_thermal` channels the blob uses (each read is an EC
+  request, ~2 ms; all 18 on the SB3 took ~30 ms per second [M]). Other adapters are not called at all when the blob reads none of
+  their channels.
 - **Read failures:** a failing read makes that channel invalid for this cycle. After 10 failures in a row, the adapter logs once and retries every 30 s [D].
 
 ## 8. Inputs of the newer blobs (phase 6)

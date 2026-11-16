@@ -291,6 +291,13 @@ class InputsTest(unittest.TestCase):
         self.fs.write(f"{pdo}/maximum_current", 3000)
         self.assertEqual(up.read(0)[usb], 15000)
 
+    def test_reader_reads_only_wanted_temperatures(self):
+        """Every surface_thermal read is an EC request: sensors the blob does not use are not read."""
+        t = inputs.HwmonTemperatures(self.fs.root)
+        self.assertGreater(len(t.paths), 2)
+        inputs.InputReader({ref(TEMP, 509)}, [t])
+        self.assertEqual(set(t.paths), {ref(TEMP, 509)})
+
     def test_reader_reports_missing_once(self):
         wanted = {ref(TEMP, 509), ref(TEMP, 609), ref(SYSTEM, 1), ref("99999999-9999-9999-9999-999999999999", 1)}
         r = inputs.InputReader(wanted, [inputs.HwmonTemperatures(self.fs.root), inputs.SliderState(self.fs.root)])

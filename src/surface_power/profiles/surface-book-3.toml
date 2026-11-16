@@ -11,10 +11,10 @@ source = "efivar"
 variant = "classic"     # the SB3 driver package ships SMF core 3.140
 
 [outputs]
-# PL3 (MSR 0x615) and PL4 are off here until measured: the field tests (docs/research/08) ran without them, and the SB3
-# reports 0 for peak_power, so what a PL4 write does is not known. The other devices use the automatic default.
-pl3 = false
-pl4 = false
+# PL3 (MSR 0x615) and PL4 measured on the SB3 15" on 16.11.2026 (docs/research/10-outputs.md 4): both can be written, bind,
+# and restore exactly. peak_power reads 0 here (no PL4 set by the firmware), so PL4 must be switched on explicitly.
+pl3 = true
+pl4 = true
 # dGPU stand-in (DO-1): restores the Windows dGPU limit (50 W on the Surface PSU) through a clock cap.
 # On by default for parity (G-1); without it the Linux driver lets the dGPU draw 65 W.
 dgpu_clock_cap = true
