@@ -14,7 +14,7 @@ PL1 = "sys/class/powercap/intel-rapl:0/constraint_0_power_limit_uw"
 PL2 = "sys/class/powercap/intel-rapl:0/constraint_1_power_limit_uw"
 
 
-def blob_text(absent_sensor=False, absent_on_written=False, extra=()):
+def blob_text(absent_sensor=False, absent_on_written=False, extra=(), node_controller=False):
     b = BlobBuilder()
     b.input_channel(TEMP, 509, 3681, 2731)
     b.output_channel(LIMITS, 51, 25000, 31000, 7500)
@@ -31,6 +31,12 @@ def blob_text(absent_sensor=False, absent_on_written=False, extra=()):
         b.line(G["pid_sets"], 10, [(TEMP, 609), (SYSTEM, 1)], [(VN, 10)], [20, 1, 15, 4, 0], divider=1)
         b.line(G["pid_parameter_set"], 10, [], [], [10, 0, 7, 50000, 50001, 20000, 40000, 3181, 10, 40, 100, 0.4])
         b.line(G["pass_through"], 11, [(VN, 10)], [(LIMITS, 201)], [50000], stage=1)
+    if node_controller:
+        # A controller whose input is an internal node (Pro 10: VN470, a smoothed battery current), here a copy of 509.
+        b.line(G["pass_through"], 20, [(TEMP, 509)], [(VN, 20)], [3000], stage=1)
+        b.line(G["pid_sets"], 21, [(VN, 20), (SYSTEM, 1)], [(VN, 21)], [20, 1, 15, 4, 0], divider=1, stage=2)
+        b.line(G["pid_parameter_set"], 21, [], [], [21, 0, 7, 50000, 50001, 20000, 40000, 3181, 10, 40, 100, 0.4])
+        b.line(G["pass_through"], 22, [(VN, 21)], [(LIMITS, 201)], [50000], stage=3)
     for line in extra:
         b.algorithms.append(line)
     if absent_on_written:
@@ -139,6 +145,16 @@ class DaemonTest(unittest.TestCase):
         for t in range(1000, 62000, 1000):
             d.cycle(t)
         self.assertEqual(d.state, "emergency")
+        d.stop()
+
+    def test_controller_on_an_internal_node_is_no_emergency(self):
+        """Internal nodes are not device inputs; their validity follows the device inputs (seen on a Pro 10 report)."""
+        with open(self.blob, "w") as f:
+            f.write(blob_text(node_controller=True))
+        d = self.start("--control")
+        for t in range(0, 70000, 1000):
+            d.cycle(t)
+        self.assertEqual(d.state, "control")
         d.stop()
 
     def test_suspend_and_resume(self):

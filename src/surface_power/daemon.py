@@ -25,6 +25,7 @@ from .adapters.outputs import OutputStage
 from .engine.engine import Engine
 from .engine.graph import build_graph, outputs_reached_by
 from .engine.pid import STATE_NAMES
+from .engine.registry import INTERNAL_NODE
 from .engine.scheduler import Scheduler
 from .loader.errors import BlobError
 from .loader.model import ChannelRef
@@ -220,13 +221,16 @@ class Daemon:
 
         Inputs that are unavailable from the start (SB3: base sensors 605/609) are logged once at start and do not count:
         their controllers stay OFF, as on Windows when a sensor is missing. Power inputs from the EC do not count either.
+        Internal nodes (e.g. a smoothed battery current on the Pro 10) are not device inputs: the reader never has them,
+        and their validity follows the device inputs that are checked here.
         """
         refs = [c.line.inputs[0] for c in self.graph.controllers]
         slider = ChannelRef(inp.SYSTEM, 1)
         if slider in self.graph.inputs:
             refs.append(slider)
         absent = set(self.reader.unavailable)
-        return any(self.values.get(r) is None for r in refs if r.guid != inp.POWER and r not in absent)
+        return any(self.values.get(r) is None for r in refs
+                   if r.guid not in (inp.POWER, INTERNAL_NODE) and r not in absent)
 
     def _enter(self, state: str, reason: str) -> None:
         if state == self.state:
