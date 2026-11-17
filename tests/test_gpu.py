@@ -207,15 +207,15 @@ class ProbeTest(unittest.TestCase):
         self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "active")
         self.p = gpu.ClientProbe(self.fs.root, PCI)
         self.scans = 0
-        real = gpu.other_nvidia_client
+        real = gpu.nvidia_client
 
-        def counting(root):
+        def counting(root, hint=None):
             self.scans += 1
-            return real(root)
-        self._real, gpu.other_nvidia_client = real, counting
+            return real(root, hint)
+        self._real, gpu.nvidia_client = real, counting
 
     def tearDown(self):
-        gpu.other_nvidia_client = self._real
+        gpu.nvidia_client = self._real
         self.fs.cleanup()
 
     def test_scan_interval(self):
@@ -233,6 +233,21 @@ class ProbeTest(unittest.TestCase):
         self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "active")
         self.assertTrue(self.p.has_client(1000))
         self.assertEqual(self.scans, 1)
+
+    def test_last_client_checked_first(self):
+        """A long-running client is found again without walking /proc; when it closes the GPU, the others are still seen."""
+        self.fs.link_raw("proc/9000/fd/3", "/dev/nvidia0")
+        self.assertTrue(self.p.has_client(0))
+        self.assertEqual(self.p.client, "9000")
+        self.fs.link_raw("proc/100/fd/3", "/dev/nvidia0")
+        self.assertTrue(self.p.has_client(10000))
+        self.assertEqual(self.p.client, "9000")             # the hint wins over the lower PID
+        os.remove(self.fs.path("proc/9000/fd/3"))
+        self.assertTrue(self.p.has_client(20000))
+        self.assertEqual(self.p.client, "100")
+        os.remove(self.fs.path("proc/100/fd/3"))
+        self.assertFalse(self.p.has_client(30000))
+        self.assertIsNone(self.p.client)
 
     def test_no_scan_while_suspended(self):
         self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "suspended")

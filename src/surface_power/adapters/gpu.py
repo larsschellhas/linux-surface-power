@@ -190,32 +190,46 @@ def find_nvidia_gpu(root: str = "/") -> str | None:
     return None
 
 
-def other_nvidia_client(root: str = "/") -> bool:
-    """True if a process other than this one has /dev/nvidia* open (needs root to see all processes).
-
-    Plain scandir/readlink with an early exit: the glob version cost ~70 ms per scan on the SB3 [M]."""
-    own = str(os.getpid())
-    proc = os.path.join(root, "proc")
+def _holds_nvidia(proc: str, pid: str) -> bool:
     try:
-        pids = [e.name for e in os.scandir(proc) if e.name.isdigit() and e.name != own]
+        with os.scandir(os.path.join(proc, pid, "fd")) as it:
+            for e in it:
+                try:
+                    if os.readlink(e.path).startswith("/dev/nvidia"):
+                        return True
+                except OSError:
+                    continue                        # the descriptor went away
     except OSError:
-        return False
-    for pid in pids:
-        fd_dir = os.path.join(proc, pid, "fd")
-        try:
-            with os.scandir(fd_dir) as it:
-                for e in it:
-                    try:
-                        if os.readlink(e.path).startswith("/dev/nvidia"):
-                            return True
-                    except OSError:
-                        continue                    # the descriptor went away
-        except OSError:
-            continue                                # the process went away, or no permission
+        pass                                        # the process went away, or no permission
     return False
 
 
-PROBE_MS = 10000          # rescan for other NVIDIA clients at most every 10 s; a scan of /proc/*/fd costs a few ms CPU [M]
+def nvidia_client(root: str = "/", hint: str | None = None) -> str | None:
+    """PID of a process other than this one that has /dev/nvidia* open, else None (needs root to see all processes).
+
+    `hint` (the client found last time) is checked first: a long-running client is then found without a scan. A full scan
+    walks all processes in PID order and cost ~60 ms CPU on the SB3 under load with the client at a high PID [M, 17.11.2026].
+    Plain scandir/readlink with an early exit: the glob version cost ~70 ms per scan on the SB3 [M]."""
+    own = str(os.getpid())
+    proc = os.path.join(root, "proc")
+    if hint and hint != own and _holds_nvidia(proc, hint):
+        return hint
+    try:
+        pids = [e.name for e in os.scandir(proc) if e.name.isdigit() and e.name not in (own, hint)]
+    except OSError:
+        return None
+    for pid in pids:
+        if _holds_nvidia(proc, pid):
+            return pid
+    return None
+
+
+def other_nvidia_client(root: str = "/") -> bool:
+    """True if a process other than this one has /dev/nvidia* open."""
+    return nvidia_client(root) is not None
+
+
+PROBE_MS = 10000          # rescan for other NVIDIA clients at most every 10 s (the last client is checked first, see nvidia_client)
 
 
 def runtime_status(root: str, pci: str) -> str | None:
@@ -238,6 +252,7 @@ class ClientProbe:
         self.was_suspended = True
         self.checked_ms: int | None = None
         self.result = False
+        self.client: str | None = None      # PID found last time, checked first on the next scan
 
     def has_client(self, now_ms: int) -> bool:
         if self.pci is None:
@@ -249,7 +264,8 @@ class ClientProbe:
         woke = self.was_suspended
         self.was_suspended = False
         if woke or self.checked_ms is None or now_ms - self.checked_ms >= self.interval_ms:
-            self.result = other_nvidia_client(self.root)
+            self.client = nvidia_client(self.root, self.client)
+            self.result = self.client is not None
             self.checked_ms = now_ms
         return self.result
 
