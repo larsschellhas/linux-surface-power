@@ -184,7 +184,7 @@ class DaemonTest(unittest.TestCase):
         with open(self.blob, "w") as f:
             f.write(blob_text(extra=pl4))
         PL4 = "sys/class/powercap/intel-rapl:0/constraint_2_power_limit_uw"
-        self.fs.write("sys/class/dmi/id/product_name", "Surface Pro 10 for Business")     # no profile: PL4 automatic
+        self.fs.write("sys/class/dmi/id/product_name", "Surface Pro 9")     # no profile: PL4 automatic, control without EC data
         d = self.start("--control", "--allow-partial-outputs")
         for t in range(0, 6000, 1000):
             d.cycle(t)
@@ -193,6 +193,145 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(out["0B7B5350/53"]["target"], "held at firmware value (EC inputs invalid)")
         self.assertEqual(out["0B7B5350/53"]["value_w"], 100.0)              # what stays in place, not the 20 W fallback
         self.assertEqual(out["0B7B5350/53"]["computed_w"], 20.0)
+        d.stop()
+
+    # --- PL4 on the Pro 10: never the blob fallback, and no control without EC data on its path ---
+    PL4_BLOB = ["1,0,0,026CCFCC-A52A-4DB1-8B49-D2BAAFCAD329,32,1,1,28B7BD85-B4CD-49F1-B02B-F84E5AA09889,8,"
+                "0B7B5350-BB8C-4459-8D4A-A75C57073801,53,20000"]
+    PL4_PATH = "sys/class/powercap/intel-rapl:0/constraint_2_power_limit_uw"
+
+    class Ec:
+        """EC transport: answers 0x53 with an available input power of 73.5 W; `fail` makes every request time out."""
+
+        def __init__(self):
+            self.fail = False
+            self.calls = 0
+
+        def request(self, tid, cid, iid=1):
+            import struct
+            self.calls += 1
+            if self.fail or cid != 0x53 or tid != 1:
+                return None
+            return bytes([1]) + struct.pack("<IIHHII", 47900, 35600, 170, 8030, 73500, 9700)
+
+    def pl4_start(self, ec, *extra, product="Surface Pro 10 for Business", on_nap=None, journal=None):
+        """Start on a fake clock that begins at 0 and advances only through the daemon's waiting; `on_nap(n)` runs per nap."""
+        with open(self.blob, "w") as f:
+            f.write(blob_text(extra=self.PL4_BLOB))
+        self.fs.write("sys/class/dmi/id/product_name", product)
+        args = ["--root", self.fs.root, "--blob", self.blob, "--run-dir", self.run.name, "--state-dir", self.state.name, *extra]
+        now = [0.0]
+        self.naps = []
+
+        def nap(s):
+            self.naps.append(s)
+            now[0] += s
+            if on_nap:
+                on_nap(len(self.naps))
+        old = daemon._sleep, daemon._clock
+        daemon._sleep, daemon._clock = nap, lambda: now[0]
+        try:
+            return daemon.Daemon(daemon.parse_args(args), journal or monitor.Journal(stream=io.StringIO()), ec_transport=ec)
+        finally:
+            daemon._sleep, daemon._clock = old
+
+    def test_pl4_never_gets_the_fallback_when_the_ec_stops_answering(self):
+        """Valid EC data write PL4; if the EC stops answering (also after a resume, the gate closed) the written value stays."""
+        ec = self.Ec()
+        d = self.pl4_start(ec, "--control", "--allow-partial-outputs", product="Surface Pro 9")   # no profile: only the hold
+        d.cycle(0)
+        self.assertEqual(self.fs.read(self.PL4_PATH), "73500000")           # computed from the EC data
+        ec.fail = True
+        written = []
+        for t in range(1000, 400000, 1000):                                  # refreshes at 60 s fail three times: gate closed
+            d.cycle(t)
+            written.append(self.fs.read(self.PL4_PATH))
+        self.assertEqual(set(written), {"73500000"})                         # never the 20 W fallback
+        self.assertIsNone(d.values[daemon.ChannelRef(POWER, 8)])
+        d.before_sleep()                                                     # the firmware values are back while it sleeps
+        d.after_resume(400000)                                               # reopens the gate; the EC is still silent
+        for t in range(400000, 470000, 1000):
+            d.cycle(t)
+            self.assertEqual(self.fs.read(self.PL4_PATH), "100000000")       # still the firmware value, not the 20 W fallback
+        out = {o["channel"]: o for o in self.status()["outputs"]}
+        self.assertEqual(out["0B7B5350/53"]["target"], "held at firmware value (EC inputs invalid)")
+        ec.fail = False                                                      # the EC is back after the next resume
+        d.before_sleep()
+        d.after_resume(470000)
+        d.cycle(471000)
+        self.assertEqual(self.fs.read(self.PL4_PATH), "73500000")
+        d.stop()
+        self.assertEqual(self.fs.read(self.PL4_PATH), "100000000")           # firmware value restored
+
+    def test_pl4_not_written_before_the_first_valid_ec_answer(self):
+        """The EC answers only after a while: nothing is written to PL4 before that, and the fallback never."""
+        ec = self.Ec()
+        ec.fail = True
+        d = self.pl4_start(ec, "--control", "--allow-partial-outputs", product="Surface Pro 9")
+        for t in range(0, 5000, 1000):
+            d.cycle(t)
+            self.assertEqual(self.fs.read(self.PL4_PATH), "100000000")
+        ec.fail = False
+        d.platform.request_refresh()
+        d.cycle(5000)
+        self.assertEqual(self.fs.read(self.PL4_PATH), "73500000")
+        d.stop()
+
+    def test_pl4_requires_ec_refuses_control_without_ec_data(self):
+        """Profile option pl4_requires_ec: no valid EC input on the PL4 path within the wait -> dry-run only, with the reason."""
+        ec = self.Ec()
+        ec.fail = True
+        d = self.pl4_start(ec, "--control", "--allow-partial-outputs")
+        self.assertEqual((d.mode, d.state), ("dry-run", "dry-run"))
+        self.assertIn("PL4 needs valid EC inputs", d.mode_reason)
+        self.assertIn("28B7BD85/8", d.mode_reason)
+        self.assertIn("within 10 s", d.mode_reason)
+        self.assertGreaterEqual(sum(self.naps), 10)                          # it did wait the 10 s
+        self.assertIsNone(d.snapshot)
+        d.cycle(0)
+        self.assertEqual(self.fs.read(self.PL4_PATH), "100000000")
+        self.assertEqual(self.fs.read(PL1), "30000000")                      # nothing written at all
+        d.stop()
+
+    def test_pl4_requires_ec_allows_control_with_ec_data(self):
+        ec = self.Ec()
+        d = self.pl4_start(ec, "--control", "--allow-partial-outputs")
+        self.assertEqual(d.mode, "control")
+        self.assertEqual(d.mode_reason, "")
+        d.cycle(0)
+        self.assertEqual(self.fs.read(self.PL4_PATH), "73500000")
+        d.stop()
+
+    def test_pl4_requires_ec_waits_for_a_late_answer(self):
+        """The EC answers on the third poll, within the wait: control starts."""
+        ec = self.Ec()
+        ec.fail = True
+
+        def nap(n):
+            if n == 2:
+                ec.fail = False
+        d = self.pl4_start(ec, "--control", "--allow-partial-outputs", on_nap=nap)
+        self.assertEqual(d.mode, "control")
+        self.assertLess(sum(self.naps), 10)
+        d.stop()
+
+    def test_pl4_requires_ec_is_off_for_other_profiles_and_in_dry_run(self):
+        ec = self.Ec()
+        ec.fail = True
+        d = self.pl4_start(ec, "--control", "--allow-partial-outputs", product="Surface Book 3")
+        self.assertEqual(d.mode, "control")                                  # no such option in this profile: the hold alone
+        d.cycle(0)
+        self.assertEqual(self.fs.read(self.PL4_PATH), "100000000")
+        d.stop()
+        d = self.pl4_start(ec, "--dry-run")
+        self.assertEqual(d.mode_reason, "")
+        d.stop()
+
+    def test_pro10_profile_note_in_the_log(self):
+        ec = self.Ec()
+        buf = io.StringIO()
+        d = self.pl4_start(ec, "--dry-run", journal=monitor.Journal(stream=buf))
+        self.assertIn("integrated GPU", buf.getvalue())
         d.stop()
 
     def test_controller_on_an_internal_node_is_no_emergency(self):

@@ -64,10 +64,16 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 
 ### 3.1 Holding PL4 and PL3 while their EC inputs are invalid [D]
 PL4 and PL3 are computed from the EC power data on most devices. Without them the blob falls back to values far below the firmware
-value (Pro 10: PL4 20 W instead of the firmware's 45 W). While any EC input (`28B7BD85`, the `0x53` and `ARTG` fields) on the path to
+value (Pro 10: the blob's PL4 fallback is 20 W, the firmware value is not known [H]). While any EC input (`28B7BD85`, the `0x53` and `ARTG` fields) on the path to
 PL4 or PL3 is invalid, the output stage keeps the current value: the firmware value before the first write, the last written value
 after it. The status file reports such a channel with the target `held at firmware value (EC inputs invalid)` (or `held at last written value ...`); its `value_w` is the value that stays in place, `computed_w` the engine's value, which is not written. psys keeps the Windows behaviour (its fallback is what Windows does without
 EC data, `engine.md` 7).
+
+### 3.2 Profile option `pl4_requires_ec` [D]
+A profile can set `outputs.pl4_requires_ec = true` (and `outputs.pl4_ec_wait_s`, default 10). Then `--control` starts only if every EC input on the
+PL4 path is valid within that time after start (the EC data are asked again every 2 s); otherwise the daemon stays in dry-run and
+names the inputs in the log and `mode_reason`. The hold of 3.1 applies in any case. The Pro 10 profile sets it: PL4 also limits the
+iGPU there (tester report [H]); its `notes` line says so in the report and the log. See `docs/research/13-pro10-battery-and-timing.md`.
 
 ## 4. PL3 through MSR (FR-O2)
 - **Encoding:** MSR 0x615 holds PL3 in power units from MSR 0x606 (`1/2^PU W`). The adapter changes only the power-limit field (bits 0–14) and keeps the time window and the enable bit as read.

@@ -85,12 +85,15 @@ def _sd_notify(message: str) -> None:
         pass
 
 
+_sleep, _clock = time.sleep, time.monotonic      # replaced in tests
+
+
 def _celsius(dk: float) -> float:
     return round((dk - 2731) / 10, 1)
 
 
 class Daemon:
-    def __init__(self, args, journal: monitor.Journal | None = None, fan_transport=None):
+    def __init__(self, args, journal: monitor.Journal | None = None, fan_transport=None, ec_transport=None):
         self.args = args
         self.journal = journal or monitor.Journal()
         self.log = self.journal.log
@@ -129,7 +132,7 @@ class Daemon:
         self.state = self.mode
 
         # Inputs.
-        transport = _NoTransport() if args.no_ec else None
+        transport = _NoTransport() if args.no_ec else ec_transport
         dtx = (lambda: None) if root != "/" else inp.dtx_device_mode
         self.platform = inp.PlatformPower(root, transport=transport)
         self.battery_ec = inp.BatteryEcState(root, transport=transport)
@@ -184,7 +187,7 @@ class Daemon:
         self.not_needed = {r: notneeded.reason(r, root) for r in self.graph.outputs if notneeded.reason(r, root)}
         written |= set(self.not_needed)
         # PL4 and PL3 keep their value while an EC input on their path is invalid: their fallback would be far below the
-        # firmware value (Pro 10: PL4 20 W instead of 45 W) [D].
+        # firmware value (Pro 10: the blob's PL4 fallback is 20 W) [D].
         lines_ = self.loaded.parsed.algorithms
         ec_inputs = [r for r in self.graph.inputs if r.guid == inp.POWER and r.channel % 100 not in (1, 10, 12, 13, 16)]
         self.ec_guard = {out: [r for r in ec_inputs if out in outputs_reached_by(r, lines_)]
@@ -226,6 +229,15 @@ class Daemon:
                 reasons.append("outputs need root and surface_aggregator_cdev: " + names(self.cdev_wait))
             if no_path:
                 reasons.append("outputs without a Linux path: " + names(no_path))
+        # Profile option pl4_requires_ec (Pro 10: PL4 also limits the iGPU): without valid EC inputs on the PL4 path in time,
+        # no control at all. The hold below keeps PL4 out of every write meanwhile; this keeps the rest from running half-blind.
+        pl4_refs = self.ec_guard.get(ChannelRef(LIMITS_GUID, 53))
+        if self.mode == "control" and p and p.pl4_requires_ec and pl4_refs:
+            missing = self._wait_for_ec(pl4_refs, p.pl4_ec_wait_s)
+            if missing:
+                reasons.append(f"PL4 needs valid EC inputs ({', '.join(str(r) for r in missing)}) within {p.pl4_ec_wait_s:g} s "
+                               "after start and they are still invalid (profile option pl4_requires_ec; needs root and "
+                               "surface_aggregator_cdev, or the kernel's dptf attributes)")
         if reasons and self.mode == "control":
             self.mode_reason = "; ".join(reasons)
             self.mode = self.state = "dry-run"
@@ -258,6 +270,8 @@ class Daemon:
         tested = "tested" if (p and p.tested) else ("untested profile" if p else "no profile")
         self.log("notice", f"device {self.device.product!r} ({tested}), blob form {self.loaded.form}, "
                            f"{len(self.loaded.parsed.algorithms)} lines, variant {variant}, mode {self.mode}")
+        for note in (p.notes if p else ()):
+            self.log("info", note)
         for ref in self.reader.unavailable:
             self.log("warning", f"input {ref} unavailable on this system; it stays invalid")
         if self.mode_reason:
@@ -285,6 +299,18 @@ class Daemon:
             self.log("info", f"output {r}: not needed on Linux: {why}")
 
     # --- helpers ---
+    def _wait_for_ec(self, refs, wait_s: float) -> list:
+        """Poll the EC power data until every channel of `refs` is valid or `wait_s` has passed; the channels still invalid.
+        Each poll asks the EC again (a closed request gate is reopened), at most every 2 s."""
+        t0 = _clock()
+        while True:
+            self.platform.request_refresh()
+            values = self.platform.read(int(_clock() * 1000))
+            missing = [r for r in refs if values.get(r) is None]
+            if not missing or _clock() - t0 >= wait_s:
+                return missing
+            _sleep(min(2.0, max(0.0, wait_s - (_clock() - t0))))
+
     def _warn_writers(self) -> None:
         if self.writers:
             self.log("warning", f"{', '.join(self.writers)} running: it writes power limits itself, so the limits in "

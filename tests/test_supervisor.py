@@ -61,6 +61,9 @@ class DetectTest(unittest.TestCase):
         self.assertTrue(all(p.variant == "classic" for p in supervisor.load_profiles() if p.file != "surface-pro-10.toml"))
         pro10 = next(p for p in supervisor.load_profiles() if p.file == "surface-pro-10.toml")
         self.assertEqual((pro10.product, pro10.variant, pro10.tested), ("Surface Pro 10 for Business", "direct", False))
+        self.assertEqual((pro10.pl4_requires_ec, pro10.pl4_ec_wait_s), (True, 10.0))
+        self.assertTrue(any("integrated GPU" in n for n in pro10.notes))
+        self.assertFalse(any(p.pl4_requires_ec or p.notes for p in supervisor.load_profiles() if p.file != "surface-pro-10.toml"))
 
 
 class SnapshotTest(unittest.TestCase):

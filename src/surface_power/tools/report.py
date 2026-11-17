@@ -225,7 +225,7 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
             kind = "no Linux path (logged only)"
             missing.append(ref)
         lines.append(f"  {ref}: {kind}")
-    for note in stage.notes + throttle.notes + fan.notes + prochot.notes:
+    for note in stage.notes + throttle.notes + fan.notes + prochot.notes + list(prof.notes if prof else ()):
         lines.append(f"  note: {note}")
     if not fan.transport.can_write():
         outs = sum(1 for r in graph.outputs if fan.needs_cdev(r) or prochot.needs_cdev(r))

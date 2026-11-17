@@ -116,6 +116,9 @@ class Profile:
     panel_max_nits: float | None = None
     dgpu_clock_cap: bool = False      # opt-in stand-in DO-1 (spec outputs 6)
     fan_thresholds: bool = False      # opt-in: send the fan / PROCHOT / charge-rate temperature thresholds (spec outputs 9)
+    pl4_requires_ec: bool = False     # control starts only if the EC inputs on the PL4 path are valid in time (spec outputs 3.2)
+    pl4_ec_wait_s: float = 10.0       # how long the start waits for them
+    notes: tuple = ()                 # lines the report and the daemon log print for this device
 
 
 def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
@@ -135,7 +138,8 @@ def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
                            bool(d.get("tested", False)), d.get("blob", {}).get("source", "efivar"),
                            o.get("pl3"), o.get("pl4"), dict(o.get("narrow", {})),
                            d.get("inputs", {}).get("panel_max_nits"), bool(o.get("dgpu_clock_cap", False)),
-                           bool(o.get("fan_thresholds", False))))
+                           bool(o.get("fan_thresholds", False)), bool(o.get("pl4_requires_ec", False)),
+                           float(o.get("pl4_ec_wait_s", 10.0)), tuple(d.get("notes", ()))))
     return out
 
 
