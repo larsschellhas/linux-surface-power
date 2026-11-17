@@ -18,7 +18,7 @@ Safety:
   - a write is held at most 30 s, a run lasts at most 10 minutes;
   - at skin >= 44 C, CPU package >= 85 C, or a sensor that stops answering: restore at once, exit code 2;
   - it never sends 301 = 2, never writes 302-311 or any TMP frame, never writes above the range of the blob (read from the blob;
-    without a blob only with --no-blob, then the hard bounds of the adapter apply). The last fallback is a reboot.
+    an output without a range in the blob, or --no-blob without a blob: the hard bounds of the adapter apply). The last fallback is a reboot.
 Results go to OUT/fan.json and stdout; send the file with your report. Restore errors are printed in capitals and set exit code 1.
 Usage: sudo python3 -I scripts/fan-test.py OUT --channel 201|121|124|111|114|101 [--dry-run] [--blob FILE | --no-blob]
        python3 -I scripts/fan-test.py OUT --probe [--seconds 120]      (read only; the two requests need root)
@@ -101,8 +101,11 @@ def build_plan(channel, profile_value, ranges):
     if ranges is not None and channel not in ranges:
         raise Refuse(f"channel {channel} is not an output of this device's blob")
 
+    if ranges is not None and ranges[channel] is None:
+        notes.append(f"channel {channel} has no value range in the blob: the hard bounds of the adapter apply (as in the daemon)")
+
     def clamp(v):
-        if ranges is not None:
+        if ranges is not None and ranges[channel] is not None:
             lo, hi = ranges[channel]
             if v > hi or v < lo:
                 notes.append(f"value {v} clamped into the blob range {lo:g}..{hi:g}")
@@ -342,7 +345,7 @@ class Env:
 
 
 def blob_ranges(path):
-    """{channel: (min, max)} of the B620798F outputs of the blob, or None if the blob cannot be read."""
+    """{channel: (min, max) or None} of the B620798F outputs of the blob, or None if the blob cannot be read."""
     try:
         from surface_power.engine.graph import build_graph
         from surface_power.loader.source import load
@@ -351,7 +354,10 @@ def blob_ranges(path):
             graph = build_graph(loaded.parsed, "direct")
         except Exception:
             graph = build_graph(loaded.parsed, "classic")
-        return {r.channel: (oc.min, oc.max) for r, oc in graph.output_ranges.items() if r.guid == fan.FAN_GUID}
+        # Every fan output of the blob; a blob may list an output without a value range (Pro 9): then None, and the
+        # adapter's hard bounds apply, as in the daemon.
+        rng = {r.channel: (oc.min, oc.max) for r, oc in graph.output_ranges.items() if r.guid == fan.FAN_GUID}
+        return {r.channel: rng.get(r.channel) for r in graph.outputs if r.guid == fan.FAN_GUID}
     except Exception:
         return None
 

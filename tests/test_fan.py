@@ -736,6 +736,12 @@ class FanScriptTest(unittest.TestCase):
         with self.assertRaises(self.mod.Refuse):
             self.mod.build_plan(121, None, {101: (0, 2500)})
 
+    def test_output_without_blob_range_uses_hard_bounds(self):
+        """Pro 9: the blob lists the fan output but gives no range; no --no-blob needed, the adapter's bounds apply."""
+        plan = self.mod.build_plan(101, None, {101: None})
+        self.assertTrue(any("no value range" in n for n in plan.notes))
+        self.assertEqual(plan.steps[0].frame, self.mod.build_plan(101, None, None).steps[0].frame)
+
     def test_never_301_never_tmp_never_thresholds(self):
         for fr in (Frame(5, 1, 0x0F, b"\x02"), Frame(5, 1, 0x19, b"\x00\x0c"), Frame(3, 1, 0x25, b"\x00\x0c"),
                    Frame(5, 2, 0x0B, b"\x00\x00"), Frame(5, 1, 0x0B, struct.pack("<H", 10001))):
