@@ -12,4 +12,5 @@ source = "efivar"
 variant = "classic"     # the driver package ships SMF core 2.51 [H: its state machine was not compared with 3.140] (docs/research/09 3)
 
 [outputs]
-# pl3 / pl4: automatic (PL4 where powercap reports a value, PL3 where the MSR is writable); set false to switch off.
+# pl4: automatic (where powercap reports a value); set false to switch off. pl3 (MSR 0x615): only with pl3 = true, for devices
+# where Windows' write is verified (driver build or measurement); off by default.

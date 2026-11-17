@@ -12,7 +12,8 @@ source = "efivar"
 variant = "classic"     # the driver package ships SMF core 3.137 (docs/research/04)
 
 [outputs]
-# pl3 / pl4: automatic (PL4 where powercap reports a value, PL3 where the MSR is writable); set false to switch off.
+# pl4: automatic (where powercap reports a value); set false to switch off. pl3 (MSR 0x615): only with pl3 = true, for devices
+# where Windows' write is verified (driver build or measurement); off by default.
 # dGPU stand-in (DO-1, spec outputs 6): off. It was measured on the SB3 only. Whether this GPU takes the clock cap, and whether the
 # Windows driver of this machine uses output 201 as a power limit at all, is open (docs/research/14-laptop-studio-dgpu.md). To try it:
 #   1. python3 -I scripts/dgpu-probe.py --wake        (read-only)

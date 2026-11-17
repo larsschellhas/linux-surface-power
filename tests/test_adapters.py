@@ -558,20 +558,30 @@ class OutputsTest(unittest.TestCase):
 
     def test_pl3_through_msr_keeps_window_and_enable(self):
         self.ranges[ref(LIMITS, 59)] = OutputChannel(1, ref(LIMITS, 59), 65000, 101000, 20000)
-        dev = self._msr(0x0012_8000 | 400)                 # enabled, some time-window bits, 50 W
-        st = self.stage()
+        dev = self._msr(0x0012_A000 | 400)                 # enabled, some time-window bits, bit 13 set, 50 W
+        st = self.stage(pl3=True)
         self.assertEqual(st.kind(ref(LIMITS, 59)), "written")
         self.assertEqual(st.targets[ref(LIMITS, 59)].read_uw(), 50_000_000)
         st.apply({ref(LIMITS, 59): 72500})
         raw = self._read_pl3(dev)
-        self.assertEqual(raw & 0x7FFF, 580)                 # 72.5 W in 1/8 W
-        self.assertEqual(raw & ~0x7FFF, 0x0012_8000)        # window and enable bit untouched
+        self.assertEqual(raw & 0x1FFF, 580)                 # 72.5 W in 1/8 W, bits 12:0 as Windows writes them
+        self.assertEqual(raw & ~0x1FFF, 0x0012_A000)        # bits 13-14, window and enable bit untouched
         self.assertEqual(self.stage(pl3=False).kind(ref(LIMITS, 59)), "log-only")
+
+    def test_pl3_is_opt_in(self):
+        """Without pl3 = true in the profile, MSR 0x615 is never written, even when it is writable."""
+        self.ranges[ref(LIMITS, 59)] = OutputChannel(1, ref(LIMITS, 59), 65000, 101000, 20000)
+        dev = self._msr(0x8000 | 400)
+        st = self.stage()
+        self.assertEqual(st.kind(ref(LIMITS, 59)), "log-only")
+        self.assertIn("not enabled in the device profile", " ".join(st.notes))
+        st.apply({ref(LIMITS, 59): 90000})
+        self.assertEqual(self._read_pl3(dev), 0x8000 | 400)
 
     def test_failed_msr_write_turns_pl3_log_only(self):
         self.ranges[ref(LIMITS, 59)] = OutputChannel(1, ref(LIMITS, 59), 65000, 101000, 20000)
         dev = self._msr(0x8000 | 400)
-        st = self.stage()
+        st = self.stage(pl3=True)
         os.chmod(dev, 0o444)                                  # e.g. CAP_SYS_RAWIO missing at write time
         res = st.apply({ref(LIMITS, 59): 90000})
         self.assertEqual(res[ref(LIMITS, 59)].kind, "log-only")
@@ -582,7 +592,7 @@ class OutputsTest(unittest.TestCase):
         from surface_power import supervisor
         self.ranges[ref(LIMITS, 59)] = OutputChannel(1, ref(LIMITS, 59), 65000, 101000, 20000)
         dev = self._msr(0x8000 | 400)
-        st = self.stage()
+        st = self.stage(pl3=True)
         snap, _ = supervisor.Snapshot.take(self.fs.path("run"), st.snapshot_keys())
         st.apply({ref(LIMITS, 59): 90000})
         self.assertNotEqual(self._read_pl3(dev), 0x8000 | 400)

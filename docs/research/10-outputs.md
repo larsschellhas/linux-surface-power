@@ -56,3 +56,15 @@ Processor Aggregator Device (`PAGD`, matched with `/62` by a fixed name table in
 - PL4 reads 0 on this device because the firmware sets none; writing a value sets MSR `0x601`, and writing 0 clears it again.
 - PL3 is a platform limit, as its Microsoft name (`O_SYS_PEAK`) says. Windows raises it from the firmware's 65 W to 100 W on AC.
 - Both are switched on in the SB3 profile. With them, the SB3 15" writes every output of its blob.
+
+### 4.1 How Windows writes PL3, and on which devices [C, 17.11.2026]
+Read in the Surface CPU SMF client builds of the driver corpus (x64):
+- Channel 59 goes to MSR `0x615` as read-modify-write of **bits 12:0** only, in units of 1/8 W (fixed; MSR `0x606` is not read).
+  Enable, clamp, time window and lock bits stay as read. Gemini Lake writes it to MMIO instead (MCHBAR `0x71f0`), every other Intel
+  platform type to the MSR.
+- No condition on the write: no CPU model, capability, enable- or lock-bit or registry check.
+- Verified per device: Surface Book 3 (client build `8030e5ac`, Ice Lake type, also measured above). Pro 7+/8, Laptop 4 Intel, Laptop
+  Go 2, Laptop Studio 1/2, Pro 11 Intel, Laptop 7 Intel/5G and Pro 10/10 5G ship builds with the same path, but their platform type
+  (MSR or MMIO) is not verified; for Pro 9, Laptop 5/6, Laptop Go 1/3 and Go 3/4 the client build is not in the corpus [H].
+- **Linux:** PL3 is opt-in per profile (`pl3 = true`), only where Windows' write is verified; today the SB3. The daemon changes the
+  same bits 12:0. It converts with the RAPL power unit from MSR `0x606`; on the SB3 that is 1/8 W, as Windows assumes [M].

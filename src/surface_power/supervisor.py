@@ -110,7 +110,7 @@ class Profile:
     variant: str
     tested: bool
     blob_source: str = "efivar"
-    pl3: bool | None = None          # None: automatic (spec outputs 3, 4)
+    pl3: bool | None = None          # PL3 (MSR 0x615) only with true: opt-in per verified device; None/false: log-only
     pl4: bool | None = None
     narrow: dict = field(default_factory=dict)
     panel_max_nits: float | None = None

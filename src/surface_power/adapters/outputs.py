@@ -192,6 +192,9 @@ class OutputStage:
             self.notes.append("pl1 time window: no powercap target (package-0/long_term time window), log-only")
         if pl3 is False:
             self.notes.append("pl3: off in the device profile, log-only")
+        elif pl3 is not True:
+            # Opt-in only: Windows' write of MSR 0x615 must be proven for the device (driver build or measurement).
+            self.notes.append("pl3: not enabled in the device profile (MSR 0x615 not verified on this device), log-only")
         elif not msr.available(root):
             self.notes.append("pl3: MSR not available (no /dev/cpu/0/msr, no root, or kernel lockdown), log-only")
         else:

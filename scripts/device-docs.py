@@ -25,7 +25,7 @@ from surface_power.loader.model import ChannelRef  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 DEFAULT = os.path.join(ROOT, "docs", "research", "raw", "tools", "fw")
-AS_OF = "16.11.2026"
+AS_OF = "17.11.2026"
 
 # Package folder -> (page name, title, profile file or None, controller variant). Variants: docs/research/09-newer-blobs.md 3.
 # Platform: Intel unless listed in PLATFORM.
@@ -124,7 +124,7 @@ OUTPUTS = {
     (LIMITS, 53): ("O_CPU_PEAK", "PL4, package peak", "powercap `package-0/peak_power` (automatic, held without EC data)", "written"),
     (LIMITS, 54): ("O_SYS_AVG", "psys PL1, platform long-term", "powercap `psys/long_term`", "written"),
     (LIMITS, 55): ("O_SYS_MAX", "psys PL2, platform short-term", "powercap `psys/short_term`", "written"),
-    (LIMITS, 59): ("O_SYS_PEAK", "PL3, platform peak with duty cycle", "MSR `0x615` (root; held without EC data)", "written"),
+    (LIMITS, 59): ("O_SYS_PEAK", "PL3, platform peak with duty cycle", "MSR `0x615` (root; profile opt-in where Windows' write is verified; held without EC data)", "optional"),
     (LIMITS, 64): ("", "VPU power level request, 0-100 (Laptop Studio 2)", "none known", "log"),
     (LIMITS, 70): ("O_BATT_MODE", "battery mode (1 = adapter rating 0, i.e. on battery)",
                    "SAM TMP `0x1b` once when it turns 1 (EC: de-assert PROCHOT [H]), debug device", "written"),
@@ -268,12 +268,12 @@ def load(path):
 
 
 def profile_outputs(profile: str | None) -> set[int]:
-    """Optional limit channels a device profile switches on (PL4 53, PL3 59, dGPU stand-in 201)."""
+    """Optional limit channels a device profile switches on (PL3 59 with pl3 = true, dGPU stand-in 201)."""
     if not profile:
         return set()
     with open(os.path.join(ROOT, "src", "surface_power", "profiles", profile), "rb") as f:
         o = tomllib.load(f).get("outputs", {})
-    return {201} if o.get("dgpu_clock_cap") else set()
+    return ({201} if o.get("dgpu_clock_cap") else set()) | ({59} if o.get("pl3") is True else set())
 
 
 def profile_fan_profiles(profile: str | None) -> int:

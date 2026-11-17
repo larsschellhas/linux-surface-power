@@ -8,7 +8,7 @@ import struct
 
 RAPL_POWER_UNIT = 0x606
 PL3_CONTROL = 0x615
-PL3_LIMIT_MASK = 0x7FFF      # bits 0-14: the power limit in RAPL power units
+PL3_LIMIT_MASK = 0x1FFF      # bits 0-12: the field Windows writes (descriptor mask 0x1fff in the Windows CPU client [C]); 13-14 stay as read
 PL3_ENABLE = 1 << 15
 
 

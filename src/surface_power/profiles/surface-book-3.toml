@@ -12,7 +12,8 @@ variant = "classic"     # the SB3 driver package ships SMF core 3.140
 
 [outputs]
 # PL3 (MSR 0x615) and PL4 measured on the SB3 15" on 16.11.2026 (docs/research/10-outputs.md 4): both can be written, bind,
-# and restore exactly. peak_power reads 0 here (no PL4 set by the firmware), so PL4 must be switched on explicitly.
+# and restore exactly. Windows writes PL3 to MSR 0x615 on this device: its CPU client build (Ice Lake type) maps channel 59 to it
+# (docs/research/10-outputs.md 4). peak_power reads 0 here (no PL4 set by the firmware), so PL4 must be switched on explicitly.
 pl3 = true
 pl4 = true
 # dGPU stand-in (DO-1): restores the Windows dGPU limit (50 W on the Surface PSU) through a clock cap.
