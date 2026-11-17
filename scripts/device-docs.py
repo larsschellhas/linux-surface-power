@@ -55,7 +55,7 @@ DEVICES = {
     "go3": ("surface-go-3", "Surface Go 3", "surface-go-3.toml", "classic"),
     "go4": ("surface-go-4", "Surface Go 4", None, "direct"),
     "ls1": ("surface-laptop-studio", "Surface Laptop Studio", "surface-laptop-studio.toml", "classic"),
-    "ls2": ("surface-laptop-studio-2", "Surface Laptop Studio 2", None, "direct"),
+    "ls2": ("surface-laptop-studio-2", "Surface Laptop Studio 2", "surface-laptop-studio-2.toml", "direct"),
 }
 PLATFORM = {"lap3_amd": "amd", "lap4_amd": "amd", "pro9_5g": "arm64", "pro11_snap": "arm64", "pro12_1": "arm64",
             "lap7_snap": "arm64", "lap13_1_snap": "arm64"}
@@ -72,7 +72,7 @@ INTERFACES = {
     LID: "lid", STATE: "power and display state", SPT: "power tracker items", COMPOSITE: "client-computed channels",
     MS: "Modern Standby", LIMITS: "power limits", "110DF2A4": "thermal notifications",
     "9BBB8910": "thermal throttle requests", "B620798F": "fan and charging", "A79674B4": "sensor offsets",
-    "CF2F6076": "SoC client (time window)", "349D0E39": "SoC (not analysed)", PLACEHOLDER: "placeholder",
+    "CF2F6076": "SoC client (time window)", "349D0E39": "SoC register fields (IHV CPU client)", PLACEHOLDER: "placeholder",
 }
 
 # Linux status of an input: "sysfs", "ec" (EC data: kernel#195 attributes or the debug device), "debug" (debug device only),
@@ -125,13 +125,13 @@ OUTPUTS = {
     (LIMITS, 54): ("O_SYS_AVG", "psys PL1, platform long-term", "powercap `psys/long_term`", "written"),
     (LIMITS, 55): ("O_SYS_MAX", "psys PL2, platform short-term", "powercap `psys/short_term`", "written"),
     (LIMITS, 59): ("O_SYS_PEAK", "PL3, platform peak with duty cycle", "MSR `0x615` (root; held without EC data)", "written"),
-    (LIMITS, 64): ("", "not analysed", "–", "log"),
+    (LIMITS, 64): ("", "VPU power level request, 0-100 (Laptop Studio 2)", "none known", "log"),
     (LIMITS, 70): ("O_BATT_MODE", "battery mode (1 = adapter rating 0, i.e. on battery)",
                    "SAM TMP `0x1b` once when it turns 1 (EC: de-assert PROCHOT [H]), debug device", "written"),
     (LIMITS, 71): ("", "not analysed", "–", "log"),
-    (LIMITS, 201): ("", "dGPU power limit", "clock-cap stand-in (DO-1, profile)", "optional"),
-    (LIMITS, 205): ("", "GPU power controller limit (not analysed)", "–", "log"),
-    (LIMITS, 208): ("", "GPU power controller limit (not analysed)", "–", "log"),
+    (LIMITS, 201): ("", "dGPU power target (SB3: power limit; Laptop Studio: on/off request)", "clock-cap stand-in (profile option, off by default; observe-only option)", "optional"),
+    (LIMITS, 205): ("", "shared CPU and dGPU power budget (via ACPI on Windows)", "none known", "log"),
+    (LIMITS, 208): ("", "dGPU current limit, mA (Laptop Studio 2; meaning [H])", "none known", "log"),
     ("110DF2A4", 1): ("O_HOT", "hibernate request at 2 (thermal policy of zone `TPOL`)", "thermal action: hibernate, else suspend", "written"),
     ("110DF2A4", 2): ("O_CRT", "critical shutdown request at 2 (thermal policy of zone `TPOL`)", "thermal action: power off", "written"),
     ("110DF2A4", 3): ("O_MINPWR2", "minimum-power flags (bit mask 0-7 of three controllers)", "–", "log"),
@@ -139,8 +139,8 @@ OUTPUTS = {
                         "SAM TMP `0x24` through the SSAM debug device (root; neutral frame 0 at the restore)", "written"),
     ("CF2F6076", 61): ("O_CPU_AVG_TIME", "PL1 time window, ms (rounded up to 4 steps per octave)",
                        "powercap `package-0/long_term` time window", "written"),
-    ("349D0E39", 1): ("", "SoC value (not analysed)", "–", "log"),
-    ("349D0E39", 4): ("", "SoC value (not analysed)", "–", "log"),
+    ("349D0E39", 1): ("", "CPU register field, 8 bit (copy of 1FB53D4C/10; 255 without it)", "none known", "log"),
+    ("349D0E39", 4): ("", "CPU register flag (1 while the dGPU target is above 25 W)", "none known", "log"),
     (COMPOSITE, 220): ("O_FAST_MAXIM_POLLING", "fast power-meter polling", "–", "log"),
     (COMPOSITE, 250): ("", "not analysed", "–", "log"),
     (COMPOSITE, 300): ("O_CAMERA_AINR", "camera AI noise reduction allowed", "–", "log"),
@@ -180,7 +180,7 @@ def input_info(ref: ChannelRef):
     return INPUTS.get((g, c), ("", "not analysed", "–", "none"))
 
 
-def output_info(ref: ChannelRef, platform: str = "intel", ec: bool = False):
+def output_info(ref: ChannelRef, platform: str = "intel", ec: bool = False, kfp: int = 1):
     g, c = g8(ref.guid), ref.channel
     if g == LIMITS and c == 70:     # battery mode: one SAM request, Intel SoC client only (docs/research/12 2.2)
         base = OUTPUTS[(LIMITS, 70)]
@@ -203,7 +203,8 @@ def output_info(ref: ChannelRef, platform: str = "intel", ec: bool = False):
                     "GPU maximum frequency (i915, xe or devfreq; where the machine has one)", "written")
         return (ms, "throttle request, % (100 = none)", "–", "log")
     if g == "B620798F":
-        return (FANS.get(c, ""), *FAN_CMDS.get(c, ("fan or charging setting for the EC", "no Linux path (command not known)", "noplat")))
+        return (FANS.get(c, ""), *(fan_info(c, kfp) if c in fan.SPECS else
+                                   ("fan or charging setting for the EC", "no Linux path (command not known)", "noplat")))
     info = OUTPUTS.get((g, c), ("", "not analysed", "–", "log"))
     why = notneeded.static_reason(ChannelRef(next((k for k in (notneeded.MINPWR2.guid,) if k.startswith(g)), g), c), platform)
     if why:
@@ -231,27 +232,27 @@ FAN_MEANING = {
 }
 
 
-def fan_info(c):
-    """(meaning, Linux path, status) of a B620798F channel."""
+def fan_info(c, kfp=1):
+    """(meaning, Linux path, status) of a B620798F channel on a device whose kernel sends the fan profile to `kfp` fans."""
     sp = fan.SPECS.get(c)
     if sp is None:
         return ("fan or charging setting for the EC", "no Linux path (command not known)", "noplat")
     cmd = f"SAM {sp.tc_name} `0x{sp.cid:02x}`"
     meaning = FAN_MEANING.get(c, "fan or charging setting for the EC")
-    if sp.route == "kernel-profile":
-        return (meaning, f"{cmd}, sent by the kernel (`surface_platform_profile`, from the platform profile); the daemon does "
-                         "not send it", "written")
-    if sp.route == "kernel-suspend":
+    route = fan.route_of(sp, kfp)
+    if route == "kernel-profile":
+        return (meaning, f"{cmd}, sent by the kernel (`surface_platform_profile`, from the platform profile"
+                         + (f", fan {sp.iid} of {kfp}: needs a kernel with the `fan_count` property [H]" if sp.iid > 1 else "")
+                         + "); the daemon does not send it", "written")
+    if route == "kernel-suspend":
         return (meaning, f"{cmd}, sent by the kernel in its suspend hooks; the daemon never sends it", "written")
-    if sp.route == "none":
-        return (meaning, "no Linux path: the kernel sends the profile for fan 1 only [H]", "noplat")
-    if sp.route == "optin":
+    if route == "none":
+        return (meaning, "no Linux path: the kernel sends the profile for "
+                         + ("fan 1" if kfp == 1 else f"fans 1-{kfp}") + " only [H]", "noplat")
+    if route == "optin":
         return (meaning, f"{cmd} through the SSAM debug device; off unless the device profile sets `fan_thresholds = true`",
                 "optional")
     return (meaning, f"{cmd} through the SSAM debug device (root; neutral frame 0 at the restore)", "written")
-
-
-FAN_CMDS = {c: fan_info(c) for c in fan.SPECS}
 
 
 def name(ref):
@@ -273,6 +274,14 @@ def profile_outputs(profile: str | None) -> set[int]:
     with open(os.path.join(ROOT, "src", "surface_power", "profiles", profile), "rb") as f:
         o = tomllib.load(f).get("outputs", {})
     return {201} if o.get("dgpu_clock_cap") else set()
+
+
+def profile_fan_profiles(profile: str | None) -> int:
+    """Fans the kernel sends the fan profile to, per device profile (`outputs.kernel_fan_profiles`, default 1)."""
+    if not profile:
+        return 1
+    with open(os.path.join(ROOT, "src", "surface_power", "profiles", profile), "rb") as f:
+        return int(tomllib.load(f).get("outputs", {}).get("kernel_fan_profiles", 1))
 
 
 def profile_disabled(profile: str | None) -> set[int]:
@@ -330,11 +339,12 @@ def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[
           "- **Block types:** " + ", ".join(f"{k} ({v})" for k, v in sorted(blocks.items())), ""]
 
     enabled = profile_outputs(profile)
+    kfp = profile_fan_profiles(profile)
 
     disabled = profile_disabled(profile)
 
     def out_status(r):
-        st = output_info(r, platform, ec)[3]
+        st = output_info(r, platform, ec, kfp)[3]
         if st == "optional" and r.channel in enabled and g8(r.guid) == LIMITS:
             return "written"
         if st == "written" and g8(r.guid) == LIMITS and r.channel in disabled:
@@ -352,7 +362,7 @@ def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[
         groups_in[STATUS_IN[info[3]]][k[0]].append(short(k, info) if info[0] else f"{k[1]} {info[1].split(',')[0]}")
     groups_out = defaultdict(lambda: defaultdict(list))
     for k, r in sorted(outs.items()):
-        info = output_info(r, platform, ec)
+        info = output_info(r, platform, ec, kfp)
         groups_out[STATUS_OUT[out_status(r)]][k[0]].append(short(k, info) if info[0] else f"{k[1]} {info[1].split(',')[0].split(' (')[0]}")
     L += ["## Overview", "", "Every input and output of the blob(s), grouped by what Linux does with it.", "",
           "```mermaid", "flowchart LR"]
@@ -389,7 +399,7 @@ def device_page(key, title, profile, variant, blobs, platform="intel") -> tuple[
     L += ["", "## Outputs", "", "| Channel | Microsoft name | Meaning | Linux | Status | Range (default / max / min) |",
           "|---|---|---|---|---|---|"]
     for k, r in sorted(outs.items()):
-        ms, what, tgt, _ = output_info(r, platform, ec)
+        ms, what, tgt, _ = output_info(r, platform, ec, kfp)
         st = out_status(r)
         rg = "; ".join(f"{d:g} / {mx:g} / {mn:g}" for d, mx, mn in sorted(ranges.get(k, ()))) or "–"
         L.append(f"| {name(r)} | {ms or '–'} | {what} | {tgt} | {STATUS_OUT[st]} | {rg} |")

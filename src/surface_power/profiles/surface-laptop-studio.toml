@@ -13,3 +13,11 @@ variant = "classic"     # the driver package ships SMF core 3.137 (docs/research
 
 [outputs]
 # pl3 / pl4: automatic (PL4 where powercap reports a value, PL3 where the MSR is writable); set false to switch off.
+# dGPU stand-in (DO-1, spec outputs 6): off. It was measured on the SB3 only. Whether this GPU takes the clock cap, and whether the
+# Windows driver of this machine uses output 201 as a power limit at all, is open (docs/research/14-laptop-studio-dgpu.md). To try it:
+#   1. python3 -I scripts/dgpu-probe.py --wake        (read-only)
+#   2. dgpu_clock_cap_dry_run = true                  (the daemon computes and logs the cap it would set, sets none)
+#   3. dgpu_clock_cap = true                          (sets the cap; only when 1 and 2 look sane)
+# The inputs of 201 on this blob include EC data (adapter rating, battery peak power): without them the stand-in stays off.
+dgpu_clock_cap = false
+dgpu_clock_cap_dry_run = false

@@ -44,17 +44,17 @@ Which interface each output belongs to and what Linux does with it on an Intel d
 | `0B7B5350/54` | power limits | O_SYS_AVG | psys PL1, platform long-term | powercap `psys/long_term` | written | 22 |
 | `0B7B5350/55` | power limits | O_SYS_MAX | psys PL2, platform short-term | powercap `psys/short_term` | written | 24 |
 | `0B7B5350/59` | power limits | O_SYS_PEAK | PL3, platform peak with duty cycle | MSR `0x615` (root; held without EC data) | written | 20 |
-| `0B7B5350/64` | power limits | – | not analysed | – | logged only | 1 |
+| `0B7B5350/64` | power limits | – | VPU power level request, 0-100 (Laptop Studio 2) | none known | logged only | 1 |
 | `0B7B5350/70` | power limits | O_BATT_MODE | battery mode (1 = adapter rating 0, i.e. on battery) | SAM TMP `0x1b` once when it turns 1 (EC: de-assert PROCHOT [H]), debug device | written | 22 |
 | `0B7B5350/71` | power limits | – | not analysed | – | logged only | 4 |
-| `0B7B5350/201` | power limits | – | dGPU power limit | clock-cap stand-in (DO-1, profile) | optional (profile) | 4 |
-| `0B7B5350/205` | power limits | – | GPU power controller limit (not analysed) | – | logged only | 2 |
-| `0B7B5350/208` | power limits | – | GPU power controller limit (not analysed) | – | logged only | 1 |
+| `0B7B5350/201` | power limits | – | dGPU power target (SB3: power limit; Laptop Studio: on/off request) | clock-cap stand-in (profile option, off by default; observe-only option) | optional (profile) | 4 |
+| `0B7B5350/205` | power limits | – | shared CPU and dGPU power budget (via ACPI on Windows) | none known | logged only | 2 |
+| `0B7B5350/208` | power limits | – | dGPU current limit, mA (Laptop Studio 2; meaning [H]) | none known | logged only | 1 |
 | `110DF2A4/1` | thermal notifications | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | 27 |
 | `110DF2A4/2` | thermal notifications | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | 27 |
 | `110DF2A4/3` | thermal notifications | O_MINPWR2 | minimum-power flags (bit mask 0-7 of three controllers) | not needed on Linux: no Windows client takes it: the thermal-policy client registers channels 1 and 2 only and its policy structure has no field for it; only the power tracker records it (telemetry) [C] | not needed on Linux | 16 |
-| `349D0E39/1` | SoC (not analysed) | – | SoC value (not analysed) | – | logged only | 1 |
-| `349D0E39/4` | SoC (not analysed) | – | SoC value (not analysed) | – | logged only | 1 |
+| `349D0E39/1` | SoC register fields (IHV CPU client) | – | CPU register field, 8 bit (copy of 1FB53D4C/10; 255 without it) | none known | logged only | 1 |
+| `349D0E39/4` | SoC register fields (IHV CPU client) | – | CPU register flag (1 while the dGPU target is above 25 W) | none known | logged only | 1 |
 | `87008365/220` | client-computed channels | O_FAST_MAXIM_POLLING | fast power-meter polling | – | logged only | 4 |
 | `87008365/250` | client-computed channels | – | not analysed | – | logged only | 1 |
 | `87008365/300` | client-computed channels | O_CAMERA_AINR | camera AI noise reduction allowed | – | logged only | 2 |

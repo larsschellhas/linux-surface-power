@@ -383,6 +383,36 @@ class DaemonTest(unittest.TestCase):
         self.assertIsNone(nvml.cap)
         d.stop()
 
+    def test_dgpu_observe_only_profile(self):
+        """Profile option dgpu_clock_cap_dry_run (spec outputs 6.2): the cap is computed and shown, never set; 201 stays unwritten."""
+        from unittest import mock
+
+        from surface_power import supervisor
+        from test_gpu import PCI, FakeNvml
+        b = BlobBuilder()
+        b.line(G["lookup_table"], 20, [(SYSTEM, 1)], [(LIMITS, 201)], [6, 50000, 50000, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6,
+                                                                     50000, 50000, 50000, 50000, 50000, 50000])
+        with open(self.blob, "w") as f:
+            f.write(blob_text(extra=b.algorithms))
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/vendor", "0x10de")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/class", "0x030200")
+        self.fs.link_raw("proc/4242/fd/7", "/dev/nvidia0")
+        nvml = FakeNvml()
+        prof = supervisor.Profile("x.toml", None, None, "classic", True, dgpu_clock_cap_dry_run=True)
+        with mock.patch.object(supervisor, "find_profile", return_value=prof):
+            d = self.start("--control", "--allow-partial-outputs")
+        d.dgpu.factory = lambda pci: nvml
+        self.assertEqual(d.state, "control")
+        d.cycle(0)
+        self.assertIsNone(nvml.cap)                                    # nothing is set on the GPU
+        self.assertEqual(self.status()["dgpu"]["would_cap_mhz"], 1260)
+        self.assertIsNone(self.status()["dgpu"]["cap_mhz"])
+        out = {o["channel"]: o for o in self.status()["outputs"]}
+        self.assertEqual(out["0B7B5350/201"]["target"], "clock-cap stand-in (observe only)")
+        self.assertIn(daemon.DGPU, d.unwritten)                               # a blob with 201 still counts it as not written
+        d.stop()
+        self.assertIsNone(nvml.cap)
+
     def test_no_dgpu_stand_in_without_a_dgpu_output(self):
         d = self.start("--control")
         self.assertIsNone(d.dgpu)

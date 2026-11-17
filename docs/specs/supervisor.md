@@ -101,6 +101,7 @@ A profile is a small TOML file in `profiles/`. It holds no limit values (G-2). F
   - `outputs.pl3`: `false` by default;
   - `outputs.fan_thresholds`: `false` by default; `true` lets the daemon send the fan, PROCHOT and charge-rate temperature thresholds (302-311, `outputs.md` 9). No shipped profile sets it;
   - `outputs.pl4_requires_ec`: `false` by default; `true` refuses control unless the EC inputs on the PL4 path are valid within `outputs.pl4_ec_wait_s` (default 10) of the start (`outputs.md` 3.2). Pro 10 only;
+  - `outputs.kernel_fan_profiles`: 1 by default; 1–3 = number of fans the kernel sends the fan profile to (`outputs.md` 9.3). Laptop Studio 2: 2;
   - top-level `notes`: lines the report (`note: ...`) and the daemon log print for the device;
   - `outputs.narrow`: optional upper limits per target (FR-S7, only narrowing).
 - **Status:** `tested`, `true` when the device was validated against Windows (NFR-1).

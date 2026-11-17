@@ -254,6 +254,44 @@ class PathsTest(unittest.TestCase):
         st = self.stage([202])
         self.assertFalse(st.has_path(ref(202)))
 
+    def test_fan_2_profile_is_the_kernels_where_the_device_profile_says_so(self):
+        self.bind_profile_driver()
+        st = self.stage([201, 202, 203], kernel_fan_profiles=2)
+        self.assertEqual((st.describe(ref(201)), st.describe(ref(202)), st.describe(ref(203))),
+                         ("kernel (platform profile)", "kernel (platform profile, fan 2)", "no Linux path"))
+        self.assertTrue(st.has_path(ref(202)))
+        self.assertFalse(st.has_path(ref(203)))
+        self.assertFalse(st.sends(ref(202)))
+        r = st.apply({ref(201): 3, ref(202): 3, ref(203): 3}, 0)
+        self.assertEqual((r[ref(202)].kind, r[ref(203)].kind), ("kernel", "log-only"))
+        self.assertEqual(self.t.sent, [])                                 # the daemon never sends 0x0e itself
+        self.assertTrue(any("2 fans" in n for n in st.notes))
+        self.assertEqual(self.stage([203], kernel_fan_profiles=3).describe(ref(203)), "kernel (platform profile, fan 3)")
+        self.assertEqual(self.stage([203], kernel_fan_profiles=9).kernel_fan_profiles, 3)     # clamped to the three fan instances
+
+    def test_default_is_fan_1_only(self):
+        self.bind_profile_driver()
+        st = self.stage([201, 202])
+        self.assertEqual((st.describe(ref(201)), st.describe(ref(202))), ("kernel (platform profile)", "no Linux path"))
+        self.assertFalse(any("fans" in n and "fan_count" in n for n in st.notes))
+
+    def test_fan_2_needs_the_bound_driver_too(self):
+        st = self.stage([201, 202], kernel_fan_profiles=2)
+        self.assertEqual((st.describe(ref(201)), st.describe(ref(202))), ("no Linux path", "no Linux path"))
+
+    def test_log_for_fan_2_names_the_fan(self):
+        self.bind_profile_driver()
+        self.fs.write("sys/firmware/acpi/platform_profile", "balanced")
+        st = self.stage([201, 202], kernel_fan_profiles=2)
+        st.apply({ref(201): 4, ref(202): 2}, 0)
+        ev = [t for _, t in st.drain_events()]
+        self.assertEqual(len(ev), 1)
+        self.assertIn("asks for 4", ev[0])
+        st.apply({ref(202): 4}, 1000)
+        ev = [t for _, t in st.drain_events()]
+        self.assertEqual(len(ev), 1)
+        self.assertIn("fan profile (fan 2): the blob asks for 4", ev[0])
+
     def test_log_when_the_blob_differs_from_the_kernel(self):
         self.bind_profile_driver()
         self.fs.write("sys/firmware/acpi/platform_profile", "balanced")
@@ -479,6 +517,25 @@ class DaemonFanTest(unittest.TestCase):
                 f.write('[match]\nproduct_name = "X"\n[outputs]\nfan_thresholds = true\n')
             self.assertTrue(supervisor.load_profiles(td)[0].fan_thresholds)
         self.assertFalse(any(p.fan_thresholds for p in supervisor.load_profiles()))     # no shipped profile opts in
+
+    def test_kernel_fan_profiles_option(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "x.toml")
+            with open(path, "w") as f:
+                f.write('[match]\nproduct_name = "X"\n')
+            self.assertEqual(supervisor.load_profiles(td)[0].kernel_fan_profiles, 1)
+            for text, ok in (("2", True), ("3", True), ("0", False), ("4", False), ('"2"', False), ("true", False)):
+                with open(path, "w") as f:
+                    f.write(f'[match]\nproduct_name = "X"\n[outputs]\nkernel_fan_profiles = {text}\n')
+                if ok:
+                    self.assertEqual(supervisor.load_profiles(td)[0].kernel_fan_profiles, int(text))
+                else:
+                    with self.assertRaises(ValueError):
+                        supervisor.load_profiles(td)
+        ls2 = next(p for p in supervisor.load_profiles() if p.file == "surface-laptop-studio-2.toml")
+        self.assertEqual((ls2.product, ls2.variant, ls2.tested, ls2.kernel_fan_profiles),
+                         ("Surface Laptop Studio 2", "direct", False, 1))     # 2 only with a kernel that has fan_count
+        self.assertEqual({p.file for p in supervisor.load_profiles() if p.kernel_fan_profiles != 1}, set())
 
 
 class ReportProbeTest(unittest.TestCase):

@@ -39,7 +39,8 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 | | 59 | PL3 | MSR 0x615, see 4 |
 | | 70 | battery mode (1 = adapter rating 0) | one SAM TMP `0x1b` request through the SSAM debug device when it turns 1 (9.9) |
 | | 201 | dGPU limit | log-only (FR-O5): `nvidia-smi -pl` is not supported on the SB3 GPU [M]. Opt-in stand-in: clock cap (6, DO-1) |
-| | 205 | system budget (Laptop Studio 2) | log-only |
+| | 205 | shared CPU + dGPU power budget (Laptop Studio 1 and 2) | log-only; no Linux path known (`../research/14-laptop-studio-dgpu.md`) |
+| | 208, 64 | dGPU current limit (Laptop Studio 2); VPU level request (Laptop Studio 2) | log-only; no Linux path known (`../research/14-laptop-studio-dgpu.md`) |
 | `9BBB8910` | 1–5, 20–22, 62 | throttle requests for CPUs, clusters, GPU and the aggregator device | cpufreq or GPU frequency cap (8) |
 | | 103–105, 200 | modem sensors, NPU | log-only (no Linux interface known) |
 | `110DF2A4` | 1, 2 | thermal policy: hibernate (`O_HOT`) and critical shutdown (`O_CRT`) requests | thermal actions (7) |
@@ -124,6 +125,16 @@ while no Windows state in the SB3 blob allows more than 50 W.
 - **Dry-run:** computes and logs the cap it would set, sets nothing, and still only samples under the rule above.
 - **Failures:** an NVML error disables the stand-in for the rest of the run and is logged once. Examples: no library, no permission, unsupported call.
 
+### 6.1 Other devices (Laptop Studio 1 and 2) [C for the blob and the Windows driver, H for the rest]
+The stand-in is generic (first NVIDIA display controller, NVML limits), but everything measured about it is from the SB3's GTX 1660 Ti.
+It is therefore off in every other profile.
+- **What is not known:** whether the Laptop Studio GPU (Ampere, Ada) takes the clock cap; the MHz-per-watt slope (the 20 MHz/W gain is the SB3's); whether `nvmlDeviceSetPowerManagementLimit` works there (on the SB3 NVML reports a range of 1 to 65 W and still refuses every write [M], so the range proves nothing).
+- **What Windows does with 201 there:** on the Laptop Studio driver the numeric dGPU limit is not 201 alone. The GPU power controller of the 2.149 driver treats 201 as an on/off request, takes a shared budget (205) and a current limit (208) through ACPI methods, and sends a power value to the GPU through NVIDIA's private control device only for 202 (constant 100 W in every blob). The older SB3 driver (2.43) sends 201 itself as the power limit. The Laptop Studio 1 driver was not available [C for 2.149 and 2.43, H for the mapping of the five outputs]. So a clock cap that follows 201 on the Laptop Studio is a model of the blob's intent, not a copy of what Windows does (`../research/14-laptop-studio-dgpu.md`).
+- **Check before trying:** `python3 -I scripts/dgpu-probe.py --wake` (read-only; `--try-limit` and `--try-cap PCT` write and need root) reports what the driver says and, with `--try-cap`, measures the cap against load, always removing it afterwards.
+
+### 6.2 Observe only (profile option `dgpu_clock_cap_dry_run`)
+With `outputs.dgpu_clock_cap_dry_run = true` (and `dgpu_clock_cap` off) the stand-in is created in dry-run mode in every daemon mode: it samples under the same rules as in 6, computes the cap and publishes `would_cap_mhz` in the status file, and sets nothing. The dGPU limit stays a log-only output (it does not count as written, so it does not change readiness). `dgpu_clock_cap = true` or `--dgpu-clock-cap` wins over it. Both options are off in every shipped profile except that the SB3 sets `dgpu_clock_cap`.
+
 ## 7. Thermal actions (`110DF2A4/1`, `/2`) [C for the meaning, D for the Linux action]
 - **Windows:** the Surface thermal-policy driver turns `O_HOT` = 2 into the "hibernate" flag and `O_CRT` = 2 into the "critical" flag of
   the thermal zone `TPOL`; Windows then hibernates or shuts down (`../research/10-outputs.md`).
@@ -187,15 +198,16 @@ The commands, units and send rules come from the analysis of the Windows receive
 | 114–116, 124–126 | FAN `0x15`, `0x14`, u8, sones | `SAM FAN 0x15 (cdev)`, `SAM FAN 0x14 (cdev)` |
 | 306, 312 | FAN `0x1c` float32, `0x16` u8 | `SAM FAN 0x1c (cdev)`, `SAM FAN 0x16 (cdev)` |
 | 201 | FAN `0x0e`, profile 1–4 | `kernel (platform profile)` |
-| 202, 203 | FAN `0x0e` for fan 2 and 3 | `no Linux path` [C: the kernel request has the fixed instance 1; a send for fan 2 and 3 through the debug device is possible but not implemented, and the Laptop Studio 2 effect is unknown] |
+| 202, 203 | FAN `0x0e` for fan 2 and 3 | `kernel (platform profile, fan 2)` / `fan 3` where the device profile says the kernel sends them (`outputs.kernel_fan_profiles`, below); otherwise `no Linux path` [C: stock kernels send instance 1 only] |
 | 301 | FAN `0x0f`, state | `kernel (suspend)` |
 | 302, 304, 305, 307, 308–311 | FAN `0x19`, `0x1a`, `0x1b`, `0x1d`; TMP `0x25`–`0x28`, u16 | `disabled (profile opt-in)` |
 
-The path is a property of this machine. An output counts as written (`supervisor.md` 2.6) only if its path exists: the debug device must be writable (root, module `surface_aggregator_cdev` loaded), or, for 201 and 301, the kernel path must exist. Otherwise the output is `no Linux path`, and a blob that has it cannot control. `--no-ec` switches the debug device off.
+The path is a property of this machine. An output counts as written (`supervisor.md` 2.6) only if its path exists: the debug device must be writable (root, module `surface_aggregator_cdev` loaded), or, for 201 (202, 203 where the profile says so) and 301, the kernel path must exist. Otherwise the output is `no Linux path`, and a blob that has it cannot control. `--no-ec` switches the debug device off.
 
 ### 9.3 Fan profile and fan state are the kernel's
 `surface_platform_profile` (linux-surface kernel) sends FAN `0x0e` at every platform profile change on nodes with `has_fan`, and FAN `0x0f` (standby / normal) in its suspend hooks. These are channels 201 and 301 with the Windows numbers. The daemon does **not** send them. It never sends 301 = 2, because standby while the system runs may stop the fan.
 - **Detection:** the kernel path exists if the driver `surface_platform_profile` is bound to its SSAM device (`/sys/bus/surface_aggregator/drivers/surface_platform_profile/<device>`, or a `platform-profile` class node of that name). The property `has_fan` is not visible in sysfs. A hwmon `surface_fan` is only evidence for it, so the path counts as present when the driver is bound, and the fan support is [H].
+- **More than one fan:** the instance ID of the request is the fan number. A kernel with the node property `fan_count = N` (`surface_aggregator_registry`, set to 2 for the Laptop Studio 2, MSHW0360) sends the profile to the fans 1..N, so channels 201..200+N are the kernel's. The property is not visible in sysfs. The device profile therefore says it: `outputs.kernel_fan_profiles = N` (1–3, default 1). Only channels up to N get `kernel (platform profile, fan n)`; the others stay `no Linux path`. A profile with N = 2 on a kernel without the property is wrong: fan 2 gets nothing [H]. The daemon does not send the profile to fan 2 itself, not even as a fallback (see `research/11-fan-charging.md` 9). Shipped: `surface-laptop-studio-2.toml` (N = 2, untested on a device). The fan state 301 stays with fan 1.
 - **Log:** when the blob's 201 differs from the value the kernel sends for the current platform profile (low-power 1, balanced 2, balanced-performance 3, performance 4), the daemon logs it once per pair. The platform profile is the one the slider input uses (`inputs.md` 3).
 
 ### 9.4 Temperature thresholds are off

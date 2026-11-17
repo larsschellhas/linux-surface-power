@@ -264,6 +264,18 @@ class DynamicParameterTest(unittest.TestCase):
         graph, eng = build(b)
         self.assertEqual(run(eng, {X: None}), 0)                # default is 100/0: the block is skipped
 
+    def test_reach_follows_expression_references(self):
+        """A node that only appears in a parameter expression still carries its input to the output (graph reach analysis)."""
+        from helpers import LIMITS
+        from surface_power.engine.graph import outputs_reached_by
+        out = (LIMITS, 51)
+        b = BlobBuilder()
+        b.line(G["pass_through"], 2, [Y], [(VN, 2)], [0])
+        b.line(G["lookup_table"], 1, [X], [out], [1, 100, 50, f"({{{VN}}}_2+30)", f"({{{VN}}}_2+45)", 50], stage=1)
+        graph, _ = build(b)
+        self.assertEqual(outputs_reached_by(ref(*Y), graph.parsed.algorithms), [ref(*out)])
+        self.assertEqual(outputs_reached_by(ref(*X), graph.parsed.algorithms), [ref(*out)])
+
     def test_other_blocks_stay_unsupported(self):
         b = BlobBuilder()
         b.line(G["conditional_table"], 1, [X], [(VN, 1)], [1, f"({{{VN}}}_2)", 0, 9, 5])

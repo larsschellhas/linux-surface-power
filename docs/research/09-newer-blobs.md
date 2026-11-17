@@ -112,3 +112,34 @@ stage writes:
 The scheduler runs an instance only when an input changes or the timer runs, so a device with steady inputs would keep the first-run
 value. On Windows, inputs arrive one by one at boot, which gives several runs [H]. Repeating the first run until the outputs
 settle is noted as idea I-12 (`../requirements/ideas.md`).
+
+## 6. `87008365/200` (I_AMBIENT_AI) reaches no output [C, corpus and engine run]
+
+The check covers every SMF blob that reads the channel: Pro 10, Pro 10 5G, Pro 11 Snapdragon (four blobs), Pro 12" and Laptop 13". It follows every
+input of every line, selector inputs and parameter expressions with channel references included, through all internal nodes across instances.
+
+| Blob | Consumers of the input (decoded text line) | Where the chain ends |
+|---|---|---|
+| Pro 10, Pro 10 5G | one hysteresis quantiser (L114 / L120) -> VN321 | nothing reads VN321 |
+| Pro 11 Snapdragon (all four) | the same quantiser -> VN321 -> one conditional table (with slider state `2DD6960F/1`) -> VN212 | nothing reads VN212 |
+| Pro 12", Laptop 13" | two linear maps -> VN450 and VN464; VN450 -> scale/clamp -> VN241 -> scale/clamp -> VN315 | VN464 is not read; VN241 and VN315 appear only in `#VNTELEMETRY` (display ranges, not control) |
+
+In all blobs the channel is otherwise named only in channel and telemetry sections: the channel definition line, `#IOTELEMETRY` (value range), `#DURATIONTEL`
+(time above a threshold, Pro 10 family) and, on Pro 12" and Laptop 13", the snapshots taken at minimum-power and PROCHOT events. So Microsoft feeds it
+for telemetry and for nodes that nothing consumes [C]; why the dead nodes are there (left over, or kept for a later blob) is not evidenced [M].
+
+**Engine replay.** Per blob 150 random contexts (temperatures, slider 1 – 10, power values, battery and AC states drawn from plausible values for every
+other input), `/200` swept 15 – 40 °C in 2.5 K steps, 40 s of scheduler time each: no device output and no node outside the chain above ever changed.
+Control: changing one other input at random changed the outputs in 47 – 58 % of the contexts, so the test can see a dependence [C].
+
+**Windows source.** The `SurfaceSmfClient` driver (child device "ambient estimation") computes it. Inputs are the battery temperature, the previous
+battery temperature, the system power in W (CPU power on some versions), the fan speed and, in the newest configuration version, the battery discharge
+current. The estimate is a linear model of these with the blob's coefficients (the `/200` channel line), truncated to whole °C, kept as a moving
+average over the blob's window (180 samples on Pro 10), and it reads 25 °C until the window is full. Polling is slow, or off on Laptop 13", until the skin
+temperature comes near a threshold, then once per second. Batteries outside a valid range are ignored [C, driver]. A Linux estimate is therefore only
+useful if a future blob uses it; the inputs exist on Linux (battery temperature, platform power, fan speed) and the model would be a direct port.
+
+**Generator check.** `scripts/device-docs.py` used `outputs_reached_by`, which followed line inputs (selectors and set-selection inputs of controllers are
+inputs of their line, so they were followed) but not channel references inside parameter expressions. That is fixed in `engine/graph.py` (test
+`test_reach_follows_expression_references`). Seven lines in the corpus have such expressions (all on VN208); no "reaches no output" verdict of any
+device page changed.

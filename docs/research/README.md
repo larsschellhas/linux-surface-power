@@ -23,6 +23,7 @@ Markers used in the summaries:
 | [11-fan-charging.md](11-fan-charging.md) | The fan and charging outputs `B620798F`: channel meaning, Windows receiver, SAM commands, Linux path, safe test procedure |
 | [12-remaining-outputs.md](12-remaining-outputs.md) | PL1 time window, sensor offset, battery mode and `O_MINPWR2` (the last four Pro 10 outputs): Windows receivers, Linux paths, "not needed" evidence, Pro 10 tester checklist |
 | [13-pro10-battery-and-timing.md](13-pro10-battery-and-timing.md) | Pro 10: where PL1 comes from on battery (controllers 9, 6, slider table), AC step-down timing, PL4 hold and `pl4_requires_ec` |
+| [14-laptop-studio-dgpu.md](14-laptop-studio-dgpu.md) | Laptop Studio 1 and 2: dGPU outputs `201`, `205`, `208`, `64`, `349D0E39/1`, `/4`: values, Windows receivers, Linux paths, why the stand-in is off there and how to try it |
 
 ## Raw material (`raw/`, local only)
 

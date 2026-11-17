@@ -59,11 +59,21 @@ def _slot(graph: Graph, ref: ChannelRef, as_output: bool) -> Slot:
     return table[ref]
 
 
+def _reads(line: AlgorithmLine) -> list[ChannelRef]:
+    """Every channel a line reads: its inputs (including selector inputs) and the channels in its parameter expressions."""
+    if not line.dynamic:
+        return list(line.inputs)
+    try:
+        return list(line.inputs) + _expression_refs(line)
+    except BlobError:
+        return list(line.inputs)
+
+
 def _reaches(start: AlgorithmLine, lines: list[AlgorithmLine]) -> list[ChannelRef]:
-    """Device outputs reachable from the outputs of `start` through internal nodes."""
+    """Device outputs reachable from the outputs of `start` through internal nodes (inputs, selectors, expression refs)."""
     consumers = defaultdict(list)
     for ln in lines:
-        for r in ln.inputs:
+        for r in _reads(ln):
             if r.internal:
                 consumers[r.channel].append(ln)
     found, seen, todo = set(), set(), list(start.outputs)
@@ -96,7 +106,7 @@ def outputs_reached_by(ref: ChannelRef, lines: list[AlgorithmLine]) -> list[Chan
     """Device outputs that a device input `ref` can influence, directly or through internal nodes."""
     found: set[ChannelRef] = set()
     for ln in lines:
-        if ref in ln.inputs:
+        if ref in _reads(ln):
             found.update(_reaches(ln, lines))
     return sorted(found)
 

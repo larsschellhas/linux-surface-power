@@ -9,7 +9,9 @@ The commands, units and send rules are in docs/research/11-fan-charging.md. In s
     recorded in the snapshot before the first send of the channel (supervisor.py).
 The same stage also sends the sensor offsets `A79674B4/5xx` (TMP 0x24, docs/research/12), with the same rules and the neutral frame 0.
 The fan profile (201..203) and the fan state (301) are NOT sent here: the linux-surface kernel sends them (surface_platform_profile,
-suspend hooks). 301 = 2 (standby) is never sent by the daemon. The temperature thresholds (302-311) are off unless a device
+suspend hooks). The profile goes to fan 1 on every node with `has_fan`; to fans 1..N only where the node has `fan_count = N` (the
+Laptop Studio 2 in the registry of a kernel with that property). The property is not visible in sysfs, so the device profile says
+how many fans get the profile (`kernel_fan_profiles`, default 1); only those channels are "kernel", the others stay "no Linux path". 301 = 2 (standby) is never sent by the daemon. The temperature thresholds (302-311) are off unless a device
 profile opts in (`fan_thresholds = true`).
 """
 from __future__ import annotations
@@ -91,7 +93,8 @@ def _build() -> dict[int, Spec]:
         s[114 + n] = Spec(114 + n, TC_FAN, 0x15, 1 + n, "u8", 255)
         s[121 + n] = Spec(121 + n, TC_FAN, 0x12, 1 + n, "f32", 100)
         s[124 + n] = Spec(124 + n, TC_FAN, 0x14, 1 + n, "u8", 255)
-        # The kernel sends the profile with the fixed instance 1, i.e. for the first fan only [C: surface_platform_profile.c].
+        # Stock kernels send the profile with the fixed instance 1, i.e. for the first fan only [C: surface_platform_profile.c].
+        # With the `fan_count` property it goes to fans 1..fan_count; 202 and 203 are "kernel" only then (route_of).
         s[201 + n] = Spec(201 + n, TC_FAN, 0x0E, 1 + n, "u8", 4, neutral=None, route="kernel-profile" if n == 0 else "none")
     s[301] = Spec(301, TC_FAN, 0x0F, 1, "u8", 2, neutral=None, route="kernel-suspend")
     s[306] = Spec(306, TC_FAN, 0x1C, 1, "f32", 100)
@@ -104,6 +107,14 @@ def _build() -> dict[int, Spec]:
 
 
 SPECS = _build()
+MAX_FANS = 3
+
+
+def route_of(spec: Spec, kernel_fan_profiles: int = 1) -> str:
+    """The route of a channel on a device whose kernel sends the fan profile to `kernel_fan_profiles` fans (device profile)."""
+    if spec.guid == FAN_GUID and spec.cid == 0x0E and 1 <= spec.iid <= min(kernel_fan_profiles, MAX_FANS):
+        return "kernel-profile"
+    return spec.route
 OPT_IN = frozenset(c for c, sp in SPECS.items() if sp.route == "optin")
 
 # Sensor offsets (A79674B4/5xx): the Windows SMF client sends them as TMP 0x24, instance = sensor number, payload = the sensor number
@@ -245,11 +256,12 @@ class FanStage:
     """The write path of the fan and charging outputs. Built for the channels the blob has."""
 
     def __init__(self, root: str, channels, ranges: dict[ChannelRef, OutputChannel] | None = None, transport=None,
-                 dry_run: bool = False, thresholds: bool = False, on_touch=None):
+                 dry_run: bool = False, thresholds: bool = False, on_touch=None, kernel_fan_profiles: int = 1):
         """on_touch(key, frame): called before the first send of a channel with the neutral frame to record for the restore;
         raising OSError stops the send (no restore frame, no write)."""
         self.root, self.ranges, self.dry_run = root, ranges or {}, dry_run
         self.thresholds, self.on_touch = thresholds, on_touch
+        self.kernel_fan_profiles = min(max(int(kernel_fan_profiles), 1), MAX_FANS)
         self.transport = transport if transport is not None else CdevTransport(os.path.join(root, SSAM_CDEV.lstrip("/")))
         self.notes: list[str] = []
         self.events: list[tuple[str, str]] = []
@@ -263,13 +275,14 @@ class FanStage:
             if sp is None:
                 self.notes.append(f"{ref}: unknown fan or charging channel, log-only")
                 continue
-            if sp.route == "kernel-profile":
+            route = route_of(sp, self.kernel_fan_profiles)
+            if route == "kernel-profile":
                 path = "kernel-profile" if self.kernel.bound else "none"
-            elif sp.route == "kernel-suspend":
+            elif route == "kernel-suspend":
                 path = "kernel-suspend" if self.kernel.bound else "none"
-            elif sp.route == "none":
+            elif route == "none":
                 path = "none"
-            elif sp.route == "optin" and not thresholds:
+            elif route == "optin" and not thresholds:
                 path = "disabled"
             else:
                 path = "sam" if can else "needs-root" if needs_root else "needs-cdev" if sam_present(root) else "none"
@@ -280,6 +293,9 @@ class FanStage:
         if any(c.path.startswith("kernel") for c in self.chans.values()):
             self.notes.append("fan profile and fan state are sent by the kernel (surface_platform_profile), not by the daemon"
                               + ("" if self.kernel.fan_seen else "; fan support (has_fan) is not detectable [H]"))
+        if self.kernel_fan_profiles > 1 and any(c.path == "kernel-profile" and c.spec.iid > 1 for c in self.chans.values()):
+            self.notes.append(f"the device profile says the kernel sends the fan profile to {self.kernel_fan_profiles} fans "
+                              "(property `fan_count`, not visible in sysfs); an older kernel sends it to fan 1 only [H]")
         if any(c.path == "sam" for c in self.chans.values()):
             self.notes.append("fan and charging outputs go through the SSAM debug device; the EC's values cannot be read back, "
                               "the restore sends neutral frames")
@@ -308,7 +324,7 @@ class FanStage:
         if c.path == "needs-cdev":
             return f"SAM {c.spec.tc_name} 0x{c.spec.cid:02x} (needs root and surface_aggregator_cdev)"
         if c.path == "kernel-profile":
-            return "kernel (platform profile)"
+            return "kernel (platform profile)" if c.spec.iid == 1 else f"kernel (platform profile, fan {c.spec.iid})"
         if c.path == "kernel-suspend":
             return "kernel (suspend)"
         if c.path == "disabled":
@@ -405,12 +421,13 @@ class FanStage:
         return send_frame(self.transport, frame)
 
     def _check_kernel(self, ref: ChannelRef, c: _Chan, x: int) -> None:
-        if c.spec.channel == 201:
+        if c.spec.cid == 0x0E:
             prof = platform_profile(self.root)
             expect = PROFILE_VALUES.get(prof or "")
             if expect is not None and x != expect:
-                self._event("info", f"fan profile: the blob asks for {x}, the kernel sends {expect} for the platform profile "
-                                    f"{prof!r}; the daemon does not send it", key=("profile", x, expect))
+                fan_no = "" if c.spec.iid == 1 else f" (fan {c.spec.iid})"
+                self._event("info", f"fan profile{fan_no}: the blob asks for {x}, the kernel sends {expect} for the platform "
+                                    f"profile {prof!r}; the daemon does not send it", key=("profile", c.spec.channel, x, expect))
         elif c.spec.channel == 301 and x == SLEEP_STATE:
             self._event("info", "fan state: the blob asks for 2 (standby); the daemon never sends it, the kernel does in its "
                                 "suspend hook", key=("state", x))

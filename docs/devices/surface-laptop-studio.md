@@ -54,11 +54,11 @@ flowchart LR
     end
     B --> OUT0
     subgraph OUT1["optional (profile)"]
-        O1_0B7B5350["<b>power limits</b><br/>201 dGPU power limit"]
+        O1_0B7B5350["<b>power limits</b><br/>201 dGPU power target"]
     end
     B --> OUT1
     subgraph OUT2["logged only"]
-        O2_0B7B5350["<b>power limits</b><br/>71 not analysed; 205 GPU power controller limit"]
+        O2_0B7B5350["<b>power limits</b><br/>71 not analysed; 205 shared CPU and dGPU power budget"]
     end
     B --> OUT2
 ```
@@ -110,8 +110,8 @@ A device can be controlled only when every output of its blob is written: a blob
 | `0B7B5350/59` | O_SYS_PEAK | PL3, platform peak with duty cycle | MSR `0x615` (root; held without EC data) | written | 130000 / 130000 / 20000 |
 | `0B7B5350/70` | O_BATT_MODE | battery mode (1 = adapter rating 0, i.e. on battery) | SAM TMP `0x1b` once when it turns 1 (EC: de-assert PROCHOT [H]), debug device | written | – |
 | `0B7B5350/71` | – | not analysed | – | logged only | – |
-| `0B7B5350/201` | – | dGPU power limit | clock-cap stand-in (DO-1, profile) | optional (profile) | 35000 / 50000 / 15000 |
-| `0B7B5350/205` | – | GPU power controller limit (not analysed) | – | logged only | 95000 / 105000 / 10000 |
+| `0B7B5350/201` | – | dGPU power target (SB3: power limit; Laptop Studio: on/off request) | clock-cap stand-in (profile option, off by default; observe-only option) | optional (profile) | 35000 / 50000 / 15000 |
+| `0B7B5350/205` | – | shared CPU and dGPU power budget (via ACPI on Windows) | none known | logged only | 95000 / 105000 / 10000 |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |
 | `9BBB8910/62` | O_WTMF_PARK | passive limit of zone `TPOL`, % (processor aggregator device) | cpufreq cap on all CPU policies (minimum with the other requests) | written | – |

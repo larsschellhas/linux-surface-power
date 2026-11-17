@@ -57,6 +57,33 @@ class ControlLawTest(unittest.TestCase):
         self.assertIsNone(gpu.next_cap(2100, power=20.0, target=50.0, clock=2100, lo=300, hi=2100))   # cap released
 
 
+class CapabilitiesTest(unittest.TestCase):
+    """What an owner is told from the read-only NVML answers (spec outputs 6.1)."""
+
+    def caps(self, **kw):
+        base = dict(name="GPU", power_w=10.0, default_limit_w=50.0, enforced_limit_w=50.0, limit_min_w=None, limit_max_w=None,
+                    max_clock_mhz=2100)
+        base.update(kw)
+        return gpu.Capabilities(**base)
+
+    def test_fixed_limit_means_clock_cap_only(self):
+        text = " ".join(gpu.assess(self.caps(limit_min_w=50.0, limit_max_w=50.0)))
+        self.assertIn("fixed power limit of 50 W", text)
+        self.assertIn("only the clock cap", text)
+
+    def test_range_is_no_proof_of_a_settable_limit(self):
+        text = " ".join(gpu.assess(self.caps(limit_min_w=1.0, limit_max_w=65.0)))      # what the SB3 reports, and refuses
+        self.assertIn("1 to 65 W", text)
+        self.assertIn("no proof", text)
+        self.assertIn("dgpu-probe.py --try-limit", text)
+
+    def test_no_answer_and_missing_values(self):
+        text = " ".join(gpu.assess(self.caps(default_limit_w=None, max_clock_mhz=None)))
+        self.assertIn("does not report a power-limit range", text)
+        self.assertIn("default power limit is unknown", text)
+        self.assertIn("maximum graphics clock is unknown", text)
+
+
 class StandInTest(unittest.TestCase):
     def setUp(self):
         self.fs = FakeSys()

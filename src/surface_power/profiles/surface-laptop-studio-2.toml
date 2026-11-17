@@ -1,0 +1,23 @@
+# Device profile: Surface Laptop Studio 2. Spec supervisor 6. Holds no limit values (G-2): those come from the device's blob.
+# The product name is the DMI name expected from the model name; it is not confirmed on a device [H], a different name leaves the
+# profile unused. Not validated on a device: tested stays false (dry-run unless started with --control).
+tested = false
+
+[match]
+product_name = "Surface Laptop Studio 2"
+
+[blob]
+source = "efivar"
+
+[engine]
+variant = "direct"      # the driver package ships SMF core 3.204.2 (docs/research/09)
+
+[outputs]
+# kernel_fan_profiles: how many fans the kernel sends the fan profile to. The stock kernel sends it to fan 1 only [C], so
+# output 202 (fan 2) has no Linux path yet. A local patch (registry property `fan_count = 2` for MSHW0360) is waiting for a test
+# on a Laptop Studio 2 (linux-surface#2392); set 2 only on a kernel with it. The daemon cannot see the property in sysfs.
+kernel_fan_profiles = 1
+# dGPU stand-in (DO-1, spec outputs 6): off, see surface-laptop-studio.toml for the three steps. On this blob output 201 depends only on
+# the slider, the posture and the Modern Standby phase (30-80 W), so its inputs are all available.
+dgpu_clock_cap = false
+dgpu_clock_cap_dry_run = false

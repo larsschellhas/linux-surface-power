@@ -35,7 +35,7 @@ flowchart LR
     IN2 --> B
     B(["SMF blob<br/>97 lines, 9 block types"])
     subgraph OUT0["written"]
-        O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK<br/>201 dGPU power limit"]
+        O0_0B7B5350["<b>power limits</b><br/>O_CPU_AVG; O_CPU_MAX; O_CPU_PEAK<br/>O_SYS_AVG; O_SYS_MAX; O_SYS_PEAK<br/>201 dGPU power target"]
         O0_110DF2A4["<b>thermal notifications</b><br/>O_HOT; O_CRT"]
     end
     B --> OUT0
@@ -86,6 +86,6 @@ A device can be controlled only when every output of its blob is written: a blob
 | `0B7B5350/54` | O_SYS_AVG | psys PL1, platform long-term | powercap `psys/long_term` | written | 45000 / 101000 / 10000 |
 | `0B7B5350/55` | O_SYS_MAX | psys PL2, platform short-term | powercap `psys/short_term` | written | 45000 / 101000 / 10000 |
 | `0B7B5350/59` | O_SYS_PEAK | PL3, platform peak with duty cycle | MSR `0x615` (root; held without EC data) | written | 65000 / 101000 / 20000 |
-| `0B7B5350/201` | – | dGPU power limit | clock-cap stand-in (DO-1, profile) | written | 35000 / 41000 / 10000 |
+| `0B7B5350/201` | – | dGPU power target (SB3: power limit; Laptop Studio: on/off request) | clock-cap stand-in (profile option, off by default; observe-only option) | written | 35000 / 41000 / 10000 |
 | `110DF2A4/1` | O_HOT | hibernate request at 2 (thermal policy of zone `TPOL`) | thermal action: hibernate, else suspend | written | – |
 | `110DF2A4/2` | O_CRT | critical shutdown request at 2 (thermal policy of zone `TPOL`) | thermal action: power off | written | – |

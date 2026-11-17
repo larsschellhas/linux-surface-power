@@ -164,7 +164,8 @@ class Daemon:
         fan_refs = [r for r in self.graph.outputs if fan_handles(r)]
         if fan_transport is None:
             fan_transport = NullTransport() if args.no_ec else None
-        fkw = dict(transport=fan_transport, thresholds=bool(p and p.fan_thresholds))
+        fkw = dict(transport=fan_transport, thresholds=bool(p and p.fan_thresholds),
+                   kernel_fan_profiles=p.kernel_fan_profiles if p else 1)
         self.fan = FanStage(root, fan_refs, self.graph.output_ranges, dry_run=(self.mode != "control"),
                             on_touch=self._fan_touch, **fkw)
         self.fan_preview = FanStage(root, fan_refs, self.graph.output_ranges, dry_run=True, **fkw)
@@ -192,9 +193,13 @@ class Daemon:
         ec_inputs = [r for r in self.graph.inputs if r.guid == inp.POWER and r.channel % 100 not in (1, 10, 12, 13, 16)]
         self.ec_guard = {out: [r for r in ec_inputs if out in outputs_reached_by(r, lines_)]
                          for out in (ChannelRef(LIMITS_GUID, 53), ChannelRef(LIMITS_GUID, 59)) if out in self.outputs.targets}
-        if (args.dgpu_clock_cap or (p and p.dgpu_clock_cap)) and DGPU in self.graph.outputs:
-            self.dgpu = ClockCapStandIn(root, dry_run=(self.mode != "control"), probe=self.gpu_probe)
-            written.add(DGPU)
+        # Profile option dgpu_clock_cap_dry_run (spec outputs 6.2): observe only. The stand-in computes and logs the cap it would
+        # set, in control mode too, and the dGPU limit stays a log-only output (it does not count as written).
+        self.dgpu_observe = bool(p and p.dgpu_clock_cap_dry_run) and not (args.dgpu_clock_cap or (p and p.dgpu_clock_cap))
+        if (args.dgpu_clock_cap or (p and (p.dgpu_clock_cap or p.dgpu_clock_cap_dry_run))) and DGPU in self.graph.outputs:
+            self.dgpu = ClockCapStandIn(root, dry_run=(self.mode != "control") or self.dgpu_observe, probe=self.gpu_probe)
+            if not self.dgpu_observe:
+                written.add(DGPU)
 
         # Inputs this system never provides (spec supervisor 2). They are fine as long as they only reach log-only outputs
         # (SB3: base sensors 605/609 -> dGPU limit). If one reaches a limit that Linux writes, the blob would run on a
@@ -454,6 +459,8 @@ class Daemon:
             if ref in self.actions.channels:
                 return "thermal action" if self.mode == "control" else "thermal action (not armed)"
             if ref == DGPU and self.dgpu:
+                if self.dgpu_observe:
+                    return "clock-cap stand-in (observe only)"
                 return "clock-cap stand-in" if self.state == "control" else "clock-cap stand-in (dry-run)"
             if ref.guid == THROTTLE:
                 what = self.throttle.describe(ref)

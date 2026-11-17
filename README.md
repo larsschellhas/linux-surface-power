@@ -92,7 +92,7 @@ packages (`scripts/corpus-report.py`, `docs/research/09-newer-blobs.md`). Only t
 | Go 3 | ✓ | classic, untested | all from sysfs | [10 of 12](docs/devices/surface-go-3.md) | – | dry-run only |
 | Go 4 | ✓ | – (direct) | all from sysfs | [11 of 13 + 1 not needed](docs/devices/surface-go-4.md) | – | dry-run only (battery-mode output needs an ACPI EC path) |
 | Laptop Studio 1 | ✓ | classic, untested | battery EWMA level: debug device (root); dGPU power and temperature: NVML | [13 of 16](docs/devices/surface-laptop-studio.md) | – | dry-run only |
-| Laptop Studio 2 | ✓ | – (direct) | as Laptop Studio 1 | [17 of 25 + 1 not needed](docs/devices/surface-laptop-studio-2.md) | – | dry-run only |
+| Laptop Studio 2 | ✓ | direct, untested | as Laptop Studio 1 | [17 of 25 + 1 not needed](docs/devices/surface-laptop-studio-2.md) | – | dry-run only |
 | 2025/26 models (MPTF) | – | – | – | – | – | not covered (Windows MPTF, [linux-surface#2384](https://github.com/linux-surface/linux-surface/issues/2384)) |
 
 Notes:

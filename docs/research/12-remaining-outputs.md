@@ -127,7 +127,7 @@ stated. No other power tool (thermald, tuned, TLP) may run. AC power, battery ab
    (log line "firmware values restored"); if the process was killed, run `surface-power-reset`. Last resort: reboot.
 6. **Report:** the report text, `status.json` from step 5, the journal, and whether the fan or temperatures behaved differently from the
    dry run. The effect of the TMP `0x24` request and of the fan frames on the EC is unknown: say if the status shows request failures.
-- **Known gap:** `I_CPU_TEMP_AVG` is the package temperature as the Windows client reads it, one sample without averaging [C] (DV-7) and `I_AMBIENT_AI` is not provided (reaches no output).
+- **Known gap:** `I_CPU_TEMP_AVG` is the package temperature as the Windows client reads it, one sample without averaging [C] (DV-7) and `I_AMBIENT_AI` is not provided (reaches no output in any blob that reads it, `09-newer-blobs.md` section 6).
 
 ## 5. Open points
 - Whether the register's time unit is 1/1024 s on the Pro 10 (default MSR `0x606` bits 19:16 = 10) [H]; Linux rounds with the real unit.

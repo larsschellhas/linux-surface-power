@@ -179,7 +179,8 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
                         pl4=prof.pl4 if prof else None)
     throttle = ThrottleStage(root, [r for r in graph.outputs if r.guid == THROTTLE], dry_run=True)
     fan = FanStage(root, [r for r in graph.outputs if fan_handles(r)], graph.output_ranges, transport=fan_transport,
-                   dry_run=True, thresholds=bool(prof and prof.fan_thresholds))
+                   dry_run=True, thresholds=bool(prof and prof.fan_thresholds),
+                   kernel_fan_profiles=prof.kernel_fan_profiles if prof else 1)
     prochot = ProchotStage(root, [r for r in graph.outputs if r == BATT_MODE], transport=fan_transport, dry_run=True)
     if args.with_ec and fan.chans:                          # the fan commands are asked only if the blob has fan outputs
         probe = fan_probe(fan.transport, want_spl=any(c.spec.tc == TC_FAN and c.spec.cid == 0x13 for c in fan.chans.values()))

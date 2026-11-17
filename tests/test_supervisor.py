@@ -58,12 +58,30 @@ class DetectTest(unittest.TestCase):
         names = {p.file for p in supervisor.load_profiles()}
         self.assertLessEqual({"surface-book-3.toml", "surface-pro-8.toml", "surface-go-3.toml", "surface-laptop-go.toml",
                               "surface-laptop-studio.toml", "surface-laptop-3-amd.toml", "surface-laptop-4-amd.toml"}, names)
-        self.assertTrue(all(p.variant == "classic" for p in supervisor.load_profiles() if p.file != "surface-pro-10.toml"))
+        self.assertTrue(all(p.variant == "classic" for p in supervisor.load_profiles() if p.file not in ("surface-pro-10.toml", "surface-laptop-studio-2.toml")))
         pro10 = next(p for p in supervisor.load_profiles() if p.file == "surface-pro-10.toml")
         self.assertEqual((pro10.product, pro10.variant, pro10.tested), ("Surface Pro 10 for Business", "direct", False))
         self.assertEqual((pro10.pl4_requires_ec, pro10.pl4_ec_wait_s), (True, 10.0))
         self.assertTrue(any("integrated GPU" in n for n in pro10.notes))
         self.assertFalse(any(p.pl4_requires_ec or p.notes for p in supervisor.load_profiles() if p.file != "surface-pro-10.toml"))
+
+
+class DgpuProfileOptionTest(unittest.TestCase):
+    """dGPU stand-in options (spec outputs 6.2): the Laptop Studio profiles ship with both off; the SB3 has it on."""
+
+    def test_shipped_profiles(self):
+        by = {p.file: p for p in supervisor.load_profiles()}
+        self.assertTrue(by["surface-book-3.toml"].dgpu_clock_cap)
+        for name in ("surface-laptop-studio.toml", "surface-laptop-studio-2.toml"):
+            self.assertFalse(by[name].dgpu_clock_cap, name)
+            self.assertFalse(by[name].dgpu_clock_cap_dry_run, name)
+
+    def test_option_is_read(self):
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "x.toml"), "w") as f:
+                f.write('[match]\nproduct_name = "X"\n[outputs]\ndgpu_clock_cap_dry_run = true\n')
+            p = supervisor.load_profiles(td)[0]
+            self.assertEqual((p.dgpu_clock_cap, p.dgpu_clock_cap_dry_run), (False, True))
 
 
 class SnapshotTest(unittest.TestCase):

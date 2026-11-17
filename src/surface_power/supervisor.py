@@ -119,6 +119,14 @@ class Profile:
     pl4_requires_ec: bool = False     # control starts only if the EC inputs on the PL4 path are valid in time (spec outputs 3.2)
     pl4_ec_wait_s: float = 10.0       # how long the start waits for them
     notes: tuple = ()                 # lines the report and the daemon log print for this device
+    kernel_fan_profiles: int = 1      # fans (1-3) the kernel sends the fan profile to: `fan_count` of its node (spec outputs 9.3)
+    dgpu_clock_cap_dry_run: bool = False   # opt-in: the stand-in computes and logs its cap but never sets one (spec outputs 6.2)
+
+
+def _fan_profiles(v, path: str) -> int:
+    if isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 3:
+        raise ValueError(f"profile {os.path.basename(path)}: outputs.kernel_fan_profiles must be 1, 2 or 3")
+    return v
 
 
 def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
@@ -139,7 +147,9 @@ def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
                            o.get("pl3"), o.get("pl4"), dict(o.get("narrow", {})),
                            d.get("inputs", {}).get("panel_max_nits"), bool(o.get("dgpu_clock_cap", False)),
                            bool(o.get("fan_thresholds", False)), bool(o.get("pl4_requires_ec", False)),
-                           float(o.get("pl4_ec_wait_s", 10.0)), tuple(d.get("notes", ()))))
+                           float(o.get("pl4_ec_wait_s", 10.0)), tuple(d.get("notes", ())),
+                           kernel_fan_profiles=_fan_profiles(o.get("kernel_fan_profiles", 1), path),
+                           dgpu_clock_cap_dry_run=bool(o.get("dgpu_clock_cap_dry_run", False))))
     return out
 
 

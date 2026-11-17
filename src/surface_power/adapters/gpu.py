@@ -3,6 +3,11 @@
 Spec outputs 6, deviation DO-1 (opt-in). Windows sets a dGPU power limit; the SB3's NVIDIA driver on Linux refuses one
 (`nvidia-smi -pl`), but accepts a clock cap. Every NVML session opens the GPU and restarts its idle timer, so this
 module only talks to NVML while another process already has an NVIDIA device open and so keeps the GPU awake.
+
+Measured on the SB3's GTX 1660 Ti only. The module itself is not tied to it (it takes the first NVIDIA display controller and
+asks NVML for the limits), but the constants below are SB3 numbers. Whether another GPU accepts a power limit (`probe()`,
+`scripts/dgpu-probe.py`) or this cap, and how many MHz a watt is worth there, is not known for the Laptop Studio GPUs
+(`docs/research/14-laptop-studio-dgpu.md`).
 """
 from __future__ import annotations
 
@@ -33,6 +38,40 @@ class Sample:
     default_limit_w: float
     min_clock_mhz: int
     max_clock_mhz: int
+
+
+@dataclass(frozen=True)
+class Capabilities:
+    """What NVML reports about one GPU (all read-only). None: the driver did not answer that question."""
+
+    name: str
+    power_w: float | None
+    default_limit_w: float | None
+    enforced_limit_w: float | None
+    limit_min_w: float | None            # range the driver would accept for a new power limit
+    limit_max_w: float | None
+    max_clock_mhz: int | None
+
+
+def assess(c: Capabilities) -> list[str]:
+    """Plain-language findings for an owner (spec outputs 6.1). Pure function of what the driver reported [H for the verdicts]."""
+    out = []
+    if c.limit_min_w is not None and c.limit_max_w is not None:
+        if c.limit_min_w < c.limit_max_w:
+            out.append(f"NVML reports a power-limit range of {c.limit_min_w:g} to {c.limit_max_w:g} W. That is no proof that a "
+                       "limit can be set: the SB3 reports 1 to 65 W and still refuses every write [M]. "
+                       "`scripts/dgpu-probe.py --try-limit` shows whether a write is accepted; only then is a power limit "
+                       "a closer copy of the Windows limit than the clock cap.")
+        else:
+            out.append(f"NVML reports a fixed power limit of {c.limit_max_w:g} W (minimum equals maximum): no power limit can "
+                       "be set; only the clock cap of this stand-in is left.")
+    else:
+        out.append("NVML does not report a power-limit range: no power limit can be set; only the clock cap is left.")
+    if c.default_limit_w is None:
+        out.append("The default power limit is unknown: the stand-in cannot tell when a target is above it, and will not run.")
+    if c.max_clock_mhz is None:
+        out.append("The maximum graphics clock is unknown: the stand-in cannot regulate and will not run.")
+    return out
 
 
 def _round_step(mhz: float) -> int:
@@ -99,6 +138,35 @@ class Nvml:
 
     def temperature_c(self) -> int:
         return self._uint("nvmlDeviceGetTemperature", ctypes.c_int(0))   # NVML_TEMPERATURE_GPU
+
+    def capabilities(self) -> "Capabilities":
+        """Read-only questions to the driver: what it reports about the power limit and the clocks. Writes nothing."""
+        name = ctypes.create_string_buffer(96)
+        self._call("nvmlDeviceGetName", self.dev, name, ctypes.c_uint(96))
+
+        def mw(fn_name):
+            try:
+                return self._uint(fn_name) / 1000
+            except NvmlError:
+                return None
+        lo = hi = None
+        try:
+            a, b = ctypes.c_uint(), ctypes.c_uint()
+            self._call("nvmlDeviceGetPowerManagementLimitConstraints", self.dev, ctypes.byref(a), ctypes.byref(b))
+            lo, hi = a.value / 1000, b.value / 1000
+        except NvmlError:
+            pass
+        try:
+            clock = self._uint("nvmlDeviceGetMaxClockInfo", 0)      # NVML_CLOCK_GRAPHICS
+        except NvmlError:
+            clock = None
+        return Capabilities(name=name.value.decode(errors="replace"), power_w=mw("nvmlDeviceGetPowerUsage"),
+                            default_limit_w=mw("nvmlDeviceGetPowerManagementDefaultLimit"),
+                            enforced_limit_w=mw("nvmlDeviceGetEnforcedPowerLimit"),
+                            limit_min_w=lo, limit_max_w=hi, max_clock_mhz=clock)
+
+    def set_power_limit_mw(self, mw: int) -> None:
+        self._call("nvmlDeviceSetPowerManagementLimit", self.dev, ctypes.c_uint(mw))
 
     def set_cap(self, max_mhz: int) -> None:
         self._call("nvmlDeviceSetGpuLockedClocks", self.dev, ctypes.c_uint(300), ctypes.c_uint(max_mhz))
