@@ -64,7 +64,7 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 
 ### 3.1 Holding PL4 and PL3 while their EC inputs are invalid [D]
 PL4 and PL3 are computed from the EC power data on most devices. Without them the blob falls back to values far below the firmware
-value (Pro 10: the blob's PL4 fallback is 20 W, the firmware value is not known [H]). While any EC input (`28B7BD85`, the `0x53` and `ARTG` fields) on the path to
+value (Pro 10: the blob's PL4 fallback is 20 W, the firmware value is 45 W, `peak_power` and MSR `0x601` on UEFI 23.104.143 [M, tester]). While any EC input (`28B7BD85`, the `0x53` and `ARTG` fields) on the path to
 PL4 or PL3 is invalid, the output stage keeps the current value: the firmware value before the first write, the last written value
 after it. The status file reports such a channel with the target `held at firmware value (EC inputs invalid)` (or `held at last written value ...`); its `value_w` is the value that stays in place, `computed_w` the engine's value, which is not written. psys keeps the Windows behaviour (its fallback is what Windows does without
 EC data, `engine.md` 7).

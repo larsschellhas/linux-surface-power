@@ -47,5 +47,8 @@ Markers as in the README of this folder.
 - Profile option `pl4_requires_ec` (Pro 10): `--control` is refused (dry-run only, reason in the log and `status.json`) unless those
   inputs are valid within `pl4_ec_wait_s` (10 s) of the start. A tester reports that PL4 also limits the iGPU on this model
   (linux-surface issue 2331) [H, not measured here]; the report and the log say so.
-- "Firmware PL4 45 W" had no source in this repository (no Pro 10 register or powercap reading); removed from the spec. The
-  firmware value is whatever `peak_power` reads before the first write (snapshot) [H].
+- Firmware PL4: 45 W, read by the tester on a boot without his PL4 service (`peak_power` 45000000 µW, MSR `0x601` = 0x168 at
+  1/8 W, UEFI 23.104.143) [M]. With EC data the blob sets 109 W on AC and on battery.
+- Loaded battery dry-run (root, thermald stopped, slider 6, 15 min) [M, tester]: PL1 30 W until sensor 509 reaches 47 °C (9.7 min),
+  then 25.5 W; `/3` 84 → 81 W, `/13` 20, `/16` 1 → 0 after 2 min, `/7` and `/8` 0. The battery controllers never engage, as
+  the engine analysis expects. The Windows 10.6 W on battery is still unexplained by the blob alone (energy saver [H]).
