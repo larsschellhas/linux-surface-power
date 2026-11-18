@@ -2,6 +2,7 @@
 import os
 import struct
 import unittest
+from unittest import mock
 
 from fakesys import FakeSys
 from helpers import LIMITS, POWER, SYSTEM, TEMP, ref
@@ -567,6 +568,28 @@ class OutputsTest(unittest.TestCase):
         self.assertEqual(raw & 0x1FFF, 580)                 # 72.5 W in 1/8 W, bits 12:0 as Windows writes them
         self.assertEqual(raw & ~0x1FFF, 0x0012_A000)        # bits 13-14, window and enable bit untouched
         self.assertEqual(self.stage(pl3=False).kind(ref(LIMITS, 59)), "log-only")
+
+    def test_lagging_readback_is_no_foreign_change(self):
+        """Pro 10 (#2383): right after the write MSR 0x615 still read the old value, a cycle later the written one."""
+        from surface_power.adapters import outputs
+        self.ranges[ref(LIMITS, 59)] = OutputChannel(1, ref(LIMITS, 59), 65000, 101000, 20000)
+        dev = self._msr(0x8000)                                # enabled, limit 0
+        st = self.stage(pl3=True)
+        t = st.targets[ref(LIMITS, 59)]
+        real_read, reads = outputs.MsrTarget.read_uw, []
+        def lagging(self_):
+            reads.append(1)
+            return 0 if len(reads) == 2 else real_read(self_)   # 1st: before the write, 2nd: read-back right after it
+        with mock.patch.object(outputs.MsrTarget, "read_uw", lagging):
+            st.apply({ref(LIMITS, 59): 90000})
+        self.assertEqual(t.last_uw, 0)
+        self.assertEqual(st.foreign_changes(), [])            # register holds 90 W: our own value, not another writer
+        self.assertEqual(t.last_uw, 90_000_000)
+        self.assertEqual(self._read_pl3(dev) & 0x1FFF, 720)
+        import struct
+        with open(dev, "r+b") as f:                           # now a real foreign write
+            f.seek(0x615); f.write(struct.pack("<Q", 0x8000 | 400))
+        self.assertEqual([c.ref for c in st.foreign_changes()], [ref(LIMITS, 59)])
 
     def test_pl3_is_opt_in(self):
         """Without pl3 = true in the profile, MSR 0x615 is never written, even when it is writable."""

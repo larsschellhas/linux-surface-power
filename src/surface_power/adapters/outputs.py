@@ -55,6 +55,7 @@ class Target:
     hard_min_uw: int
     hard_max_uw: int
     last_uw: int | None = None     # last value we wrote, as read back
+    wrote_uw: int | None = None    # last value we wrote, as requested (a read-back right after the write may lag behind it)
 
     def shape(self, uw: int) -> int:
         """Last step before writing: a target may round the value the way the Windows client does."""
@@ -258,6 +259,7 @@ class OutputStage:
                 written = True
                 back = t.read_uw()
                 t.last_uw = back if back is not None else uw
+                t.wrote_uw = uw
             out[ref] = Result(ref, "written", mw, uw, written)
         return out
 
@@ -274,6 +276,11 @@ class OutputStage:
             if t.last_uw is None:
                 continue
             cur_uw = t.read_uw()
+            if cur_uw is not None and t.wrote_uw is not None and abs(cur_uw - t.wrote_uw) <= t.tolerance(t.wrote_uw):
+                # The register now holds what we wrote: no other writer, even if the read-back right after the write still
+                # showed the old value (Pro 10, MSR 0x615: read 0 at once, 130 W a cycle later [M, #2383]).
+                t.last_uw = cur_uw
+                continue
             if cur_uw is None or abs(cur_uw - t.last_uw) > t.tolerance(t.last_uw):
                 found.append(self.Foreign(ref, t.last_uw, cur_uw))
         return found
@@ -281,4 +288,4 @@ class OutputStage:
     def forget(self) -> None:
         """After a restore to firmware values: we no longer own the current values."""
         for t in self.targets.values():
-            t.last_uw = None
+            t.last_uw = t.wrote_uw = None
