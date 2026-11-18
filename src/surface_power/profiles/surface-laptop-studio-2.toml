@@ -13,6 +13,9 @@ source = "efivar"
 variant = "direct"      # the driver package ships SMF core 3.204.2 (docs/research/09)
 
 [outputs]
+# pl4: automatic (where powercap reports a value). PL3: Windows writes channel 59 to MSR 0x615 on the Laptop Studio 2 (Raptor
+# Lake type, client build 0d5efa50; docs/research/10-outputs.md 4.1) [C].
+pl3 = true
 # kernel_fan_profiles: how many fans the kernel sends the fan profile to. The stock kernel sends it to fan 1 only [C], so
 # output 202 (fan 2) has no Linux path yet. A local patch (registry property `fan_count = 2` for MSHW0360) is waiting for a test
 # on a Laptop Studio 2 (linux-surface#2392); set 2 only on a kernel with it. The daemon cannot see the property in sysfs.

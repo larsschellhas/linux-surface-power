@@ -14,3 +14,5 @@ variant = "classic"     # the driver package ships SMF core 3.140 (docs/research
 [outputs]
 # pl4: automatic (where powercap reports a value); set false to switch off. pl3 (MSR 0x615): only with pl3 = true, for devices
 # where Windows' write is verified (driver build or measurement); off by default.
+# PL3: Windows writes channel 59 to MSR 0x615 on the Laptop Go (Ice Lake type, client build dee1fad5; docs/research/10-outputs.md 4.1) [C].
+pl3 = true

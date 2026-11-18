@@ -25,7 +25,7 @@ from surface_power.loader.model import ChannelRef  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 DEFAULT = os.path.join(ROOT, "docs", "research", "raw", "tools", "fw")
-AS_OF = "17.11.2026"
+AS_OF = "18.11.2026"
 
 # Package folder -> (page name, title, profile file or None, controller variant). Variants: docs/research/09-newer-blobs.md 3.
 # Platform: Intel unless listed in PLATFORM.
@@ -33,9 +33,9 @@ DEVICES = {
     "sb3": None,  # split by blob size below
     "pro7p": ("surface-pro-7-plus", "Surface Pro 7+", None, "direct"),
     "pro8": ("surface-pro-8", "Surface Pro 8", "surface-pro-8.toml", "classic"),
-    "pro9": ("surface-pro-9-intel", "Surface Pro 9 (Intel)", None, "direct"),
+    "pro9": ("surface-pro-9-intel", "Surface Pro 9 (Intel)", "surface-pro-9.toml", "direct"),
     "pro9_5g": ("surface-pro-9-5g", "Surface Pro 9 5G (arm64)", None, "direct"),
-    "pro10": ("surface-pro-10", "Surface Pro 10 for Business", None, "direct"),
+    "pro10": ("surface-pro-10", "Surface Pro 10 for Business", "surface-pro-10.toml", "direct"),
     "pro10_5g": ("surface-pro-10-5g", "Surface Pro 10 5G for Business", None, "direct"),
     "pro11_intel": ("surface-pro-11-intel", "Surface Pro 11 (Intel)", None, "direct"),
     "pro11_snap": ("surface-pro-11-snapdragon", "Surface Pro 11 (Snapdragon, arm64)", None, "direct"),

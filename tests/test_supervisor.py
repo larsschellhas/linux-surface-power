@@ -58,10 +58,16 @@ class DetectTest(unittest.TestCase):
         names = {p.file for p in supervisor.load_profiles()}
         self.assertLessEqual({"surface-book-3.toml", "surface-pro-8.toml", "surface-go-3.toml", "surface-laptop-go.toml",
                               "surface-laptop-studio.toml", "surface-laptop-3-amd.toml", "surface-laptop-4-amd.toml"}, names)
-        self.assertTrue(all(p.variant == "classic" for p in supervisor.load_profiles() if p.file not in ("surface-pro-10.toml", "surface-laptop-studio-2.toml")))
+        self.assertTrue(all(p.variant == "classic" for p in supervisor.load_profiles() if p.file not in ("surface-pro-9.toml", "surface-pro-10.toml", "surface-laptop-studio-2.toml")))
         pro10 = next(p for p in supervisor.load_profiles() if p.file == "surface-pro-10.toml")
         self.assertEqual((pro10.product, pro10.variant, pro10.tested), ("Surface Pro 10 for Business", "direct", False))
         self.assertEqual((pro10.pl4_requires_ec, pro10.pl4_ec_wait_s), (True, 10.0))
+        pro9 = next(p for p in supervisor.load_profiles() if p.file == "surface-pro-9.toml")
+        self.assertEqual((pro9.variant, pro9.tested), ("direct", False))
+        # PL3 only where Windows' write of MSR 0x615 is verified in the device's driver (docs/research/10-outputs.md 4.1)
+        self.assertEqual({p.file for p in supervisor.load_profiles() if p.pl3 is True},
+                         {"surface-book-3.toml", "surface-pro-8.toml", "surface-pro-9.toml", "surface-pro-10.toml",
+                          "surface-laptop-go.toml", "surface-laptop-studio.toml", "surface-laptop-studio-2.toml"})
         self.assertTrue(any("integrated GPU" in n for n in pro10.notes))
         self.assertFalse(any(p.pl4_requires_ec or p.notes for p in supervisor.load_profiles() if p.file != "surface-pro-10.toml"))
 

@@ -15,9 +15,11 @@ source = "efivar"
 variant = "direct"      # the driver package ships SMF core 3.204.23 (docs/research/09)
 
 [outputs]
-# pl4: automatic (where powercap reports a value). pl3: off (Windows' write of MSR 0x615 not verified for this device). Both are held while their EC inputs are
-# invalid (spec outputs 3.1). fan_thresholds: the Pro 10 blob has none of those outputs.
+# pl4: automatic (where powercap reports a value). PL3: Windows writes channel 59 to MSR 0x615 on the Pro 10 (Meteor Lake type,
+# client build 463d42bc; docs/research/10-outputs.md 4.1) [C]. Both are held while their EC inputs are invalid (spec outputs 3.1),
+# so the blob's fallback (0 for PL3) is never written. fan_thresholds: the Pro 10 blob has none of those outputs.
 # pl4_requires_ec: --control is refused (dry-run only) unless the EC inputs on the PL4 path are valid within pl4_ec_wait_s seconds
 # of the start (spec outputs 3.2).
 pl4_requires_ec = true
 pl4_ec_wait_s = 10
+pl3 = true

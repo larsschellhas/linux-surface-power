@@ -1,0 +1,19 @@
+# Device profile: Surface Pro 9 (Intel), only the SKU seen in a tester's report (linux-surface#2383). Spec supervisor 6. Holds no
+# limit values (G-2): those come from the device's blob. Not validated on a device: tested stays false.
+# Other Pro 9 SKUs (and the 5G model) are not matched: their DMI values are not known here.
+tested = false
+
+[match]
+sku = ["Surface_Pro_9_for_Business_2038"]
+
+[blob]
+source = "efivar"
+
+[engine]
+variant = "direct"      # the daemon's default without a profile, as in the tester's runs; not verified for this device [H]
+
+[outputs]
+# pl4: automatic (where powercap reports a value); set false to switch off.
+# PL3: Windows writes channel 59 to MSR 0x615 on the Pro 9 Intel (Alder Lake type, client build 0d5efa50;
+# docs/research/10-outputs.md 4.1) [C]; a tester measured write, bind and restore.
+pl3 = true

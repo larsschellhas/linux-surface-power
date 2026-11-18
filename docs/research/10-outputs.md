@@ -57,14 +57,25 @@ Processor Aggregator Device (`PAGD`, matched with `/62` by a fixed name table in
 - PL3 is a platform limit, as its Microsoft name (`O_SYS_PEAK`) says. Windows raises it from the firmware's 65 W to 100 W on AC.
 - Both are switched on in the SB3 profile. With them, the SB3 15" writes every output of its blob.
 
-### 4.1 How Windows writes PL3, and on which devices [C, 17.11.2026]
+### 4.1 How Windows writes PL3, and on which devices [C, 18.11.2026]
 Read in the Surface CPU SMF client builds of the driver corpus (x64):
 - Channel 59 goes to MSR `0x615` as read-modify-write of **bits 12:0** only, in units of 1/8 W (fixed; MSR `0x606` is not read).
   Enable, clamp, time window and lock bits stay as read. Gemini Lake writes it to MMIO instead (MCHBAR `0x71f0`), every other Intel
   platform type to the MSR.
 - No condition on the write: no CPU model, capability, enable- or lock-bit or registry check.
-- Verified per device: Surface Book 3 (client build `8030e5ac`, Ice Lake type, also measured above). Pro 7+/8, Laptop 4 Intel, Laptop
-  Go 2, Laptop Studio 1/2, Pro 11 Intel, Laptop 7 Intel/5G and Pro 10/10 5G ship builds with the same path, but their platform type
-  (MSR or MMIO) is not verified; for Pro 9, Laptop 5/6, Laptop Go 1/3 and Go 3/4 the client build is not in the corpus [H].
-- **Linux:** PL3 is opt-in per profile (`pl3 = true`), only where Windows' write is verified; today the SB3. The daemon changes the
+- **Which platform type a device has** is fixed by the Surface integration driver of its package: it creates exactly one CPU client
+  child, unconditionally, with a hardware ID naming the type (Ice Lake, Tiger Lake, Alder Lake, Raptor Lake, Meteor Lake, or
+  `MSHW0600`). Only the Gemini Lake type selects the MMIO table; no package of the corpus creates it. Go 3 and Go 4 create no such
+  child: there the client binds to `ACPI\MSHW0301` and takes its type from an ACPI `_DSM`, whose value is not verified [H].
+- **Verified per device [C, 18.11.2026]** (driver package of the device, client build by sha256 prefix): MSR `0x615` on
+  Surface Book 3 13"/15" (Ice Lake, `8030e5ac`), Laptop Go 1 (Ice Lake, `dee1fad5`), Pro 7+ and Pro 8 (Tiger Lake, `18ed0894`),
+  Laptop 4 Intel, Laptop Go 2, Laptop Studio 1 (Tiger Lake, `0d5efa50`), Pro 9 Intel, Laptop 5, Laptop Go 3 (Alder Lake,
+  `0d5efa50`), Laptop Studio 2 (Raptor Lake, `0d5efa50`), Pro 10 (Meteor Lake, `463d42bc`), Pro 10 5G (Meteor Lake, `3db5fe38`),
+  Laptop 6 (Meteor Lake, `0d5efa50`), Laptop 7 5G Intel (Meteor Lake, `f884dca0`), Pro 11 Intel and Laptop 7 Intel (`MSHW0600`,
+  `0d5efa50`). Open: Go 3, Go 4 [H]. Measured only on the SB3 15" (above) and by a tester on a Pro 9.
+- **PL1/PL2 on Windows go to MMIO** (MCHBAR `0x59a0`, PL2 in its upper half; Gemini Lake `0x70a8`), bits 14:0 with enable and clamp set, in
+  every table of these builds; the MSR `0x610` copy has its own channels (56/57), which no blob of the corpus uses. Linux writes PL1/PL2 through powercap (MSR). Where
+  the firmware's MMIO copy is lower, it caps the effective limit: on a Pro 10 PL1 above 28 W did not take effect (tester, #2383) [M].
+- **Linux:** PL3 is opt-in per profile (`pl3 = true`), only where Windows' write is verified in the driver and a profile
+  matches the device: since 18.11.2026 SB3, Pro 8, Pro 9 Intel (one SKU), Pro 10, Laptop Go 1, Laptop Studio 1/2. The daemon changes the
   same bits 12:0. It converts with the RAPL power unit from MSR `0x606`; on the SB3 that is 1/8 W, as Windows assumes [M].

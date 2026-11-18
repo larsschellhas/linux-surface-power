@@ -14,6 +14,8 @@ variant = "classic"     # the driver package ships SMF core 3.137 (docs/research
 [outputs]
 # pl4: automatic (where powercap reports a value); set false to switch off. pl3 (MSR 0x615): only with pl3 = true, for devices
 # where Windows' write is verified (driver build or measurement); off by default.
+# PL3: Windows writes channel 59 to MSR 0x615 on the Laptop Studio (Tiger Lake type, client build 0d5efa50; docs/research/10-outputs.md 4.1) [C].
+pl3 = true
 # dGPU stand-in (DO-1, spec outputs 6): off. It was measured on the SB3 only. Whether this GPU takes the clock cap, and whether the
 # Windows driver of this machine uses output 201 as a power limit at all, is open (docs/research/14-laptop-studio-dgpu.md). To try it:
 #   1. python3 -I scripts/dgpu-probe.py --wake        (read-only)
