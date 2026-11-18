@@ -65,12 +65,19 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 - **Linux:** `intel-rapl:0` is the MSR copy. The MMIO copy is reachable only through `intel-rapl-mmio`, which needs the processor
   thermal PCI device (00:04.0). The driver ships with the kernel, but the device is absent from the PCI bus on the SB3 [M] and on a
   tester's Pro 10 (8086:7d03); the SB3 has no Intel DPTF ACPI devices either. The daemon therefore writes the MSR copy.
-- **Effect:** the package limit in force is the lower of the two copies [M on a Pro 10, #2383; general rule H]. So:
+- **Effect:** an enabled MMIO copy below the MSR copy caps the package [M on a Pro 10 and a Pro 8, #2383]; that the lower of the two always wins (and not the MMIO copy always) is a general rule [H]. So:
   - lowering PL1/PL2 (the skin controllers, the battery limits) works as on Windows;
   - raising them above the firmware's MMIO value has no effect. On the Pro 10 the firmware sets 28/35 W there, the blob 30/55 W on AC:
     package power stayed at 28 W while the MSR said 30 W;
   - the firmware's MMIO copy is never changed or restored by the daemon, and a write to it by another agent is not seen.
-- **On the SB3 15"** (18.11.2026, daemon in control, AC, `scripts/mmio-pl-read.py`) [M]: MCHBAR `0xfed10000` (the client's Ice Lake
+- **On the Pro 8** (tester, i5-1135G7, 18.11.2026, daemon stopped, `surface-power-report` and turbostat) [M]: 00:04.0 and
+  `intel-rapl-mmio` absent; firmware MMIO copy PL1 30 W and PL2 60 W, both enabled; firmware MSR copy PL1 35 W, PL2 60 W. Package power
+  under three load phases of ~6.5 minutes settled at 29.9-30.0 W (peaks of 32.7 and 39 W only at a load change, inside PL2), not at 35 W:
+  the enabled MMIO PL1 caps. This does not show whether the lower copy wins or the MMIO copy always does (the MSR copy was not set below
+  30 W), nor that no other limit sits at 30 W. The blob's own value there is PL1 35 W / PL2 60 W (AC, performance), equal to the firmware
+  MSR copy, so Windows (MMIO written, MSR left at 35/60 W) would reach 35 W where Linux (MSR written) stays at 30 W [H, not measured].
+  The tester needed `lockdown` = none (Secure Boot off) to read `/dev/mem`.
+- **On the SB3 15" (18.11.2026, daemon in control, AC, `scripts/mmio-pl-read.py`) [M]: MCHBAR `0xfed10000` (the client's Ice Lake
   constant); MMIO copy PL1 25 W, PL2 61 W, **both enable bits 0**; MSR copy PL1 30 W, PL2 61 W, both enabled. A disabled MMIO copy
   does not cap, so on the SB3 the MSR copy alone is in force, which fits the measured control runs. Windows' write (base `0x18000`)
   would set enable and clamp there. Whether the MMIO copy on the Pro 10 (28/35 W) is enabled was not reported [H].
