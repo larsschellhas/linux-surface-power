@@ -460,6 +460,28 @@ class DaemonTest(unittest.TestCase):
             self.start("--control")
         self.assertEqual(self.fs.read(PL1), "30000000")
 
+    def test_run_enables_faulthandler(self):
+        """A hang that the systemd watchdog ends with SIGABRT must leave the Python stacks in the journal."""
+        import faulthandler
+        self.fs.write("sys/class/dmi/id/sys_vendor", "LENOVO")
+        faulthandler.disable()
+        try:
+            daemon.run(["--root", self.fs.root, "--run-dir", self.run.name, "--state-dir", self.state.name])
+            self.assertTrue(faulthandler.is_enabled())
+        finally:
+            faulthandler.disable()
+
+    def test_unit_orders_after_thermald_and_protects_memory(self):
+        """Conflicts= does not order: the unit needs After=thermald.service, or a restart finds thermald still running."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "..", "packaging", "systemd", "surface-powerd.service")) as f:
+            lines = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+        after = next(ln for ln in lines if ln.startswith("After="))
+        self.assertIn("thermald.service", after.split())
+        self.assertIn("Conflicts=thermald.service", lines)
+        self.assertIn("MemorySwapMax=0", lines)
+        self.assertTrue(any(ln.startswith("MemoryLow=") for ln in lines))
+
     def test_time_series(self):
         d = self.start("--dry-run")
         for t in range(3):

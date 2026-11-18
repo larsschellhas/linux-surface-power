@@ -47,7 +47,7 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
    (`outputs.md` 9), or an output that needs none, with evidence (`outputs.md` 10). Otherwise the blob would regulate, for example, the CPU while its fan,
    throttle or safety outputs go nowhere. The daemon then runs in dry-run and logs the outputs. `--allow-partial-outputs` overrides
    this for field tests; the status file lists the outputs in `outputs_without_linux_path`.
-7. **Conflicts:** if thermald is active (`systemctl is-active thermald`, or its D-Bus name), the daemon refuses to start (FR-S6). systemd `Conflicts=` normally prevents this. In every mode, the daemon logs a warning and writes `competing_writers` to the status file while thermald, tuned, TLP or power-profiles-daemon runs (checked at start and every 60 s): they write limits too, so the sysfs values of a dry-run differ from the computed ones. `surface-power-report` prints the same warning.
+7. **Conflicts:** if thermald is active (`systemctl is-active thermald`, or its D-Bus name), the daemon refuses to start (FR-S6). systemd `Conflicts=` together with `After=thermald.service` normally prevents this (`Conflicts=` alone does not order the stop before the start: on 18.11.2026 a restart found thermald still running, `OnFailure=` started it again and the daemon stayed off for 25 min [M]). In every mode, the daemon logs a warning and writes `competing_writers` to the status file while thermald, tuned, TLP or power-profiles-daemon runs (checked at start and every 60 s): they write limits too, so the sysfs values of a dry-run differ from the computed ones. `surface-power-report` prints the same warning.
 
 ## 3. Snapshot and restore (FR-S1, FR-S2)
 - **Contents:** before the first write, the supervisor saves every value it may write:
@@ -122,6 +122,7 @@ The reference implementation uses only the Python standard library, so it does n
 
 ## 8. Watchdog (FR-S3)
 - **systemd watchdog:** `Type=notify`, `WatchdogSec=30`. The loop sends `WATCHDOG=1` once per cycle, only after a complete cycle, and also while paused for sleep. 30 s lies above the kernel's 20 s limit for freezing tasks: a suspend that hangs in the freezer (seen on the SB3 with a FUSE mount, 16.11.2026) stops the loop for up to 20 s [M].
+  The loop can also stall under system-wide memory pressure: on 18.11.2026 a OneDrive client grew to 14 GB, swap filled and the loop missed the watchdog (SIGABRT, 25 min on thermald) [M for the sequence, H for the stall's mechanism]. The unit therefore sets `MemorySwapMax=0`, `MemoryLow=64M` and `OOMScoreAdjust=-500`, and the daemon enables Python's `faulthandler`, so that a hang ended by the watchdog leaves the stacks in the journal.
 - **Restart limits:** `Restart=on-failure` with `StartLimitBurst=3`, `StartLimitIntervalSec=600`. After that the unit stays failed and the device stays on firmware values. `OnFailure=thermald.service` is offered as an option in the unit, not set by default [D].
 
 ## 9. Main loop

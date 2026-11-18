@@ -1,8 +1,10 @@
 [Unit]
 Description=Surface power management (SMF blob interpreter)
 Documentation=https://github.com/larsschellhas/linux-surface-power
-After=systemd-modules-load.service
-# thermald changes package PL1 itself and would fight the daemon (FR-S6).
+# thermald changes package PL1 itself and would fight the daemon (FR-S6). Conflicts= alone does not order the two: without After=
+# the daemon can start while thermald is still stopping, refuses to run ("thermald is running") and, after a failover by
+# OnFailure=thermald.service, never comes back (seen 18.11.2026, 25 min without the controller).
+After=systemd-modules-load.service thermald.service
 Conflicts=thermald.service
 StartLimitIntervalSec=600
 StartLimitBurst=3
@@ -34,6 +36,11 @@ RestrictAddressFamilies=AF_UNIX
 # log-only. The thermal actions (spec outputs 7) call systemctl, which talks to PID 1 over its local socket as root.
 CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SYS_RAWIO
 MemoryMax=100M
+# Under system-wide memory pressure (swap thrashing) the loop stalled for more than the watchdog's 30 s and was killed (18.11.2026):
+# keep the daemon out of swap and protect its pages from reclaim. Its peak is about 22 MB.
+MemorySwapMax=0
+MemoryLow=64M
+OOMScoreAdjust=-500
 
 [Install]
 WantedBy=multi-user.target

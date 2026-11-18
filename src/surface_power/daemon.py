@@ -12,6 +12,7 @@ sends the two USR signals. Without the hook, a jump between CLOCK_BOOTTIME and C
 """
 import argparse
 import datetime as dt
+import faulthandler
 import os
 import signal
 import socket
@@ -620,6 +621,7 @@ class Daemon:
 
 
 def run(argv=None) -> int:
+    faulthandler.enable()          # a hang killed by the watchdog (SIGABRT) leaves the Python stacks in the journal
     args = parse_args(argv)
     journal = monitor.Journal()
     try:
