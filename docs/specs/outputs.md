@@ -74,8 +74,16 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
   constant); MMIO copy PL1 25 W, PL2 61 W, **both enable bits 0**; MSR copy PL1 30 W, PL2 61 W, both enabled. A disabled MMIO copy
   does not cap, so on the SB3 the MSR copy alone is in force, which fits the measured control runs. Windows' write (base `0x18000`)
   would set enable and clamp there. Whether the MMIO copy on the Pro 10 (28/35 W) is enabled was not reported [H].
-- **Per device:** the firmware state of the MMIO copy differs; read it with `scripts/mmio-pl-read.py` (root, read-only) before
-  judging a PL1/PL2 result.
+- **Windows' own limit [H]:** Windows leaves the MSR copy at the firmware value, so its effective limit is the lower of the blob
+  value and the *firmware MSR* value, not the blob value alone. On the Pro 10 the firmware MSR is 35/64 W [M, tester] while the blob
+  allows PL1 up to 65 W and PL2 up to 100 W (channel ranges), so the MSR copy may limit under Windows too. What Windows really
+  delivers there is not measured. Writing the MMIO copy and leaving the MSR alone would reproduce Windows; it is not the same as
+  "no second limit".
+- **Per device:** the firmware state of the copies differs. Read-only visibility, no write:
+  - `surface-power-report` (as root) prints the presence of 00:04.0 and of `intel-rapl-mmio`, and both copies (PL1/PL2, enable, clamp, lock);
+  - the daemon reads the copies every 60 s (`adapters/rapl_copies.py`), logs a warning when an *enabled* MMIO half is below the
+    value computed here, and puts both copies into `status.json` (`rapl_copies`, with `mmio_below_computed` while one limits);
+  - `scripts/mmio-pl-read.py` does the same standalone. Without root, `/dev/mem` or the msr module the copies show as "not readable".
 - **Not done [D]:** writing the MMIO copy from user space (`/dev/mem`, root, fails under lockdown and with `IO_STRICT_DEVMEM`) or a
   kernel path for it. Open until the SB3 values are known and the question is put to the platform maintainers.
 

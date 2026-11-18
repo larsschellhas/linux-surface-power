@@ -27,6 +27,7 @@ from .adapters.prochot import BATT_MODE, ProchotStage
 from .adapters.fan import FanStage, NullTransport, handles as fan_handles
 from .adapters import gpu
 from .adapters.gpu import ClockCapStandIn
+from .adapters import rapl_copies
 from .adapters.outputs import OutputStage
 from .engine.engine import Engine
 from .engine.graph import build_graph, outputs_reached_by
@@ -271,6 +272,9 @@ class Daemon:
         self.values = {}
         self.before_pause = None
         self.writers_next_ms = 0
+        self.rapl_next_ms = 0
+        self.rapl = None                      # last read of the PL1/PL2 copies (status), spec outputs 3.3
+        self.mmio_capped: dict[str, float] = {}
 
         tested = "tested" if (p and p.tested) else ("untested profile" if p else "no profile")
         self.log("notice", f"device {self.device.product!r} ({tested}), blob form {self.loaded.form}, "
@@ -321,6 +325,28 @@ class Daemon:
             self.log("warning", f"{', '.join(self.writers)} running: it writes power limits itself, so the limits in "
                                 "sysfs differ from the computed ones" + (" (this run writes nothing)" if self.mode != "control"
                                                                           else ""))
+
+    def _check_mmio(self, now_ms: int) -> None:
+        """Every 60 s: read the MMIO copy of PL1/PL2 (what Windows writes) and say when it is enabled and below the value computed
+        here, so it limits on top of the MSR value this daemon writes (spec outputs 3.3, DV-8). Reads only."""
+        if now_ms < self.rapl_next_ms:
+            return
+        self.rapl_next_ms = now_ms + 60000
+        self.rapl = rapl_copies.read_all(self.args.root)
+        written = {}
+        for ref, res in self.results.items():
+            t = self.outputs.targets.get(ref)
+            if t is not None and t.name in ("pl1", "pl2") and res.value_uw is not None:
+                written[t.name] = res.value_uw
+        now = {n: mm for n, mm, _ours in rapl_copies.mmio_caps(self.rapl, written)}
+        if now != self.mmio_capped:
+            for n, mm, ours in rapl_copies.mmio_caps(self.rapl, written):
+                if self.mmio_capped.get(n) != mm:
+                    self.log("warning", f"the MMIO copy of {n.upper()} is {mm:g} W (enabled), below the computed {ours:g} W: it "
+                                        "limits on top of the MSR value written here (Windows writes the MMIO copy)")
+            for n in self.mmio_capped.keys() - now.keys():
+                self.log("info", f"the MMIO copy of {n.upper()} no longer limits below the computed value")
+            self.mmio_capped = now
 
     def _fan_touch(self, key: str, frame) -> None:
         """Before the first send of a fan channel: put its neutral frame into the snapshot (restore without read-back)."""
@@ -420,6 +446,7 @@ class Daemon:
             self.results = self.outputs.apply(rounded, hold)
         else:
             self.results = self.preview.apply(rounded, hold)
+        self._check_mmio(now_ms)
         self.results.update((self.throttle if self.state == "control" else self.throttle_preview).apply(rounded, hold))
         fan = self.fan if self.state == "control" else self.fan_preview
         self.results.update(fan.apply(rounded, now_ms))
@@ -513,6 +540,11 @@ class Daemon:
         }
         if self.writers:
             status["competing_writers"] = self.writers
+        if self.rapl:
+            status["rapl_copies"] = {k: (v.describe() if isinstance(v, rapl_copies.Copy) else v) for k, v in self.rapl.items()
+                                     if k != "unit_w"}
+            if self.mmio_capped:
+                status["rapl_copies"]["mmio_below_computed"] = {n.upper(): w for n, w in self.mmio_capped.items()}
         if self.dgpu:
             status["dgpu"] = self.dgpu.status()
         if self.actions.channels & set(self.graph.outputs):

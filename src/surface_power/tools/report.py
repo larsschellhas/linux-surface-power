@@ -15,7 +15,7 @@ from ..adapters import gpu
 from ..adapters import inputs as inp
 from ..adapters.actions import ThermalActions
 from ..adapters.cpufreq import THROTTLE, ThrottleStage
-from ..adapters import notneeded
+from ..adapters import notneeded, rapl_copies
 from ..adapters.prochot import BATT_MODE, ProchotStage
 from ..adapters.fan import TC_FAN, FanStage, handles as fan_handles
 from ..adapters.outputs import OutputStage
@@ -80,6 +80,21 @@ def ec_power_lines(pp, ac) -> list[str]:
         else:
             out.append(f"EC adapter rating request: answered {raw} mW")
     return out
+
+
+def rapl_lines(root: str) -> list[str]:
+    """PL1/PL2 in the MMIO copy (what Windows writes) next to the MSR copy and powercap (what this daemon writes), spec outputs 3.3."""
+    lines = ["PL1/PL2 copies (Windows writes the MMIO copy, the daemon the MSR copy; the lower enabled one is in force [H]):",
+             f"  processor thermal device 00:04.0: {'present' if rapl_copies.has_proc_thermal(root) else 'absent'}; "
+             f"powercap intel-rapl-mmio: {'present' if rapl_copies.has_rapl_mmio_zone(root) else 'absent'}"]
+    copies = rapl_copies.read_all(root)
+    if copies is None:
+        return lines + ["  copies not readable (needs root and the msr module)"]
+    mm, ms = copies["mmio"], copies["msr"]
+    lines.append("  MMIO (MCHBAR + 0x59A0): " + (mm.describe() if mm else "not readable (needs root and /dev/mem; lockdown or "
+                                                 "STRICT_DEVMEM may forbid it)"))
+    lines.append("  MSR 0x610:              " + (ms.describe() if ms else "not readable"))
+    return lines
 
 
 def main(argv=None, fan_transport=None, ec_transport=None) -> int:
@@ -228,6 +243,7 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
         lines.append(f"  {ref}: {kind}")
     for note in stage.notes + throttle.notes + fan.notes + prochot.notes + list(prof.notes if prof else ()):
         lines.append(f"  note: {note}")
+    lines += rapl_lines(root)
     if not fan.transport.can_write():
         outs = sum(1 for r in graph.outputs if fan.needs_cdev(r) or prochot.needs_cdev(r))
         hint = inp.cdev_hint(outs, len(via_cdev & set(graph.inputs)))
