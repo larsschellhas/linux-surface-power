@@ -75,7 +75,7 @@ Read in the Surface CPU SMF client builds of the driver corpus (x64):
   `0d5efa50`). Open: Go 3, Go 4 [H]. Measured only on the SB3 15" (above) and by a tester on a Pro 9.
 - **PL1/PL2 on Windows go to MMIO** (MCHBAR `0x59a0`, PL2 in its upper half; Gemini Lake `0x70a8`), bits 14:0 with enable and clamp set, in
   every table of these builds; the MSR `0x610` copy has its own channels (56/57), which no blob of the corpus uses. Linux writes PL1/PL2 through powercap (MSR). Where
-  the firmware's MMIO copy is lower, it caps the effective limit: on a Pro 10 PL1 above 28 W did not take effect (tester, #2383) [M].
+  the firmware's MMIO copy is lower, it caps the effective limit: on a Pro 10 PL1 above 28 W did not take effect (tester, #2383) [M]. Consequences: `../specs/outputs.md` 3.3.
 - **Linux:** PL3 is opt-in per profile (`pl3 = true`), only where Windows' write is verified in the driver and a profile
   matches the device: since 18.11.2026 SB3, Pro 8, Pro 9 Intel (one SKU), Pro 10, Laptop Go 1, Laptop Studio 1/2. The daemon changes the
   same bits 12:0. It converts with the RAPL power unit from MSR `0x606`; on the SB3 that is 1/8 W, as Windows assumes [M].

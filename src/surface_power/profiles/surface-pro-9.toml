@@ -10,7 +10,7 @@ sku = ["Surface_Pro_9_for_Business_2038"]
 source = "efivar"
 
 [engine]
-variant = "direct"      # the daemon's default without a profile, as in the tester's runs; not verified for this device [H]
+variant = "direct"      # the driver package ships SMF core 3.180 (docs/research/09-newer-blobs.md 3)
 
 [outputs]
 # pl4: automatic (where powercap reports a value); set false to switch off.

@@ -56,6 +56,29 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 - **PL1 time window:** written only where the blob has `CF2F6076/61` (3.2); otherwise the daemon leaves it alone, and the snapshot restores it.
 - **Enable bits:** writes never change `enabled`. A disabled zone is reported. The daemon does not enable it.
 
+### 3.3 PL1/PL2: Linux writes the MSR copy, Windows the MMIO copy [C for Windows, M on one Pro 10, D for Linux]
+- **Windows:** the CPU client writes channels 51/52 (and the PL1 time window `CF2F6076/61`) to the MMIO copy of the package power
+  limit, MCHBAR + `0x59a0` (PL2 in its upper half; Gemini Lake: `0x70a8`), bits 14:0, with enable and clamp set, in every descriptor
+  table of every client build of the corpus. MCHBAR is a fixed address per platform type in the client (`0xfed10000` Ice Lake,
+  `0xfedc0000` the others). The MSR copy (`0x610`) has channels of its own (56/57); no blob of the corpus uses them, so Windows does not
+  write it (`../research/10-outputs.md` 4.1).
+- **Linux:** `intel-rapl:0` is the MSR copy. The MMIO copy is reachable only through `intel-rapl-mmio`, which needs the processor
+  thermal PCI device (00:04.0). The driver ships with the kernel, but the device is absent from the PCI bus on the SB3 [M] and on a
+  tester's Pro 10 (8086:7d03); the SB3 has no Intel DPTF ACPI devices either. The daemon therefore writes the MSR copy.
+- **Effect:** the package limit in force is the lower of the two copies [M on a Pro 10, #2383; general rule H]. So:
+  - lowering PL1/PL2 (the skin controllers, the battery limits) works as on Windows;
+  - raising them above the firmware's MMIO value has no effect. On the Pro 10 the firmware sets 28/35 W there, the blob 30/55 W on AC:
+    package power stayed at 28 W while the MSR said 30 W;
+  - the firmware's MMIO copy is never changed or restored by the daemon, and a write to it by another agent is not seen.
+- **On the SB3 15"** (18.11.2026, daemon in control, AC, `scripts/mmio-pl-read.py`) [M]: MCHBAR `0xfed10000` (the client's Ice Lake
+  constant); MMIO copy PL1 25 W, PL2 61 W, **both enable bits 0**; MSR copy PL1 30 W, PL2 61 W, both enabled. A disabled MMIO copy
+  does not cap, so on the SB3 the MSR copy alone is in force, which fits the measured control runs. Windows' write (base `0x18000`)
+  would set enable and clamp there. Whether the MMIO copy on the Pro 10 (28/35 W) is enabled was not reported [H].
+- **Per device:** the firmware state of the MMIO copy differs; read it with `scripts/mmio-pl-read.py` (root, read-only) before
+  judging a PL1/PL2 result.
+- **Not done [D]:** writing the MMIO copy from user space (`/dev/mem`, root, fails under lockdown and with `IO_STRICT_DEVMEM`) or a
+  kernel path for it. Open until the SB3 values are known and the question is put to the platform maintainers.
+
 ### 3.2 PL1 time window (`CF2F6076/61`) [C for the meaning, H for the unit]
 - Windows: the Intel SoC client writes it into bits 23:17 of the PL1 register, rounded up to 4 steps per octave (`../research/12-remaining-outputs.md` 2.1).
 - Linux: `OutputStage` target `pl1_window` on `package-0/long_term`'s `constraint_0_time_window_us`. The blob's ms become µs, are clamped to 1.0-112 s and
