@@ -2,8 +2,8 @@
 Description=Surface power management (SMF blob interpreter)
 Documentation=https://github.com/larsschellhas/linux-surface-power
 # thermald changes package PL1 itself and would fight the daemon (FR-S6). Conflicts= alone does not order the two: without After=
-# the daemon can start while thermald is still stopping, refuses to run ("thermald is running") and, after a failover by
-# OnFailure=thermald.service, never comes back (seen 18.11.2026, 25 min without the controller).
+# the daemon can start while thermald is still stopping, refuses to run ("thermald is running") and, after a failover to
+# thermald through the OnFailure= line below, never comes back (seen 18.11.2026, 25 min without the controller).
 After=systemd-modules-load.service thermald.service
 Conflicts=thermald.service
 StartLimitIntervalSec=600

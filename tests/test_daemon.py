@@ -480,6 +480,9 @@ class DaemonTest(unittest.TestCase):
         self.assertIn("thermald.service", after.split())
         self.assertIn("Conflicts=thermald.service", lines)
         self.assertIn("MemorySwapMax=0", lines)
+        # Installers uncomment the one optional line with sed 's|^# OnFailure=thermald.service|OnFailure=...|': no other comment may match.
+        with open(os.path.join(here, "..", "packaging", "systemd", "surface-powerd.service")) as f:
+            self.assertEqual(sum(1 for ln in f if ln.startswith("# OnFailure=thermald.service")), 1)
         self.assertTrue(any(ln.startswith("MemoryLow=") for ln in lines))
 
     def test_time_series(self):
