@@ -39,5 +39,5 @@ Markers used in the summaries:
 | `raw/tools/fw/` | Firmware packages per device (extracted capsules and SMF core drivers), decompiled cores (`decomp/`) |
 | `raw/tools/clients/`, `raw/tools/gscripts/` | SMF client drivers of the SB3, Ghidra headless scripts |
 
-Ghidra 12.2 and JDK 25 are installed in `~/tools/` and not copied. The originals of the working folder are in
-`~/Schreibtisch/Surface-Book-3-Drosselung/`; this copy is from 14.11.2026.
+Ghidra 12.2 and JDK 25 are installed in `~/tools/` and not copied. `raw/arbeitsordner/` is the one working folder (git-ignored).
+Since 19.11.2026 it also holds everything that used to live in a separate folder on the desktop.
