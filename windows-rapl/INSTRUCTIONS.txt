@@ -1,0 +1,66 @@
+SP10 WINDOWS RUN SHEET (version 7) - battery power-throttling test
+===================================================================
+Purpose: find out whether the 10 W battery result is Windows throttling our load.
+Two battery runs: A as before, B with PowerShell excluded from power throttling.
+Total about 1 hour 15 minutes. Do the steps in order.
+
+
+STEP 1 - PREPARE (~10 min)
+1.1  Copy this whole folder to the Windows disk as C:\rapl-capture
+     (replace the old copy: capture-windows.ps1 has changed).
+1.2  Charge the battery to 80% or more.
+1.3  Make sure nothing is installing:
+       - Settings > Windows Update: no download or install in progress.
+       - Microsoft Store > Downloads: nothing running.
+     Close all other programs.
+1.4  Settings > System > Power & battery:
+       - Power mode = Best performance
+       - Energy saver: "Turn energy saver on automatically at" = Never,
+         "Always use energy saver" = Off
+1.5  Start > type powershell > right-click > Run as administrator. Then run:
+
+     cd C:\sp10-capture
+
+
+RUN A - battery, as before (~35 min)
+A.1  Unplug the charger. Leave the device idle for 15 minutes.
+A.2  Run, and wait for "load stopped" (20 minutes). Do not touch the device:
+
+     powershell -ExecutionPolicy Bypass -File .\run-continuous.ps1 -Mode best -Power bat
+
+
+STEP 2 - EXCLUDE POWERSHELL FROM POWER THROTTLING (~1 min)
+2.1  In the same Administrator PowerShell window run:
+
+     powercfg /powerthrottling disable /path "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+2.2  Check it is listed as excluded:
+
+     powercfg /powerthrottling list
+
+
+RUN B - battery, PowerShell excluded (~35 min)
+B.1  Charger still unplugged. Leave the device idle for 15 minutes.
+     (If the battery is below 50%, charge it first, then unplug and idle 15 minutes.)
+B.2  Open Task Manager (Ctrl+Shift+Esc) > Details. Right-click a column header >
+     Select columns > tick "Power throttling" > OK. Leave Task Manager open.
+B.3  Run, and wait for "load stopped":
+
+     powershell -ExecutionPolicy Bypass -File .\run-continuous.ps1 -Mode best -Power bat
+
+B.4  About 2 minutes into the run, look at Task Manager: write down what the
+     "Power throttling" column shows for the powershell.exe processes
+     (expected: Disabled).
+
+
+STEP 3 - UNDO THE EXCLUSION
+3.1  Run:
+
+     powercfg /powerthrottling reset /path "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+
+FINISH
+1. Create C:\rapl-capture\runs\NOTES.txt with: the Task Manager "Power throttling" value from B.4,
+   whether anything was installing, and anything that went wrong.
+2. Shut down fully: hold Shift while clicking Shut down.
+3. Boot Linux. Copy C:\rapl-capture\runs to analysis folder
