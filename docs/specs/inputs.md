@@ -43,6 +43,12 @@ The placeholder channel `99999999-…/1` (`blob-format.md` 5.2b) is never provid
 
 Readings outside the input-line range (`blob-format.md` 5.1) are invalid (FR-I2) [H: the Windows client reports a range error and drops the value].
 
+**Availability of the SAM temperature sensors (`2E8B14C2/5xx`) [C, registry read 23.11.2026].** The hwmon source `surface_thermal` exists only
+where the kernel registry has the TMP sensor node `01:03:01:00:02`: Book 3, Pro 9/10/11 and Pro 12 Intel, Laptop 5, Laptop 6, Laptop Studio 2. It is
+missing for the Pro 7+, Pro 8, Laptop 3/4 AMD (`MSHW0110`), Laptop 4 Intel (`MSHW0250`), Laptop 7, Laptop Go 1/2/3 and Laptop Studio 1. There the inputs
+are invalid (DV-10) until nodes are added (`plan.md` D9, D10). A tester's report on a Laptop 4 Intel 15" lists 505 and 509 as "not available"
+and shows that the EC answers the sensor requests through the debug device (mask `0x07f6`, `I_VTS1` = sensor 9).
+
 ## 3. Slider state (FR-I3, OD-4)
 | `platform_profile` | AC | battery |
 |---|---|---|

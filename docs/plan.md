@@ -1,6 +1,6 @@
 # Project plan: from the reference device to a rollout on every SMF Surface
 
-Version 1.3, 23.11.2026. This is the single plan of the project: target, work packages, their state, and what comes next. Read it
+Version 1.6, 23.11.2026. This is the single plan of the project: target, work packages, their state, and what comes next. Read it
 first; it is kept current with every change of state (section 7). Evidence markers as in `docs/README.md`: [C] driver code or ACPI
 table, [M] measured, [H] hypothesis, [D] design decision.
 
@@ -60,21 +60,27 @@ kernel interfaces it needs are in the released linux-surface kernel; fail-safe c
 | B5 | Supervisor, monitor, daemon, tools, units, sleep hook | ✅ | – |
 | B6 | Report tool, tester guide, device pages generator | ✅ | – |
 | B7 | **Safety suite per device:** every profile and blob through extreme scenarios in simulation, run locally | ⬜ | criteria agreed 19.11.2026 (3, B7); fix the numbers, then write the script |
+| B8 | **CPU budget of the daemon:** about 1 % of one core on two devices (SB3 control run, Pro 9 dry-run 0.98 % over 59 h) against the AC-L4 criterion of 0.5 % | ⬜ | profile first (EC requests every 2 s, copy reads every 60 s, interpreter); cause unproven [H]; then reduce it or decide the criterion (maintainer) |
+| B9 | **PL3 stage when MSR `0x615` is not readable** although `0x606` is (Pro 9: EIO on `0x17`, `0x611`, `0x614`, `0x615`, F10): the setup reads only `0x606`, the supervisor's reaction to a failing write is not checked | ⬜ | check the behaviour, then test `0x615` before creating the target (code change, maintainer's yes) |
+| B10 | **Report tool vs daemon:** the report calls `0B7B5350/59` "writable as root" and the device "ready for control: yes" without a profile that switches PL3 on, while the daemon treats PL3 as log-only and stays in dry-run (Laptop 4 Intel report, 20.11.); it also says nothing about inputs without a source that reach written outputs (505/509 "not available") | ⬜ | make the report say what the daemon does (code change, maintainer's yes) |
 | **C** | **Reference device Surface Book 3 15"** | 🔄 | |
 | C1 | Field tests AC-L1–L3 (skin 48 °C, ~32 W, psys 45/100 W) | ✅ | – |
 | C2 | PL3/PL4 measured, all 9 outputs written | ✅ | – |
-| C3 | Soak test (AC-L4): first dry-run failed, replaced by a control run since 17.11.2026; watchdog incident 18.11.2026 fixed (1a7520a, 829f24e) | 🔄 | daily evaluation until 21.11.2026 |
-| C4 | `tested = true` in the SB3 profile | ⬜ | after C3, maintainer's decision |
+| C3 | Soak test (AC-L4): first dry-run failed, replaced by a control run since 17.11.2026; watchdog incident 18.11.2026 fixed (1a7520a, 829f24e) | 🔄 | evaluation of 23.11.: only three short runs (device off 21.–23.11.), skin controllers never active, CPU ≈1 % (B8), PL4 written to 0 by `surface-rapl.service` after resume (L8); extended to 25.11.2026 (maintainer, 23.11.) |
+| C4 | `tested = true` in the SB3 profile | ⬜ | after C3 (not recommended on the data of 21.–23.11.), maintainer's decision |
 | C5 | Surface Book 3 13" (shares the profile) | ⏳ 🙋 | tester report with DMI values |
 | **D** | **Kernel interfaces in linux-surface** | 🔄 | |
 | D1 | SB3 sensors and fans, main and base ([kernel#190](https://github.com/linux-surface/kernel/pull/190)) | ✅ | merged 17.11.2026 (`v7.3-surface-devel`) |
 | D2 | DPTF battery data `0x53` and adapter rating ([kernel#195](https://github.com/linux-surface/kernel/pull/195)) | ✅ | merged 17.11.2026 (`v7.3-surface-devel`) |
 | D3 | `pm_prepare` fix of `surface_platform_profile` ([kernel#197](https://github.com/linux-surface/kernel/pull/197)); fixes the suspend bug [linux-surface#2386](https://github.com/linux-surface/linux-surface/issues/2386) | ✅ | merged 16.11.2026 (`v7.3-surface`), released in 7.3.4-2-surface, #2386 closed 17.11.2026 |
 | D4 | Kernel attribute for the battery EWMA level and max-charge flag (`28B7BD85/13, 16`; OD-3) | ⬜ | needed by Pro 8, 9, 10, 11 Intel, Laptop 6, 7, Laptop Studio (R3) |
-| D5 | PL1/PL2 MMIO write path (`intel-rapl-mmio` without device 00:04.0) | 🔄 ⚠️ | tester module offer on #2383 (18.11.2026, Pro 10) not evaluated yet; blocks Pro 8, Pro 10 (R5) |
-| D6 | PL3 with lockdown (MSR writes are blocked there) | ⬜ ⚠️ | kernel path needed; with lockdown `none` it works [M SB3, tester Pro 10] |
+| D5 | **PL1/PL2 through the MMIO copy, as Windows does it, on every Intel device** (decided 23.11.2026): kernel module independent of the daemon, prototype first in this repository (`kernel/`), later a patch for the linux-surface kernel and then mainline (E4); opt-in per proven device; the daemon prefers an `intel-rapl-mmio` zone and falls back to MSR (powercap) | 🔄 ⚠️ | design agreed 23.11.2026; concept, requirements (`requirements/kernel-modules.md`), spec (`specs/kernel-mmio-rapl.md` 0.2), evidence (`research/15`) and a compiling skeleton (`kernel/surface-rapl-mmio/`) exist and were reviewed independently; next: the SB3 test plan (spec 8, needs sudo), then fixes found there; later the daemon side (zone preference, snapshot/restore of the MMIO copy, foreign-write check, KM-9) and the tester's module source; the MMIO copy is enabled on Pro 8, Pro 9, Pro 10 [M] and disabled on the SB3 [M] |
+| D6 | **PL3 (MSR `0x615`, bits 12:0) through a kernel path** (decided 23.11.2026: separate feature, separate patch, same prototype module directory; MSR writes from user space are blocked under lockdown) | ⬜ ⚠️ | with lockdown `none` user space works [M SB3, tester Pro 10]; before building: clarify the Pro 9 EIO on `0x615` (F10, B9); no powercap constraint for PL3 exists, so an own attribute is needed (E5) |
 | D7 | EC requests without the debug device: fan outputs, PROCHOT release (SAM), sensor offset | 🔄 | draft PR "fan profile instances" exists; other requests not designed |
 | D8 | PROCHOT release on ACPI-EC devices (Go 3, Go 4: ACPI `DPHT`) | ⬜ | small kernel driver on `MSHW0301`, or evidence that it is not needed (I2) |
+| D9 | TMP sensor node for `MSHW0250` (Laptop 4 Intel, reported on a 15 inch) in `ssam_node_group_sl3_dptf`, which `MSHW0110` (Laptop 3/4 AMD) shares | ⬜ 🙋 | proof per device needed (mask, names, temperature); the group cannot be split by SKU; no `fan_speed` without proof |
+| D10 | Review of [kernel#198](https://github.com/linux-surface/kernel/pull/198) (Laptop Go sensors, fan, `tempX_offset`; neveltyc): not ready by the rules: group `slg1` is shared with Go 2 and Go 3 without proof, the offset frame contradicts the Windows client (H6), ±100 K bound against ±2 K in the corpus | ⏳ | read only, nothing commented; the maintainer decides what to say |
+| D11 | TMP sensor nodes for the other groups without one (Pro 7+ `sp7_dptf`, Pro 8 `sp8`, Laptop 7 `sl7`, Studio 1 `sls1`) | ⬜ 🙋 | no evidence yet that the EC of these devices answers the sensor requests; ask for a reading from one tester per device first |
 | **E** | **Mainline submission** | ⬜ | |
 | E1 | Submit what is merged in linux-surface: SB3 sensor and fan nodes (D1), DPTF battery data and adapter rating (D2) | ⬜ | cover letter draft exists; after some time in a released linux-surface kernel |
 | E2 | Battery EWMA level and max-charge attribute (after D4) | ⬜ | with or after E1 |
@@ -83,14 +89,15 @@ kernel interfaces it needs are in the released linux-surface kernel; fail-safe c
 | E5 | PL3 (MSR `0x615`) through the kernel (after D6) | ⬜ ⚠️ | no powercap constraint for PL3 today; acceptance uncertain, ask early on linux-pm |
 | **F** | **Device validation and profiles (community)** | 🔄 | |
 | F1 | Tester process: report, dry-run, control, evaluation procedure (`CLAUDE.md`) | ✅ | – |
-| F2 | Pro 10: control run (tester); PL1 above the firmware MMIO 28 W has no effect | ⏳ | evaluate tester comment of 18.11.2026; needs D5 |
-| F3 | Pro 9 Intel: control run (tester, one SKU) | 🔄 🙋 | 59-hour dry-run reported (F9); consumer SKU added from the catalogue 23.11.2026; D4 for R3 |
+| F2 | Pro 10: control run (tester); PL1 above the firmware MMIO 28 W has no effect | 🔄 | evaluated 23.11.2026: the lower copy is in force, measured with four MSR values [M]; questions to the tester open; needs D5 |
+| F3 | Pro 9 Intel: control run (tester, one SKU) | 🔄 🙋 | 59-hour dry-run evaluated 23.11.2026: stable, CPU 0.98 % over the criterion (B8), MMIO copy 30/60 W enabled (D5), no Windows comparison; consumer SKU added from the catalogue; D4 for R3 |
 | F4 | Pro 8: MMIO copy caps at 30 W (tester) | ⏳ | D5, H1 (`0B7B5350/71`), D4 |
 | F5 | Profiles for the devices without one: Pro 7+, Pro 10 5G, Pro 11 Intel, Laptop 4 Intel, Laptop 5, Laptop 6, Laptop 7 Intel, Laptop 7 5G, Laptop Go 2, Laptop Go 3, Go 4 | ✅ 🙋 | created 23.11.2026 with catalogue SKUs and `pl3 = true` (3, F5); reports confirm the SKUs |
 | F6 | Profiles without a device check: Laptop Go 1, Go 3, Laptop 3/4 AMD, Laptop Studio 1/2 | ⏳ 🙋 | tester reports (Laptop Go 1, Laptop Studio 2: reports in F9) |
 | F7 | Go 3: switch on `pl3` in its profile (I1 verified 19.11.2026) | ✅ 🙋 | on since 23.11.2026; a report with `acpidump` confirms the `_DSM` value [H] |
 | F8 | Docs and code consistency | 🔄 | `specs/outputs.md` 4 corrected 19.11.2026; keep README, device pages and specs in step |
-| F9 | Evaluate the reports of 18.–21.11.2026 in #2383: Pro 10 MMIO answers (technosf, 18.11.), Laptop 4 Intel 15" (hypergol-d, 20.11.), Laptop Go 1 with kernel#198 (neveltyc, 20.11.), Pro 9 59-hour dry-run (NexGen-3D-Printing, 20.11.), Laptop Studio 2 fans (VibeCodingAnimal, 21.11.) | ⬜ | procedure in `CLAUDE.md`, one device at a time; the Pro 10 answer is F2 |
+| F9 | Evaluate the reports of 18.–21.11.2026 in #2383: Pro 10 MMIO answers (technosf, 18.11.), Laptop 4 Intel 15" (hypergol-d, 20.11.), Laptop Go 1 with kernel#198 (neveltyc, 20.11.), Pro 9 59-hour dry-run (NexGen-3D-Printing, 20.11.), Laptop Studio 2 fans (VibeCodingAnimal, 21.11.) | 🔄 | evaluated 23.11.2026 (raw notes `f9-1` … `f9-5`); reply drafts exist, nothing posted; follow-ups: B8–B10, D9, D10, F10, H6, H7, L8 |
+| F10 | Pro 9: MSR reads of `0x17`, `0x611`, `0x614`, `0x615` fail with EIO, also after a clean reboot and before the daemon starts [M, tester]; cause unknown | ⏳ 🙋 | questions to the tester (`rdmsr -p 0`, `dmesg`, hypervisor flag, the reading script); B9 |
 | **G** | **Inputs to settle** | 🔄 | |
 | G1 | Display brightness in millinits (`1FB53D4C/41`, SB3 13"/15"): no source, block default 3 W display power (DV-3); reaches PL4 | ⬜ | where Windows takes the value from (display client), and whether Linux can give nits |
 | G2 | Battery EWMA level and max-charge flag (`28B7BD85/13, 16`): debug device only | 🔄 | D4 |
@@ -105,6 +112,8 @@ kernel interfaces it needs are in the released linux-surface kernel; fail-safe c
 | H3 | `87008365/220, 250, 300` (Surface service): evidence for "not needed" | ⬜ | driver check per device |
 | H4 | `B620798F/302–311` temperature thresholds (arm64 Laptop 13", Pro 12") | ⬜ | off unless a profile opts in |
 | H5 | Laptop Studio dGPU outputs (`/64, /201, /205, /208`, `349D0E39/1, /4`, `B620798F/202`) | 🔄 | analysis in `research/14`; no Linux path yet |
+| H6 | `A79674B4/509` frame: the Windows clients (Pro 10 and Go 1 builds) put the sensor number in the SSAM instance field and in the payload; a tester on a Go 1 measures an effect only with instance 0 [M]; the effect of the offset is measured on no device (DV-11) | ⬜ | questions to the tester; read the serial-hub layer of the Windows client; no code change before |
+| H7 | Unit of `B620798F/111–113`: documented as SPL "[H: dB(A)]"; a tester's decode of the Laptop Studio 2 EC says `FAN 0x0C` is a target-temperature override in °C (f32) [H, tester]; the bytes sent are the same either way | ⬜ | documentation only; ask for a measured effect |
 | **I** | **Go 3 / Go 4 (ACPI EC)** | 🔄 | |
 | I1 | CPU platform type from ACPI `_DSM` (PL3 target) | ✅ | Go 3 → 1, Go 4 → 5, both MSR `0x615` [C, public DSDT dumps + client `0d5efa50`, 19.11.2026]; same value on current firmware [H] |
 | I2 | `O_BATT_MODE` (`0B7B5350/70`): Windows calls ACPI `DPHT` → EC command `0x36` "de-assert PROCHOT" [C, DSDT]; no user-space path | ⬜ | D8 |
@@ -119,10 +128,11 @@ kernel interfaces it needs are in the released linux-surface kernel; fail-safe c
 | L1 | **Python reference complete:** every device class has its paths (B, D, G–K), B7 passes for every profile, specs v1.0 | ⬜ | gates the production version |
 | L2 | Production version in **Rust or C** (OD-2, decision open), ported 1:1 against the same specs and tests | ⬜ | after L1 |
 | L3 | Installer and systemd units (control, dry-run next to thermald) | ✅ | – |
-| L4 | Coexistence with thermald, power-profiles-daemon, tuned | 🔄 | thermald handled (`Conflicts=`, `After=`); others not checked |
+| L4 | Coexistence with thermald, power-profiles-daemon, tuned | 🔄 | thermald handled (`Conflicts=`, `After=`); tuned restarts itself by D-Bus on Bazzite-SDX (six times in 59 h, tester): stopping is not enough, it has to be masked; ppd not checked |
 | L5 | Distribution packages (deb, rpm, Arch) and a linux-surface repository entry | ⬜ | – |
 | L6 | Integration with linux-surface (`surface-control` or own service) | ⏳ | talks with the maintainers in kernel#117 / #2383 |
 | L7 | Release process: versioning, changelog, supported-device list (FR-D3), AC-S1–S8 on hardware | ⬜ | – |
+| L8 | Coexistence with `surface-rapl.service` (package `surface-control`): after every resume it writes `0` to `constraint_2_power_limit_uw` (PL4), the daemon reports a foreign change "58.6 W → 0 W" [C script, M journal 21.11.]; whether PL4 is restored afterwards is not shown | ⬜ | decision: order or conflict with the unit, or write PL4 again after resume; check on 23.–25.11. with `cat constraint_2_power_limit_uw` after a resume |
 
 ## 3. Work packages in detail
 
@@ -162,7 +172,12 @@ behaviour of the SB3 is explained and specified (reached 14.11.2026). Open: requ
 Rule (`CLAUDE.md`): every change proven 100 % (command, instance, payload, affected devices); support properties only for proven
 devices; only the maintainer signs off.
 - **D4:** EC battery requests `0x1A` / `0x69` as attributes next to the `dptf` group. Done when merged in linux-surface.
-- **D5:** the Pro 8 and Pro 10 testers measured that the lower enabled copy is in force (DV-8 [M on two devices]). A kernel path that
+- **Decided 23.11.2026 (D5, D6):**
+  - MMIO is the preferred write path for PL1/PL2 on Intel devices, because Windows writes it on every Intel platform type [C]; MSR (powercap) stays the fallback. Windows leaves the MSR copy at the firmware value [C: no blob uses channels 56/57], so parity means writing MMIO only and not touching the MSR copy; writing both would lift the firmware's own MSR limit, which is a new deviation and needs its own proof.
+  - The module is independent of the daemon (the daemon only uses what powercap shows), is opt-in per device with a DMI match and a proof per platform type (MCHBAR base, register offsets, enable and clamp bits; `CLAUDE.md` kernel rules), and is meant for linux-surface first (as kernel#190/#195 were), then mainline. Where `00:04.0` exists the kernel already provides `intel-rapl-mmio` and no module is needed.
+  - PL3 is a separate feature (other register, other subsystem, other upstream question) and a separate patch, so a rejection of one does not block the other.
+  - The prototype lives in this repository (`kernel/`, license GPL-2.0-only because it uses GPL-only kernel interfaces, stated in the README next to MIT/Apache) so testers can build it. It does **not** meet gate R5 (Secure Boot without extra setup): a tester needs their own signing until it is in the linux-surface kernel. Kernel rules on AI-assisted patches and the maintainer's sign-off must be checked before any submission [H, not verified].
+- **D5 history:** the Pro 8 and Pro 10 testers measured that the lower enabled copy is in force (DV-8 [M on two devices]). A kernel path that
   creates `intel-rapl-mmio` from MCHBAR without 00:04.0 is the direction [H]; a tester has such a module (not loaded yet). Done when a
   module or kernel patch is in the linux-surface kernel (signed with it, so no own MOK), is checked against the Windows target
   (MCHBAR + 0x59a0, bits 14:0, enable and clamp) and is measured on at least one device with an enabled MMIO copy.
@@ -171,6 +186,9 @@ devices; only the maintainer signs off.
   kernel path PL3 stays log-only there and R4/R5 fail on those systems.
 - **D7, D8:** today fans, PROCHOT release and sensor offset go through `/dev/surface/aggregator` (interim, NFR-11); on Go 3/4 the PROCHOT
   release is an ACPI method that user space cannot call.
+
+- **D9–D11 (sensor nodes):** per `CLAUDE.md` every registry change needs command, instance, payload and all devices of the group. A report exists for one device (Laptop 4 Intel 15", mask `0x07f6`, `I_VTS1` = sensor 9). `ssam_node_group_sl3_dptf` is shared by `MSHW0110` and `MSHW0250`, `ssam_node_group_slg1` by Go 1, 2 and 3. Evidence for a device is a reading from that device, not the Windows driver (the blob reads the sensors, the EC answer on Linux is what is missing).
+- **D10 (kernel#198):** read only. Findings: group shared with Go 2/3 without proof; the offset frame contradicts the Windows client (H6); bound ±100 K on every sensor against ±2 K (sensor 9 only) in the corpus; the EC's own protection may use the offset-shifted value [H]; offsets are reset only when the driver is removed.
 
 ### E. Mainline ⬜
 Order: what is merged and stable first (E1, E2), then the EC requests (E3). E4 and E5 touch the Intel RAPL and int340x code, whose
@@ -226,44 +244,46 @@ What contributors can do now (details for testers: README "Try it on your Surfac
   Laptop Go 2, Laptop Go 3, Go 4, and the Book 3 13" (C5). Most of their SKUs come from a catalogue; the report confirms them.
 - **Reports and dry-runs from devices with an untested profile** (F6): Laptop Go 1, Go 3 (with `acpidump`), Laptop 3/4 AMD, Laptop Studio 1/2, further Pro 9 SKUs.
 - **Windows comparisons** (HWiNFO PL1/PL2 per mode and source) on any SMF device (R7).
-- **MMIO write path** (D5): tests of a module on a Pro 8 or Pro 10 with an enabled MMIO copy.
+- **MMIO write path** (D5): tests of a module on a Pro 8, Pro 9 or Pro 10 with an enabled MMIO copy (the tester's module on the Pro 10, once its source has been seen).
+- **Sensor readings** (D9–D11): from a Pro 7+, Pro 8, Laptop 3/4 AMD, Laptop 4 Intel 13 inch, Laptop 7, Laptop Go 2/3 or Laptop Studio 1: does the EC answer the TMP sensor requests (a few read-only requests through the debug device)?
+- **Pro 9:** the output of `rdmsr` for `0x17`, `0x611`, `0x615`, `dmesg | grep -i msr` (F10).
 - **Linux on Snapdragon Surfaces** (K) and owners of the AMD Laptops (J2).
 - **Kernel review** of the linux-surface patches before the mainline submission (E).
 
 ## 5. Rollout matrix per device
 
 Gates as in 1.1. R1 is met on every device. R6 waits for the safety suite (B7) on every device; the SB3 15" has only its closed-loop
-model (`scripts/simulate-sb3.py`) so far. Source: device pages (23.11.2026), profiles, tester reports in #2383.
+model (`scripts/simulate-sb3.py`) so far. Source: device pages (23.11.2026), profiles, tester reports in #2383. R3 corrected on 23.11.2026: the kernel registry has no TMP sensor node for several devices (DV-10), so their temperature inputs are invalid on Linux until nodes exist.
 
 | Device | R1 Blob | R2 Profile | R3 Inputs | R4 Outputs | R5 Secure Boot | R6 Safety sim | R7 Validation | R8 | 🙋 | Blocking WPs |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Book 3 15" | ✅ | ✅ | 🔄 brightness fallback (G1) | ✅ 9/9 | 🔄 PL3 needs lockdown `none` | 🔄 closed-loop model only | ✅ field tests, soak 🔄 | ⬜ | – | C3, C4, D6, G1 |
+| Book 3 15" | ✅ | ✅ | 🔄 brightness fallback (G1) | ✅ 9/9 | 🔄 PL3 needs lockdown `none` | 🔄 closed-loop model only | ✅ field tests, soak 🔄 | ⬜ | – | C3, C4, D6, G1, B8, L8 |
 | Book 3 13" | ✅ | 🔄 shared, DMI unconfirmed | 🔄 (G1) | ✅ 9/9 | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | C5 |
-| Pro 7+ | ✅ | 🔄 catalogue SKUs, 1960 confirmed | ✅ | ✅ 12/12 | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | – |
-| Pro 8 | ✅ | ✅ | 🔄 debug device | ⬜ 13/14 (`/71`) | ⬜ MMIO caps at 30 W | ⬜ | 🔄 reads by tester | ⬜ | – | D4, D5, H1 |
-| Pro 9 Intel | ✅ | 🔄 report SKU + catalogue consumer SKU | 🔄 debug device, proximity constant | ✅ | 🔄 | ⬜ | 🔄 control run, 59-h dry-run | ⬜ | 🙋 | D4, F3, F9, G4 |
+| Pro 7+ | ✅ | 🔄 catalogue SKUs, 1960 confirmed | 🔄 no sensor node in the kernel (D11) | ✅ 12/12 | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | D11 |
+| Pro 8 | ✅ | ✅ | 🔄 debug device; no sensor node (D11) | ⬜ 13/14 (`/71`) | ⬜ MMIO caps at 30 W | ⬜ | 🔄 reads by tester | ⬜ | – | D4, D5, D11, H1 |
+| Pro 9 Intel | ✅ | 🔄 report SKU + catalogue consumer SKU | 🔄 debug device, proximity constant | ✅ | ⬜ MMIO 30/60 W enabled, caps Slider 5 at 30 W [H] | ⬜ | 🔄 control run, 59-h dry-run evaluated (CPU 0.98 % > 0.5 %), no Windows comparison | ⬜ | 🙋 | D4, D5, B8, F3, F10, G4 |
 | Pro 9 5G | ✅ | ⬜ | ✅ | ⬜ (`9BBB8910/103`) | ➖ | ⬜ | ⬜ | ⬜ | 🙋 | H2, K |
-| Pro 10 | ✅ | ✅ | 🔄 debug device | ✅ | ⬜ MMIO caps at 28 W | ⬜ | 🔄 control run | ⬜ | – | D4, D5, F2 |
+| Pro 10 | ✅ | ✅ | 🔄 debug device | ✅ | ⬜ MMIO caps at 28 W | ⬜ | 🔄 control run; MMIO series evaluated 23.11. | ⬜ | – | D4, D5, F2 |
 | Pro 10 5G | ✅ | 🔄 catalogue SKUs | 🔄 | ⬜ (`/103–105`) | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | H2 |
 | Pro 11 Intel | ✅ | ✅ SKU (catalogue, user reports) | 🔄 | ✅ | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | D4 |
 | Pro 11 Snapdragon | ✅ | ⬜ | 🔄 (estimate) | ⬜ 11/20 | ➖ | ⬜ | ⬜ | ⬜ | 🙋 | H2, H3, K |
 | Pro 12" 1st Ed. | ✅ | ⬜ | 🔄 (estimate) | ⬜ 6/16 | ➖ | ⬜ | ⬜ | ⬜ | 🙋 | H2, H3, H4, K |
-| Laptop 3 AMD | ✅ | ✅ SKU | ✅ | ⬜ 2/5 | ➖ | ⬜ | ⬜ | ⬜ | 🙋 | J |
-| Laptop 4 AMD | ✅ | ✅ SKU | ✅ | ⬜ 3/8 | ➖ | ⬜ | ⬜ | ⬜ | 🙋 | J |
-| Laptop 4 Intel | ✅ | ✅ SKUs (kernel, tester report) | ✅ | ✅ 12/12 | 🔄 | ⬜ | 🔄 report 20.11. not evaluated | ⬜ | – | F9 |
+| Laptop 3 AMD | ✅ | ✅ SKU | 🔄 no sensor node in the kernel (D9) | ⬜ 2/5 | ➖ | ⬜ | ⬜ | ⬜ | 🙋 | D9, J |
+| Laptop 4 AMD | ✅ | ✅ SKU | 🔄 no sensor node in the kernel (D9) | ⬜ 3/8 | ➖ | ⬜ | ⬜ | ⬜ | 🙋 | D9, J |
+| Laptop 4 Intel | ✅ | ✅ SKUs (kernel, tester report) | 🔄 no sensor node in the kernel (D9); debug device for EC data | ✅ 12/12 | 🔄 | ⬜ | 🔄 report 20.11. evaluated; EC clamp seen at 52.1 °C, no control run on a linux-surface kernel | ⬜ | – | D9, B10 |
 | Laptop 5 | ✅ | 🔄 catalogue SKUs, consumer ones confirmed | 🔄 standby constant | ✅ | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | G4 |
 | Laptop 6 | ✅ | 🔄 catalogue SKUs | 🔄 | ✅ | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | D4 |
-| Laptop 7 Intel | ✅ | 🔄 catalogue SKUs, 2107 confirmed | 🔄 | ✅ | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | D4 |
+| Laptop 7 Intel | ✅ | 🔄 catalogue SKUs, 2107 confirmed | 🔄 no sensor node (D11) | ✅ | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | D4, D11 |
 | Laptop 7 5G | ✅ | 🔄 catalogue SKU | 🔄 | ⬜ (`/103–105`) | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | H2 |
 | Laptop 7 Snapdragon | ✅ | ⬜ | 🔄 (estimate) | ⬜ 11/18 | ➖ | ⬜ | ⬜ | ⬜ | 🙋 | H2, H3, K |
 | Laptop 13" | ✅ | ⬜ | 🔄 (estimate) | ⬜ 11/25 | ➖ | ⬜ | ⬜ | ⬜ | 🙋 | H2, H3, H4, K |
-| Laptop Go 1 | ✅ | ✅ SKU | ✅ | ✅ 10/10 | 🔄 | ⬜ | 🔄 report 20.11. not evaluated | ⬜ | – | F9 |
-| Laptop Go 2 | ✅ | 🔄 catalogue SKU | ✅ | ⬜ 13/14 (`/71`) | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | H1 |
-| Laptop Go 3 | ✅ | 🔄 catalogue SKU | 🔄 standby constant | ✅ | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | G4 |
+| Laptop Go 1 | ✅ | ✅ SKU | 🔄 no sensor node in the kernel (D10) | ✅ 10/10 | 🔄 | ⬜ | 🔄 report 20.11. evaluated (kernel#198, own controller, no daemon run) | ⬜ | – | D10, H6 |
+| Laptop Go 2 | ✅ | 🔄 catalogue SKU | 🔄 no sensor node in the kernel (D10) | ⬜ 13/14 (`/71`) | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | D10, H1 |
+| Laptop Go 3 | ✅ | 🔄 catalogue SKU | 🔄 standby constant; no sensor node (D10) | ✅ | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | D10, G4 |
 | Go 3 | ✅ | 🔄 product name [H] | ✅ | ⬜ 10/12 (`/70`, `/71`) | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | H1, I2 |
 | Go 4 | ✅ | 🔄 catalogue SKU | 🔄 standby constant | ⬜ 11/13 (`/70`) | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | I2 |
-| Laptop Studio 1 | ✅ | 🔄 product name | 🔄 debug device, NVML | ⬜ (`/71`, dGPU) | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | D4, G7, H1, H5 |
-| Laptop Studio 2 | ✅ | 🔄 product name | 🔄 debug device, NVML | ⬜ (dGPU, `349D0E39`) | 🔄 | ⬜ | 🔄 fan report 21.11. not evaluated | ⬜ | 🙋 | D4, F9, G7, H5 |
+| Laptop Studio 1 | ✅ | 🔄 product name | 🔄 debug device, NVML; no sensor node (D11) | ⬜ (`/71`, dGPU) | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | D4, D11, G7, H1, H5 |
+| Laptop Studio 2 | ✅ | 🔄 product name | 🔄 debug device, NVML | ⬜ (dGPU, `349D0E39`) | 🔄 | ⬜ | 🔄 fan report 21.11. evaluated: `FAN 0x0B` per fan measured [M], no daemon run | ⬜ | 🙋 | D4, G7, H5, H7 |
 
 Since 23.11.2026 every x64 SMF device has a profile; "catalogue SKU" in R2 means the match is not yet confirmed by a report from the
 device. R5 is 🔄 on every Intel device as long as PL3 needs lockdown `none` (D6), the fan and PROCHOT
@@ -271,20 +291,28 @@ requests need the debug device (D7) and the MMIO copy has not been read on that 
 
 ## 6. Critical path and next steps
 
-In this order; each step names its work package.
+In this order; each step names its work package. **Changed on 23.11.2026 (1.4)** after the evaluation of the reports (F9): the SB3
+soak is extended to 25.11. (maintainer); the MMIO copy is enabled on a third device (Pro 9), which keeps D5 second; two checks of
+the daemon itself (B8, B9, B10) come before the safety suite because they decide what a tester may be asked to run; the sensor nodes
+(D9–D11) and the offset frame (H6) are new and come after the F9 follow-ups.
 
-1. **C3/C4:** finish the SB3 control-run evaluation (21.11.2026), then the decision on `tested = true`.
-2. **F2/D5:** evaluate the Pro 10 tester comment of 18.11.2026 (procedure in `CLAUDE.md`), then decide on the MMIO write path (tester
-   module, own module, linux-pm) and ask linux-pm early (E4). This unblocks the Pro 10, the Pro 8 and every device whose firmware
-   enables the MMIO copy.
-3. **B7:** decide the safety criteria, then build the suite; from then on no tester is asked to run control on a profile that fails it.
-4. **F9:** evaluate the reports of 20.–21.11.2026 (Laptop 4 Intel, Laptop Go 1 with kernel#198, Pro 9 dry-run, Laptop Studio 2 fans);
-   ask in #2383 for reports that confirm the new profiles (🙋).
-5. **D4, E1:** battery EWMA attribute in linux-surface; submit the merged patches to mainline.
-6. **G1, H1–H3:** brightness in nits, classify the remaining outputs.
-7. **D6/E5, D7/E3, D8:** PL3 with lockdown, EC requests without the debug device, `DPHT` on Go 3/4.
-8. **J, K:** AMD and Snapdragon paths (driver analysis first).
-9. **L1 → L2, L5–L7:** Python reference complete, then Rust or C, packages, linux-surface integration, release.
+1. **C3/C4:** finish the SB3 control-run evaluation (extended to 25.11.2026, with load, a skin rise and a resume; check PL4 after the
+   resume, L8), then the decision on `tested = true`.
+2. **F2/D5:** build the prototype module (opt-in per proven device, independent of the daemon, in `kernel/`), get the tester's module source, prove
+   MCHBAR and offsets per platform type, then the daemon side; ask linux-pm early (E4). PL3 (D6) follows as a separate feature after F10/B9. This
+   unblocks the Pro 8, Pro 9, Pro 10 and every device whose firmware enables the MMIO copy.
+3. **B8, B9, B10:** measure where the CPU time goes (about 1 % on two devices against 0.5 %), check what happens when MSR `0x615` is not
+   readable, make the report say what the daemon does. Small code changes, each needs the maintainer's yes.
+4. **B7:** fix the numbers of the safety criteria, then build the suite; from then on no tester is asked to run control on a profile that
+   fails it.
+5. **F9 follow-ups:** reply to the five reports (drafts exist), ask the questions (F10, H6, H7), ask for reports that confirm the new
+   profiles (🙋).
+6. **D9–D11, D10:** sensor nodes with proof per device; tell the author of kernel#198 what the rules need (maintainer decides).
+7. **D4, E1:** battery EWMA attribute in linux-surface; submit the merged patches to mainline.
+8. **H6, G1, H1–H3, H7:** offset frame, brightness in nits, classify the remaining outputs.
+9. **D6/E5, D7/E3, D8:** PL3 with lockdown, EC requests without the debug device, `DPHT` on Go 3/4.
+10. **J, K:** AMD and Snapdragon paths (driver analysis first).
+11. **L1 → L2, L5–L8:** Python reference complete, then Rust or C, packages, linux-surface integration, release.
 
 ## 7. Keeping this plan current
 
@@ -304,3 +332,6 @@ In this order; each step names its work package.
 | 19.11.2026 | 1.1: emoji status and help-wanted markers; mainline as its own group (E) with the hard parts marked; suspend bug fixed (D3); inputs as their own group (G); Go 3/4 platform type settled from the public ACPI dumps (I1); safety suite per device (B7, gate R6); Secure Boot without extra setup as principle and gate R5; production version Rust or C after the Python reference (L1, L2); why devices have no profile (F5). Groups renamed from 1.0 (F→H, G→I, H→J, I→K, J→L). |
 | 19.11.2026 | 1.2: rollout matrix with R1 and R6; profiles are created from proven sources without waiting for reports (F5); safety-suite criteria agreed, run locally, not in CI for now (B7). |
 | 23.11.2026 | 1.3: eleven new profiles from catalogue SKUs with `pl3 = true` (F5 ✅), PL3 on the Go 3 (F7 ✅), Pro 9 consumer SKU; seven more devices write every output (matrix R2/R4); new reports of 18.–21.11. to evaluate (F9). |
+| 23.11.2026 | 1.4: reports of 18.–21.11. evaluated (F9, F2, F3): Pro 10 lower-copy measurement and module design checked against kernel and driver (D5); Pro 9 stability, MMIO 30/60 W enabled, MSR EIO (F10); Laptop 4 Intel registry gap (D9) and report/daemon mismatch (B10); kernel#198 reviewed read-only (D10), offset frame contradiction (H6); Laptop Studio 2 fan report (H7); daemon CPU ≈1 % on two devices (B8); PL3 EIO behaviour (B9); `surface-rapl.service` (L8); tuned must be masked (L4); sensor nodes missing for several devices, R3 corrected in the matrix (DV-10, D11); SB3 soak extended to 25.11. (C3). Critical path reordered, reasons in section 6. |
+| 23.11.2026 | 1.5: decisions of the maintainer: MMIO is the preferred PL1/PL2 path on Intel devices with MSR as fallback, via a daemon-independent module (prototype in `kernel/`, later linux-surface and mainline), opt-in per proven device; PL3 as a separate feature and patch (D5, D6, section 6 step 2). |
+| 23.11.2026 | 1.6: D5 prepared for development: requirements and concept (`requirements/kernel-modules.md`), spec 0.2, evidence summary `research/15`, module skeleton in `kernel/`, independent review done (findings applied: restore at unload, bit-group bounds, locking, thermald as open point, KM-11 … KM-13); the kernel's AI-assistance rule is adopted for kernel contributions (`CLAUDE.md` "Kernel modules"), `kernel/` carries its own GPL-2.0-only license text; a licence change for the rest of the repository is open (maintainer). |

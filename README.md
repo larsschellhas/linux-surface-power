@@ -28,6 +28,7 @@ package, its state and the next steps is [`docs/plan.md`](docs/plan.md).
 | `docs/specs/` | Technical specifications, derived from the requirements |
 | `src/` | Python reference implementation of the specs (see `src/README.md`) |
 | `packaging/` | systemd units and the sleep hook |
+| `kernel/` | Prototype kernel modules (GPL-2.0-only), independent of the daemon: `surface_rapl_mmio` for the MMIO write path of PL1/PL2 |
 | `scripts/check-repo.py` | CI check that no Microsoft content gets into the repository (AC-X1) |
 
 ## Status
@@ -35,16 +36,16 @@ package, its state and the next steps is [`docs/plan.md`](docs/plan.md).
 The full plan, with what is done and what is open per work package and per device, is in [`docs/plan.md`](docs/plan.md). It is
 updated in the same commit as every change of state, together with this section and the device table below.
 
-**Plan at a glance** (19.11.2026; ✅ done · 🔄 in progress · ⬜ open · ⏳ waiting for others · 🙋 help wanted · ⚠️ hard or uncertain):
+**Plan at a glance** (23.11.2026; ✅ done · 🔄 in progress · ⬜ open · ⏳ waiting for others · 🙋 help wanted · ⚠️ hard or uncertain):
 
 | Group | State |
 |---|---|
 | A Foundations: root cause, Windows measurements, SMF decoded, requirements, specs | ✅ |
-| B Python reference implementation: loader, engine, adapters, supervisor, tools | 🔄 untested adapters; safety suite per device (B7, local) ⬜ |
-| C Reference device Surface Book 3 15" | 🔄 field tests ✅, control-run soak until 21.11.2026 |
-| D Kernel interfaces in linux-surface | 🔄 sensors/fans, DPTF data and the suspend fix merged; battery EWMA attribute, MMIO write path ⚠️, PL3 under lockdown ⚠️ open |
+| B Python reference implementation: loader, engine, adapters, supervisor, tools | 🔄 untested adapters; safety suite per device (B7, local) ⬜; CPU use ≈1 % against 0.5 % (B8) ⬜ |
+| C Reference device Surface Book 3 15" | 🔄 field tests ✅, control-run soak extended to 25.11.2026 |
+| D Kernel interfaces in linux-surface | 🔄 sensors/fans, DPTF data and the suspend fix merged; battery EWMA attribute, MMIO write path ⚠️ (decided 23.11.: preferred PL1/PL2 path via a separate module, prototype first; MMIO copy enabled on Pro 8, 9 and 10), PL3 under lockdown ⚠️, temperature sensor nodes for several devices open |
 | E Mainline submission | ⬜ merged linux-surface patches first; MMIO and PL3 paths ⚠️ |
-| F Device validation and profiles | 🔄 Pro 9 and Pro 10 control runs, Pro 8 readings; every x64 SMF device has a profile since 23.11.2026, reports to confirm them 🙋; new reports of 20.–21.11. to evaluate |
+| F Device validation and profiles | 🔄 Pro 9 and Pro 10 control runs, Pro 8 readings; every x64 SMF device has a profile since 23.11.2026, reports to confirm them 🙋; reports of 18.–21.11. evaluated on 23.11., follow-ups open |
 | G Inputs to settle (brightness in nits, battery EWMA level, constants and estimates) | 🔄 |
 | H Outputs to classify (`/71`, modem and arm64 throttle channels, Laptop Studio dGPU) | ⬜ |
 | I Go 3 / Go 4 (ACPI EC) | 🔄 PL3 target settled 19.11.2026; PROCHOT release ⬜ |
@@ -60,7 +61,7 @@ linux-surface installation.
   SKUs from a public catalogue and have not seen the device yet. Most wanted: Pro 7+, Pro 10 5G, Pro 11 Intel, Laptop 5, Laptop 6,
   Laptop 7 Intel, Laptop 7 5G, Laptop Go 2, Laptop Go 3, Go 3 and Go 4 (with `sudo acpidump`), and the Book 3 13".
 - **Dry-runs and Windows comparisons** (HWiNFO PL1/PL2 per mode, on AC and battery) from any SMF Surface.
-- **Tests of an MMIO write path** on a Pro 8 or Pro 10, **Linux on a Snapdragon Surface**, and owners of a **Laptop 3/4 AMD**.
+- **Tests of an MMIO write path** on a Pro 8, Pro 9 or Pro 10, **sensor readings** from devices whose kernel registry has no temperature node (Pro 7+, Pro 8, Laptop 4 Intel 13", Laptop Go 2/3, Laptop 7, Laptop Studio 1), **Linux on a Snapdragon Surface**, and owners of a **Laptop 3/4 AMD**.
 - **Review** of the kernel patches before they go to mainline.
 
 The full list, with what each item unblocks, is in [`docs/plan.md`](docs/plan.md) section 4.
@@ -107,29 +108,29 @@ packages (`scripts/corpus-report.py`, `docs/research/09-newer-blobs.md`). Only t
 |---|---|---|---|---|---|---|
 | Book 3 15" | ✓ | classic, tested after AC-L4 | all from sysfs and the EC data (kernel#195 or debug device) | [9 of 9](docs/devices/surface-book-3-15.md) | ✓ field tests match Windows; kernel#190, #195 merged | all outputs written; control run as a service since 17.11.2026 (the dry-run soak could not exercise the controllers) |
 | Book 3 13" | ✓ | classic (shared with 15") | all from sysfs | [9 of 9](docs/devices/surface-book-3-13.md) | – | all outputs written; dry-run, not checked on a device |
-| Pro 7+ | ✓ | direct, untested (SKU from the driver-pack catalogue, 23.11.2026) | all from sysfs | [12 of 12](docs/devices/surface-pro-7-plus.md) | – | all outputs written (PL3 since 23.11.2026); dry-run by default, untested on a device |
-| Pro 8 | ✓ | classic, untested | battery EWMA level: debug device (root) | [13 of 14](docs/devices/surface-pro-8.md) | PL1/PL2 copies read (tester, 18.11.2026): the firmware's MMIO PL1 30 W caps package power at 30 W while the MSR copy (what the daemon writes) says 35 W | dry-run only |
-| Pro 9 Intel | ✓ | direct, untested (SKUs `Surface_Pro_9_for_Business_2038` and, from the catalogue, `Surface_Pro_9_2038`) | EC power data and battery EWMA level: debug device (root) | [16 of 17 + 1 not needed](docs/devices/surface-pro-9-intel.md) | control run (tester, 17.11.2026): limits, skin controller and fan frames behave as expected | all outputs covered; dry-run by default |
+| Pro 7+ | ✓ | direct, untested (SKU from the driver-pack catalogue, 23.11.2026) | temperatures: no kernel sensor node yet (invalid on Linux), rest from sysfs | [12 of 12](docs/devices/surface-pro-7-plus.md) | – | all outputs written (PL3 since 23.11.2026); dry-run by default, untested on a device |
+| Pro 8 | ✓ | classic, untested | battery EWMA level: debug device (root); temperatures: no kernel sensor node yet | [13 of 14](docs/devices/surface-pro-8.md) | PL1/PL2 copies read (tester, 18.11.2026): the firmware's MMIO PL1 30 W caps package power at 30 W while the MSR copy (what the daemon writes) says 35 W | dry-run only |
+| Pro 9 Intel | ✓ | direct, untested (SKUs `Surface_Pro_9_for_Business_2038` and, from the catalogue, `Surface_Pro_9_2038`) | EC power data and battery EWMA level: debug device (root) | [16 of 17 + 1 not needed](docs/devices/surface-pro-9-intel.md) | control run (tester, 17.11.2026): limits, skin controller and fan frames behave as expected; 59-hour dry-run (tester, 18.–21.11.): stable, 0.98 % CPU (criterion 0.5 %), computed limits equal the engine's; the firmware's MMIO copy (30/60 W, enabled) will cap PL1 at 30 W where the blob says 35 W [H]; MSR reads fail with EIO on this machine, cause unknown | all outputs covered; dry-run by default |
 | Pro 9 5G (arm64) | ✓ | – (direct) | all from sysfs | [7 of 9 + 1 not needed](docs/devices/surface-pro-9-5g.md) | – | dry-run only; no Linux path for its limits yet |
-| Pro 10, Pro 10 5G | ✓ | direct, untested (Pro 10: product name from a report; Pro 10 5G: SKUs from the catalogue, 23.11.2026) | battery EWMA level and max charge: debug device (root) | [16 of 17 + 1 not needed](docs/devices/surface-pro-10.md), [16 of 20 + 1 not needed](docs/devices/surface-pro-10-5g.md) | Pro 10: control run (tester, 17.11.2026, AC): limits written and read back, controllers 1 and 9 switched as on Windows' blob; PL1/PL2 above the firmware's MMIO copy (28/35 W) do not take effect | Pro 10: all outputs covered, [tester checklist](docs/research/12-remaining-outputs.md); dry-run by default. Pro 10 5G: dry-run only (modem throttle requests `9BBB8910/103–105` have no Linux path) |
+| Pro 10, Pro 10 5G | ✓ | direct, untested (Pro 10: product name from a report; Pro 10 5G: SKUs from the catalogue, 23.11.2026) | battery EWMA level and max charge: debug device (root) | [16 of 17 + 1 not needed](docs/devices/surface-pro-10.md), [16 of 20 + 1 not needed](docs/devices/surface-pro-10-5g.md) | Pro 10: control run (tester, 17.11.2026, AC): limits written and read back, controllers 1 and 9 switched as on Windows' blob; PL1/PL2 above the firmware's MMIO copy (28/35 W) do not take effect: the lower copy is in force, measured with four MSR values (tester, 18.11.) | Pro 10: all outputs covered, [tester checklist](docs/research/12-remaining-outputs.md); dry-run by default. Pro 10 5G: dry-run only (modem throttle requests `9BBB8910/103–105` have no Linux path) |
 | Pro 11 Intel | ✓ | direct, untested (SKU from the catalogue and user reports, 23.11.2026) | as Pro 10 | [15 of 16 + 1 not needed](docs/devices/surface-pro-11-intel.md) | – | all outputs covered (PL3 since 23.11.2026); dry-run by default, untested on a device |
 | Pro 11 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [11 of 20 + 1 not needed](docs/devices/surface-pro-11-snapdragon.md) | – | dry-run only; no Linux path for its limits yet |
 | Pro 12" 1st Ed. (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [6 of 16 + 1 not needed](docs/devices/surface-pro-12-1st-edition.md) | – | dry-run only; no Linux path for its limits yet |
-| Laptop 3 AMD | ✓ | classic, untested (core 2.51 not compared) | all from sysfs | [2 of 5](docs/devices/surface-laptop-3-amd.md) | – | dry-run only; no Linux path for its limits yet |
-| Laptop 4 AMD | ✓ | classic, untested | all from sysfs | [3 of 8](docs/devices/surface-laptop-4-amd.md) | – | dry-run only; no Linux path for its limits yet |
-| Laptop 4 Intel | ✓ | direct, untested (SKUs from the kernel, a tester report and the catalogue, 23.11.2026) | all from sysfs | [12 of 12](docs/devices/surface-laptop-4-intel.md) | report from a 15" (tester, 20.11.2026), not evaluated yet | all outputs written (PL3 since 23.11.2026); dry-run by default |
+| Laptop 3 AMD | ✓ | classic, untested (core 2.51 not compared) | temperatures: no kernel sensor node yet; rest from sysfs | [2 of 5](docs/devices/surface-laptop-3-amd.md) | – | dry-run only; no Linux path for its limits yet |
+| Laptop 4 AMD | ✓ | classic, untested | temperatures: no kernel sensor node yet; rest from sysfs | [3 of 8](docs/devices/surface-laptop-4-amd.md) | – | dry-run only; no Linux path for its limits yet |
+| Laptop 4 Intel | ✓ | direct, untested (SKUs from the kernel, a tester report and the catalogue, 23.11.2026) | temperatures: no kernel sensor node yet (`surface_temp` does not bind; the tester used a local fallback); EC data: debug device | [12 of 12](docs/devices/surface-laptop-4-intel.md) | report from a 15" (tester, 20.11.2026, stock kernel): EC clamp at `I_VTS1` 52.1 °C seen; control only with a local sensor fallback and `--allow-partial-outputs` | all outputs written (PL3 since 23.11.2026); dry-run by default; blocked by the missing sensor node |
 | Laptop 5 | ✓ | direct, untested (SKUs from the catalogue and user reports, 23.11.2026) | all from sysfs | [15 of 16 + 1 not needed](docs/devices/surface-laptop-5.md) | – | all outputs covered (PL3 since 23.11.2026); dry-run by default, untested on a device |
 | Laptop 6 | ✓ | direct, untested (SKUs from the catalogue, 23.11.2026) | as Pro 10 | [16 of 17 + 1 not needed](docs/devices/surface-laptop-6.md) | – | all outputs covered (PL3 since 23.11.2026); dry-run by default, untested on a device |
 | Laptop 7 Intel, Laptop 7 5G | ✓ | direct, untested (SKUs from the catalogue, 2107 also from a user report, 23.11.2026) | as Pro 10 | [15 of 16 + 1 not needed](docs/devices/surface-laptop-7-intel.md), [15 of 19 + 1 not needed](docs/devices/surface-laptop-7-5g.md) | – | Laptop 7 Intel: all outputs covered (PL3 since 23.11.2026), dry-run by default, untested on a device; Laptop 7 5G: dry-run only (modem throttle requests `9BBB8910/103–105` have no Linux path) |
 | Laptop 7 Snapdragon (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [11 of 18 + 1 not needed](docs/devices/surface-laptop-7-snapdragon.md) | – | dry-run only; no Linux path for its limits yet |
 | Laptop 13" (arm64) | ✓ | – (direct) | USB-C source power: upper-bound estimate | [11 of 25 + 1 not needed](docs/devices/surface-laptop-13.md) | – | dry-run only; no Linux path for its limits yet |
-| Laptop Go 1 | ✓ | classic, untested | all from sysfs | [10 of 10](docs/devices/surface-laptop-go.md) | – | all outputs written; dry-run by default, untested on a device |
-| Laptop Go 2 | ✓ | direct, untested (SKU from the catalogue, 23.11.2026) | all from sysfs | [13 of 14](docs/devices/surface-laptop-go-2.md) | – | dry-run only (`0B7B5350/71` not classified) |
-| Laptop Go 3 | ✓ | direct, untested (SKU from the catalogue, 23.11.2026) | all from sysfs | [16 of 17 + 1 not needed](docs/devices/surface-laptop-go-3.md) | – | all outputs covered (PL3 since 23.11.2026); dry-run by default, untested on a device |
+| Laptop Go 1 | ✓ | classic, untested | temperatures: no kernel sensor node yet ([kernel#198](https://github.com/linux-surface/kernel/pull/198) by a tester adds it for Go 1, 2 and 3, under review); rest from sysfs | [10 of 10](docs/devices/surface-laptop-go.md) | tester (20.11.): sensors, fan and offset interfaces tried with an own controller; offset frame disagrees with the Windows client (open) | all outputs written; dry-run by default, untested with the daemon |
+| Laptop Go 2 | ✓ | direct, untested (SKU from the catalogue, 23.11.2026) | temperatures: no kernel sensor node yet; rest from sysfs | [13 of 14](docs/devices/surface-laptop-go-2.md) | – | dry-run only (`0B7B5350/71` not classified) |
+| Laptop Go 3 | ✓ | direct, untested (SKU from the catalogue, 23.11.2026) | temperatures: no kernel sensor node yet; rest from sysfs | [16 of 17 + 1 not needed](docs/devices/surface-laptop-go-3.md) | – | all outputs covered (PL3 since 23.11.2026); dry-run by default, untested on a device |
 | Go 3 | ✓ | classic, untested | all from sysfs | [10 of 12](docs/devices/surface-go-3.md) | – | dry-run only (battery-mode output needs an ACPI EC path; `0B7B5350/71` not classified) |
 | Go 4 | ✓ | direct, untested (SKU from the catalogue, 23.11.2026) | all from sysfs | [11 of 13 + 1 not needed](docs/devices/surface-go-4.md) | – | dry-run only (battery-mode output needs an ACPI EC path) |
 | Laptop Studio 1 | ✓ | classic, untested | battery EWMA level: debug device (root); dGPU power and temperature: NVML | [13 of 16](docs/devices/surface-laptop-studio.md) | – | dry-run only |
-| Laptop Studio 2 | ✓ | direct, untested | as Laptop Studio 1 | [17 of 25 + 1 not needed](docs/devices/surface-laptop-studio-2.md) | – | dry-run only |
+| Laptop Studio 2 | ✓ | direct, untested | as Laptop Studio 1 | [17 of 25 + 1 not needed](docs/devices/surface-laptop-studio-2.md) | tester (21.11.): the minimum-fan-speed request `FAN 0x0B` works per fan; the EC takes the higher of it and its own curve | dry-run only |
 | 2025/26 models (MPTF) | – | – | – | – | – | not covered (Windows MPTF, [linux-surface#2384](https://github.com/linux-surface/linux-surface/issues/2384)) |
 
 Notes:
@@ -199,10 +200,12 @@ Licensed under either of
 at your option. Unless you explicitly state otherwise, any contribution you intentionally submit for inclusion in this project, as defined
 in the Apache-2.0 license, is dual licensed as above, without any additional terms or conditions.
 
-This covers the project's own code and documents only. It does not cover Microsoft firmware, drivers or configuration blobs, which are
+This covers the project's own code and documents only, except `kernel/`, which is GPL-2.0-only (see `kernel/README.md`). It does not cover Microsoft firmware, drivers or configuration blobs, which are
 not part of this repository.
 
 ## AI assistance
 
 This work is done with the help of an AI assistant (Claude, in Claude Code). It ran analysis tools and drafted texts and code.
 The direction, measurements on the device and review are by the maintainer.
+Kernel contributions follow the kernel's rule for AI-assisted patches: the maintainer alone signs off, and commits that touch `kernel/` carry an
+`Assisted-by:` line (`CLAUDE.md`, "Kernel modules").

@@ -5,13 +5,15 @@ Learned from the reviews of linux-surface/kernel#190, #195 and linux-surface/lin
 ## Layout
 
 - This repository holds the daemon (`src/surface_power/`), tests, packaging, specs (`docs/specs/`), device pages
-  (`docs/devices/`) and committed research summaries (`docs/research/`).
+  (`docs/devices/`), committed research summaries (`docs/research/`) and the kernel module prototypes (`kernel/`, GPL-2.0-only, see
+  "Kernel modules" below).
 - `docs/research/raw/` is git-ignored raw material: `raw/tools/` (firmware packages per device, decompiled Windows drivers) and
   `raw/arbeitsordner/` (the working folder: measurements, SMF blobs in `smf-blob/`, drafts, `STAND-UND-PLAN.md`). Never commit it.
   Files there are mostly German working notes.
 - Conversation with the maintainer is in German; everything that goes to GitHub, mailing lists or into this repository is English.
 - Nothing is posted, pushed, sent or filed without the maintainer's explicit yes. Show the full text first. No AI footer in
-  commit messages or posts unless the maintainer asks for one.
+  commit messages or posts unless the maintainer asks for one. **Exception: anything that is or becomes a kernel contribution**
+  (commits touching `kernel/`, patches, cover letters) follows the kernel's AI rule, see "Kernel modules".
 
 ## Project plan (read first)
 - **Read `docs/plan.md` first in every session, before anything else** (also after context compaction), then `STAND-UND-PLAN.md`.
@@ -47,7 +49,27 @@ Learned from the reviews of linux-surface/kernel#190, #195 and linux-surface/lin
 - The same in the daemon: EC requests only for inputs that the device's blob reads; a command that repeatedly gets no answer is
   stopped.
 - Only the maintainer adds `Signed-off-by`. If the content of a commit that carries their sign-off changes, remove the line; the
-  maintainer checks and re-adds it (`git rebase --signoff`).
+  maintainer checks and re-adds it (`git rebase --signoff`). The kernel says the same about AI agents
+  (`Documentation/process/coding-assistants.rst`): an agent never adds `Signed-off-by`.
+
+## Kernel modules (`kernel/`)
+Decided 23.11.2026; concept `docs/requirements/kernel-modules.md`, specs `docs/specs/kernel-*.md`.
+- **License:** GPL-2.0-only. Every file under `kernel/` starts with the SPDX line `// SPDX-License-Identifier: GPL-2.0-only` (or `#` in build
+  files); the text is in `kernel/LICENSES/preferred/GPL-2.0`. Code from `kernel/` is not copied into the rest of the repository (it would
+  take over that code's license); the other direction (MIT/Apache code into `kernel/`) is allowed.
+- **AI rule of the kernel (adopted):** a kernel contribution that a coding assistant helped to write carries `Assisted-by: LLM [TOOLS]`
+  (format of the linux-surface tree, `submitting-patches.rst` "Using Assisted-by"; re-read the current text in mainline before every
+  submission), listing specialised tools only (checkpatch, sparse, coccinelle ...), not git, gcc, make or editors. The assistant never
+  adds `Signed-off-by`; the maintainer does, after reading and testing the code (the DCO is his). Cover letter and changelog say what the
+  tool did, how the code was tested, and what could not be tested (`Documentation/process/generated-content.rst`). Commits in this
+  repository that touch `kernel/` carry the `Assisted-by` line from the start, so a later `git format-patch` is already honest.
+- **Prototype first:** the module is built in a copy outside the repository, read-only by default, loaded by hand, never by an alias; a
+  device enters the DMI table only with the evidence list of `docs/specs/kernel-mmio-rapl.md` 6. Write tests run step by step on the
+  Surface Book 3 with the maintainer's explicit yes before each step; `sudo` only through a terminal tab.
+- **Not on a device with an enabled MMIO copy** (Pro 8, 9, 10) and not on any other hardware until the maintainer says so; testers get the
+  module only after the SB3 test plan has passed.
+- `checkpatch.pl --no-tree -f` and `make W=1` clean before every commit that touches `kernel/`; the checks run against the kernel tree the
+  module is meant for (the linux-surface kernel, `v7.3-surface-devel`).
 
 ## Procedure: evaluating a test report or checking a device
 Always applies, also after context compaction: nothing from memory or by analogy to another device. Every step on the device

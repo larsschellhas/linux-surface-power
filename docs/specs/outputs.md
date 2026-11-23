@@ -80,12 +80,14 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 - **On the SB3 15" (18.11.2026, daemon in control, AC, `scripts/mmio-pl-read.py`) [M]: MCHBAR `0xfed10000` (the client's Ice Lake
   constant); MMIO copy PL1 25 W, PL2 61 W, **both enable bits 0**; MSR copy PL1 30 W, PL2 61 W, both enabled. A disabled MMIO copy
   does not cap, so on the SB3 the MSR copy alone is in force, which fits the measured control runs. Windows' write (base `0x18000`)
-  would set enable and clamp there. Whether the MMIO copy on the Pro 10 (28/35 W) is enabled was not reported [H].
+  would set enable and clamp there. On the Pro 10 the MMIO copy (28/35 W) is enabled (tester, 18.11.2026, below).
 - **Windows' own limit [H]:** Windows leaves the MSR copy at the firmware value, so its effective limit is the lower of the blob
   value and the *firmware MSR* value, not the blob value alone. On the Pro 10 the firmware MSR is 35/64 W [M, tester] while the blob
   allows PL1 up to 65 W and PL2 up to 100 W (channel ranges), so the MSR copy may limit under Windows too. What Windows really
   delivers there is not measured. Writing the MMIO copy and leaving the MSR alone would reproduce Windows; it is not the same as
   "no second limit".
+- **On the Pro 10** (tester, 18.11.2026, daemon stopped) [M]: MMIO copy PL1 28 W and PL2 35 W, both enabled; MSR copy PL1 35 W, PL2 64 W; 00:04.0 and `intel-rapl-mmio` absent; MCHBAR `0xfedc0000` (the client's constant). Writing the MSR PL1 at 30.0, 29.2, 27.3 and 25.5 W gave package power of 28.0, 28.0, 27.6 and 25.5 W: the lower copy is in force (measuring method not stated). Windows holds about 30 W on AC in Best performance for the first 3.5 minutes (tester's observation), which fits the blob's 30 W written to the MMIO copy [C blob, engine replay with assumed EC inputs]. The Windows write goes to `0x59a0`/`0x59a4` of this device's client (build `463d42bc`) with mask `0x7fff` and enable and clamp set [C, read 23.11.2026].
+- **On the Pro 9 Intel** (tester, 18.–21.11.2026, read-only, unchanged over 59 hours) [M]: MMIO copy PL1 30 W and PL2 60 W, both enabled; MSR copy PL1 35 W, PL2 60 W; no 00:04.0, no `intel-rapl-mmio`. The blob's Slider 5 on AC is PL1 35 W / PL2 60 W (engine replay with assumed inputs), so Linux would give 30 W where Windows gives 35 W [H]. After the Pro 8 and Pro 10 this is the third device other than the SB3 whose firmware enables the MMIO copy.
 - **Per device:** the firmware state of the copies differs. Read-only visibility, no write:
   - `surface-power-report` (as root) prints the presence of 00:04.0 and of `intel-rapl-mmio`, and both copies (PL1/PL2, enable, clamp, lock);
   - the daemon reads the copies every 60 s (`adapters/rapl_copies.py`), logs a warning when an *enabled* MMIO half is below the
@@ -266,7 +268,9 @@ Dry-run computes the frames and sends nothing. The status file shows `would send
 ### 9.8 Sensor offsets (`A79674B4/5xx`) [C for the command, H for the effect]
 Sent by the same stage as the fan outputs (9.1): TMP `0x24`, instance = sensor number (channel - 500), payload = sensor number (u8) + float32 K (value x 0.1), flags 0.
 Hard bound +-5 K [D] (the blob has no range for it; the corpus has -2 K to +2 K), neutral frame = offset 0 (recorded in the snapshot as `sam:A79674B4/509`), status target `SAM TMP 0x24 (cdev)`.
-In the Pro 10 blob it is constantly 0; other blobs use -2.0 to +1.5 K. Effect on the EC not measured.
+In the Pro 10 blob it is constantly 0; other blobs use -2.0 to +1.5 K. Effect on the EC not measured with this frame.
+
+**Open contradiction (23.11.2026, `plan.md` H6):** the frame above (the sensor number in the SSAM instance field and again in the payload) is what the Windows SMF client builds, read in two builds: the Pro 10/Laptop Studio 2/Laptop 6 client (sha256 `0f18750c…`) and the Laptop Go 1 client (sha256 `68f6cffd…`) [C]. A tester on a Laptop Go 1 reports [M, one device, one tester] that this frame has no effect on `I_VTS1`, while the instance field 0 with the sensor number only in the payload shifts it by the float on the next 5 s EC tick. A write with flags 0 is acknowledged on the link whether or not the EC acts on it (DV-11), so "status 0" proves nothing. Whether Windows' own write has no effect on that EC, whether the Windows serial-hub layer changes the instance, or whether the EC firmware differs is not known. The daemon keeps the Windows frame until this is settled; the offset output is therefore sent on every device but its effect is measured on none.
 
 ### 9.9 Battery mode (`0B7B5350/70`) [C for the request, H for its meaning] (`adapters/prochot.py`)
 Value 1 sends one SAM request: category TMP `0x03`, target ID 1, instance 0, flags 0, command `0x1b`, no payload; the Windows Intel client does the same and sends nothing for 0.

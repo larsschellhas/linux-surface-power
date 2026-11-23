@@ -37,7 +37,7 @@ Processor Aggregator Device (`PAGD`, matched with `/62` by a fixed name table in
   linux-surface kernel (`surface_platform_profile`), and the temperature thresholds 302–311 stay off unless a device profile opts in.
   Implemented and tested on fakes only: no device with these outputs has run it (`scripts/fan-test.py` is the test for a tester).
 - **Sensor offsets (`A79674B4`):** SAM TMP `0x24` with the offset in 0.1 K, sent by the SMF client; written by the daemon since 16.11.2026 (`12-remaining-outputs.md` 2.3).
-- **`CF2F6076`:** channel 61 is the PL1 time window of the IHV CPU client (`12-remaining-outputs.md` 2.1), written through powercap. `349D0E39` (AMD and others) is not analysed.
+- **`CF2F6076`:** channel 61 is the PL1 time window of the IHV CPU client (`12-remaining-outputs.md` 2.1), written through powercap. `349D0E39` is not analysed: it has entries in every Intel client table (targets `0x5b10` and MSR `0x610`/MMIO `0x59a0` bits, depending on the table, `15-mmio-evidence.md` 1) and is used by the Laptop Studio 2 blob (`plan.md` H5); its meaning is [H].
 - **`87008365/220, 250, 300`:** the Surface service (power-meter polling, camera noise reduction), not relevant for limits.
 
 ## 4. PL3 and PL4 on the SB3 15" [M, 16.11.2026]
