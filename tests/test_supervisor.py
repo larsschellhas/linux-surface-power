@@ -51,23 +51,37 @@ class DetectTest(unittest.TestCase):
         self.fs.write("sys/class/dmi/id/product_sku", "Surface_Laptop_4_1958:1959")
         p = supervisor.find_profile(supervisor.detect(self.fs.root))
         self.assertEqual((p.file, p.variant), ("surface-laptop-4-amd.toml", "classic"))
-        self.fs.write("sys/class/dmi/id/product_sku", "Surface_Laptop_4_1950:1951")   # Intel: no profile, direct
+        self.fs.write("sys/class/dmi/id/product_sku", "Surface_Laptop_4_1950:1951")   # Intel: its own profile, direct
+        p = supervisor.find_profile(supervisor.detect(self.fs.root))
+        self.assertEqual((p.file, p.variant, p.pl3), ("surface-laptop-4-intel.toml", "direct", True))
+        self.fs.write("sys/class/dmi/id/product_sku", "Surface_Laptop_4_1999:1999")   # unknown SKU: no profile
         self.assertIsNone(supervisor.find_profile(supervisor.detect(self.fs.root)))
 
     def test_shipped_profiles_load(self):
         names = {p.file for p in supervisor.load_profiles()}
         self.assertLessEqual({"surface-book-3.toml", "surface-pro-8.toml", "surface-go-3.toml", "surface-laptop-go.toml",
                               "surface-laptop-studio.toml", "surface-laptop-3-amd.toml", "surface-laptop-4-amd.toml"}, names)
-        self.assertTrue(all(p.variant == "classic" for p in supervisor.load_profiles() if p.file not in ("surface-pro-9.toml", "surface-pro-10.toml", "surface-laptop-studio-2.toml")))
+        classic = {"surface-book-3.toml", "surface-pro-8.toml", "surface-go-3.toml", "surface-laptop-go.toml",
+                   "surface-laptop-studio.toml", "surface-laptop-3-amd.toml", "surface-laptop-4-amd.toml"}
+        self.assertTrue(all((p.variant == "classic") == (p.file in classic) for p in supervisor.load_profiles()))
+        self.assertFalse(any(p.tested for p in supervisor.load_profiles()))
+        # no SKU is matched by two profiles
+        skus = [s for p in supervisor.load_profiles() for s in (p.sku or ())]
+        self.assertEqual(len(skus), len(set(skus)))
         pro10 = next(p for p in supervisor.load_profiles() if p.file == "surface-pro-10.toml")
         self.assertEqual((pro10.product, pro10.variant, pro10.tested), ("Surface Pro 10 for Business", "direct", False))
         self.assertEqual((pro10.pl4_requires_ec, pro10.pl4_ec_wait_s), (True, 10.0))
         pro9 = next(p for p in supervisor.load_profiles() if p.file == "surface-pro-9.toml")
         self.assertEqual((pro9.variant, pro9.tested), ("direct", False))
         # PL3 only where Windows' write of MSR 0x615 is verified in the device's driver (docs/research/10-outputs.md 4.1)
+        # (Go 3/Go 4: platform type from the ACPI _DSM of the public DSDT dumps)
         self.assertEqual({p.file for p in supervisor.load_profiles() if p.pl3 is True},
                          {"surface-book-3.toml", "surface-pro-8.toml", "surface-pro-9.toml", "surface-pro-10.toml",
-                          "surface-laptop-go.toml", "surface-laptop-studio.toml", "surface-laptop-studio-2.toml"})
+                          "surface-laptop-go.toml", "surface-laptop-studio.toml", "surface-laptop-studio-2.toml",
+                          "surface-pro-7-plus.toml", "surface-pro-10-5g.toml", "surface-pro-11-intel.toml",
+                          "surface-laptop-4-intel.toml", "surface-laptop-5.toml", "surface-laptop-6.toml",
+                          "surface-laptop-7-intel.toml", "surface-laptop-7-5g.toml", "surface-laptop-go-2.toml",
+                          "surface-laptop-go-3.toml", "surface-go-3.toml", "surface-go-4.toml"})
         self.assertTrue(any("integrated GPU" in n for n in pro10.notes))
         self.assertFalse(any(p.pl4_requires_ec or p.notes for p in supervisor.load_profiles() if p.file != "surface-pro-10.toml"))
 

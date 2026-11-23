@@ -51,6 +51,12 @@ The variant follows the core in the device's driver package (`../specs/engine.md
     `surface.json`, `SystemId`). They agree with the SKUs the kernel and linux-surface match for the Laptop 3/4, and with the SB3 15"
     here (`Surface_Book_3_1899`) [M].
   - Laptop 4 Intel shares its product name with the AMD model, so the AMD profile must match by SKU.
+- Since 23.11.2026 every x64 `direct` device has a profile too (untested), matched by the SKUs of the same catalogue (commit `1fcc2829`
+  of OSDeploy `core/driverpacks/surface.json`), so that PL3 can be switched on where the device's driver proves it (`../plan.md` F5).
+  User reports in linux-surface issues confirm some of them (Pro 7+ 1960, Pro 11 Intel 2103, Laptop 4 1950:1951 and 1978:1979,
+  Laptop 5 1950:1951 and 1979, Laptop 7 Intel 2107); the rest waits for a report. The Pro 9 profile also matches the catalogue's
+  consumer SKU `Surface_Pro_9_2038`. The kernel matches the Go 3 and Go 4 by a product-name substring only, so the exact Go 3 name
+  in its profile is [H].
 
 ### 3.1 The arm64 cores [C]
 The three arm64 cores (3.181, 3.205.8, 3.205.17) were checked separately:

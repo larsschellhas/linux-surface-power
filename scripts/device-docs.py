@@ -25,35 +25,35 @@ from surface_power.loader.model import ChannelRef  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 DEFAULT = os.path.join(ROOT, "docs", "research", "raw", "tools", "fw")
-AS_OF = "18.11.2026"
+AS_OF = "23.11.2026"
 
 # Package folder -> (page name, title, profile file or None, controller variant). Variants: docs/research/09-newer-blobs.md 3.
 # Platform: Intel unless listed in PLATFORM.
 DEVICES = {
     "sb3": None,  # split by blob size below
-    "pro7p": ("surface-pro-7-plus", "Surface Pro 7+", None, "direct"),
+    "pro7p": ("surface-pro-7-plus", "Surface Pro 7+", "surface-pro-7-plus.toml", "direct"),
     "pro8": ("surface-pro-8", "Surface Pro 8", "surface-pro-8.toml", "classic"),
     "pro9": ("surface-pro-9-intel", "Surface Pro 9 (Intel)", "surface-pro-9.toml", "direct"),
     "pro9_5g": ("surface-pro-9-5g", "Surface Pro 9 5G (arm64)", None, "direct"),
     "pro10": ("surface-pro-10", "Surface Pro 10 for Business", "surface-pro-10.toml", "direct"),
-    "pro10_5g": ("surface-pro-10-5g", "Surface Pro 10 5G for Business", None, "direct"),
-    "pro11_intel": ("surface-pro-11-intel", "Surface Pro 11 (Intel)", None, "direct"),
+    "pro10_5g": ("surface-pro-10-5g", "Surface Pro 10 5G for Business", "surface-pro-10-5g.toml", "direct"),
+    "pro11_intel": ("surface-pro-11-intel", "Surface Pro 11 (Intel)", "surface-pro-11-intel.toml", "direct"),
     "pro11_snap": ("surface-pro-11-snapdragon", "Surface Pro 11 (Snapdragon, arm64)", None, "direct"),
     "pro12_1": ("surface-pro-12-1st-edition", "Surface Pro 12\" 1st Edition (arm64)", None, "direct"),
     "lap3_amd": ("surface-laptop-3-amd", "Surface Laptop 3 (AMD)", "surface-laptop-3-amd.toml", "classic"),
     "lap4_amd": ("surface-laptop-4-amd", "Surface Laptop 4 (AMD)", "surface-laptop-4-amd.toml", "classic"),
-    "lap4_intel": ("surface-laptop-4-intel", "Surface Laptop 4 (Intel)", None, "direct"),
-    "lap5": ("surface-laptop-5", "Surface Laptop 5", None, "direct"),
-    "lap6": ("surface-laptop-6", "Surface Laptop 6 for Business", None, "direct"),
-    "lap7_intel": ("surface-laptop-7-intel", "Surface Laptop 7 (Intel)", None, "direct"),
-    "lap7_5g_intel": ("surface-laptop-7-5g", "Surface Laptop 7 5G for Business", None, "direct"),
+    "lap4_intel": ("surface-laptop-4-intel", "Surface Laptop 4 (Intel)", "surface-laptop-4-intel.toml", "direct"),
+    "lap5": ("surface-laptop-5", "Surface Laptop 5", "surface-laptop-5.toml", "direct"),
+    "lap6": ("surface-laptop-6", "Surface Laptop 6 for Business", "surface-laptop-6.toml", "direct"),
+    "lap7_intel": ("surface-laptop-7-intel", "Surface Laptop 7 (Intel)", "surface-laptop-7-intel.toml", "direct"),
+    "lap7_5g_intel": ("surface-laptop-7-5g", "Surface Laptop 7 5G for Business", "surface-laptop-7-5g.toml", "direct"),
     "lap7_snap": ("surface-laptop-7-snapdragon", "Surface Laptop 7 (Snapdragon, arm64)", None, "direct"),
     "lap13_1_snap": ("surface-laptop-13", "Surface Laptop 13\" (arm64)", None, "direct"),
     "lapgo1": ("surface-laptop-go", "Surface Laptop Go", "surface-laptop-go.toml", "classic"),
-    "lapgo2": ("surface-laptop-go-2", "Surface Laptop Go 2", None, "direct"),
-    "lapgo3": ("surface-laptop-go-3", "Surface Laptop Go 3", None, "direct"),
+    "lapgo2": ("surface-laptop-go-2", "Surface Laptop Go 2", "surface-laptop-go-2.toml", "direct"),
+    "lapgo3": ("surface-laptop-go-3", "Surface Laptop Go 3", "surface-laptop-go-3.toml", "direct"),
     "go3": ("surface-go-3", "Surface Go 3", "surface-go-3.toml", "classic"),
-    "go4": ("surface-go-4", "Surface Go 4", None, "direct"),
+    "go4": ("surface-go-4", "Surface Go 4", "surface-go-4.toml", "direct"),
     "ls1": ("surface-laptop-studio", "Surface Laptop Studio", "surface-laptop-studio.toml", "classic"),
     "ls2": ("surface-laptop-studio-2", "Surface Laptop Studio 2", "surface-laptop-studio-2.toml", "direct"),
 }

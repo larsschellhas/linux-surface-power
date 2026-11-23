@@ -67,6 +67,8 @@ Tools without root: `surface-power-blob` (dump, inspect, diagram), `surface-powe
 
 ## Phases (link to acceptance criteria)
 
+The phases below were the first plan. The current plan, with work packages and their state, is [`../plan.md`](../plan.md).
+
 | Phase | Content | Done when |
 |---|---|---|
 | 1 | loader + `blob` tool | AC-B1–B6 |

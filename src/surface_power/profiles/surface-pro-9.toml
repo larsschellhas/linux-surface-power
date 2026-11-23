@@ -1,10 +1,12 @@
-# Device profile: Surface Pro 9 (Intel), only the SKU seen in a tester's report (linux-surface#2383). Spec supervisor 6. Holds no
-# limit values (G-2): those come from the device's blob. Not validated on a device: tested stays false.
-# Other Pro 9 SKUs (and the 5G model) are not matched: their DMI values are not known here.
+# Device profile: Surface Pro 9 (Intel). Spec supervisor 6. Holds no limit values (G-2): those come from the device's blob.
+# SKUs: Surface_Pro_9_for_Business_2038 from a tester's report (linux-surface#2383); Surface_Pro_9_2038 from the public Surface
+# driver-pack catalogue (OSDeploy `core/driverpacks/surface.json`, commit 1fcc2829), which lists both SKUs for the same driver
+# package (added 23.11.2026, docs/plan.md F5). The 5G model (arm64) has its own SKUs and is not matched.
+# Not validated on a device: tested stays false.
 tested = false
 
 [match]
-sku = ["Surface_Pro_9_for_Business_2038"]
+sku = ["Surface_Pro_9_for_Business_2038", "Surface_Pro_9_2038"]
 
 [blob]
 source = "efivar"

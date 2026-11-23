@@ -66,16 +66,22 @@ Read in the Surface CPU SMF client builds of the driver corpus (x64):
 - **Which platform type a device has** is fixed by the Surface integration driver of its package: it creates exactly one CPU client
   child, unconditionally, with a hardware ID naming the type (Ice Lake, Tiger Lake, Alder Lake, Raptor Lake, Meteor Lake, or
   `MSHW0600`). Only the Gemini Lake type selects the MMIO table; no package of the corpus creates it. Go 3 and Go 4 create no such
-  child: there the client binds to `ACPI\MSHW0301` and takes its type from an ACPI `_DSM`, whose value is not verified [H].
+  child: there the client binds to `ACPI\MSHW0301` and takes its type from an ACPI `_DSM` (UUID `3d011f96-f8d3-499b-8a80-3dd2b09d51ed`,
+  revision 0, function 1, integer result; 1–9 accepted) [C, client `0d5efa50`, the build of both packages]. In the public DSDT dumps
+  (linux-surface/acpidumps) the `MSHW0301` device returns **1 on the Go 3** (Ice Lake type, MSR table) and **5 on the Go 4** (Alder
+  Lake EC type, MSR table) [C, 19.11.2026]. That the firmware on a tester's device returns the same value is [H] (the dumps carry no
+  firmware version); a report with `acpidump` confirms it.
 - **Verified per device [C, 18.11.2026]** (driver package of the device, client build by sha256 prefix): MSR `0x615` on
   Surface Book 3 13"/15" (Ice Lake, `8030e5ac`), Laptop Go 1 (Ice Lake, `dee1fad5`), Pro 7+ and Pro 8 (Tiger Lake, `18ed0894`),
   Laptop 4 Intel, Laptop Go 2, Laptop Studio 1 (Tiger Lake, `0d5efa50`), Pro 9 Intel, Laptop 5, Laptop Go 3 (Alder Lake,
   `0d5efa50`), Laptop Studio 2 (Raptor Lake, `0d5efa50`), Pro 10 (Meteor Lake, `463d42bc`), Pro 10 5G (Meteor Lake, `3db5fe38`),
   Laptop 6 (Meteor Lake, `0d5efa50`), Laptop 7 5G Intel (Meteor Lake, `f884dca0`), Pro 11 Intel and Laptop 7 Intel (`MSHW0600`,
-  `0d5efa50`). Open: Go 3, Go 4 [H]. Measured only on the SB3 15" (above) and by a tester on a Pro 9.
+  `0d5efa50`). Go 3 and Go 4: MSR `0x615` by the `_DSM`
+  value in the public dumps (above), no profile switches it on yet. Measured only on the SB3 15" (above) and by a tester on a Pro 9.
 - **PL1/PL2 on Windows go to MMIO** (MCHBAR `0x59a0`, PL2 in its upper half; Gemini Lake `0x70a8`), bits 14:0 with enable and clamp set, in
   every table of these builds; the MSR `0x610` copy has its own channels (56/57), which no blob of the corpus uses. Linux writes PL1/PL2 through powercap (MSR). Where
   the firmware's MMIO copy is lower, it caps the effective limit: on a Pro 10 PL1 above 28 W did not take effect (tester, #2383) [M]. Consequences: `../specs/outputs.md` 3.3.
 - **Linux:** PL3 is opt-in per profile (`pl3 = true`), only where Windows' write is verified in the driver and a profile
-  matches the device: since 18.11.2026 SB3, Pro 8, Pro 9 Intel (one SKU), Pro 10, Laptop Go 1, Laptop Studio 1/2. The daemon changes the
+  matches the device: since 18.11.2026 SB3, Pro 8, Pro 9 Intel, Pro 10, Laptop Go 1, Laptop Studio 1/2; since 23.11.2026 also the
+  Pro 7+, Pro 10 5G, Pro 11 Intel, Laptop 4 Intel, Laptop 5, Laptop 6, Laptop 7 Intel, Laptop 7 5G, Laptop Go 2/3, Go 3 and Go 4 (profiles by catalogue SKU, `../plan.md` F5). The daemon changes the
   same bits 12:0. It converts with the RAPL power unit from MSR `0x606`; on the SB3 that is 1/8 W, as Windows assumes [M].

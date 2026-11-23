@@ -115,9 +115,9 @@ names the inputs in the log and `mode_reason`. The hold of 3.1 applies in any ca
 iGPU there (tester report [H]); its `notes` line says so in the report and the log. See `docs/research/13-pro10-battery-and-timing.md`.
 
 ## 4. PL3 through MSR (FR-O2)
-- **Encoding:** MSR 0x615 holds PL3 in power units from MSR 0x606 (`1/2^PU W`). The adapter changes only the power-limit field (bits 0–14) and keeps the time window and the enable bit as read.
+- **Encoding:** MSR 0x615 holds PL3 in power units from MSR 0x606 (`1/2^PU W`). The adapter changes only bits 0–12, the field Windows writes (`../research/10-outputs.md` 4.1 [C]); bits 13–14, the time window and the enable bit stay as read.
 - **Availability:** this needs `/dev/cpu/0/msr` and kernel lockdown `none`. If either is missing, PL3 is log-only and reported once (AC-O1).
-- **Default:** automatic: PL3 is written where the MSR device is writable (root, lockdown `none`). A device profile can switch it off. The SB3 profile does, until it is measured: the field tests ran without it [H: it does not bind in normal use, because the blob value is the battery sustained power plus the available input power].
+- **Default:** opt-in per device profile (`outputs.pl3 = true`), only where Windows' write of MSR 0x615 is verified in the driver of that device (DV-9, since 17.11.2026). Without it PL3 is log-only. The profiles of the SB3, Pro 8, Pro 9 Intel, Pro 10, Laptop Go 1, Laptop Studio 1/2 and (since 23.11.2026) the Pro 7+, Pro 10 5G, Pro 11 Intel, Laptop 4 Intel, Laptop 5, Laptop 6, Laptop 7 Intel, Laptop 7 5G, Laptop Go 2/3, Go 3 and Go 4 switch it on (`../research/10-outputs.md` 4.1).
 - **Snapshot:** the firmware value of MSR 0x615 is part of the snapshot (`supervisor.md` 3) and restored with the powercap values.
 - **Read-back:** the limit field is read back like a powercap file; a foreign change of the field counts as a foreign change.
 

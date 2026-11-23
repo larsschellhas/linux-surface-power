@@ -1,0 +1,24 @@
+# Device profile: Surface Laptop 4 (Intel). Spec supervisor 6. Holds no limit values (G-2): those come from the device's blob.
+# Matched by SKU (DMI product_sku). Source: the public Surface driver-pack catalogue (OSDeploy `core/driverpacks/surface.json`,
+# commit 1fcc2829, 30.09.2026; field `SystemId`); 1950:1951 is the kernel's own match for the Intel 13.5" (surface_gpe); 1978:1979
+# (15") in a tester report (linux-surface#2383, 20.11.2026). The AMD model shares the product name, so this profile matches by
+# SKU.
+# Created 23.11.2026 without a report from this device (docs/plan.md F5). Not validated on a device: tested stays false, so the
+# daemon runs dry-run unless started with --control. A report from the device confirms the SKU.
+tested = false
+
+[match]
+sku = ["Surface_Laptop_4_1950:1951",
+       "Surface_Laptop_4_1978:1979"]
+
+[blob]
+source = "efivar"
+
+[engine]
+variant = "direct"      # the driver package ships SMF core 3.205.17 (docs/research/09-newer-blobs.md 3)
+
+[outputs]
+# pl4: automatic (where powercap reports a value). PL3: the blob has channel 59, and Windows writes it to MSR 0x615 bits 12:0 on this
+# device (Tiger Lake type, client build 0d5efa50; docs/research/10-outputs.md 4.1) [C]. Held while its EC inputs are invalid (spec
+# outputs 3.1).
+pl3 = true

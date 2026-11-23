@@ -1,5 +1,7 @@
 # Device profile: Surface Go 3. Spec supervisor 6. Holds no limit values (G-2): those come from the device's blob.
-# Matched by the product name as matched by the kernel (acpi/battery.c, intel/hid.c). Not validated on a device yet.
+# Matched by the product name as matched by the kernel (acpi/battery.c, intel/hid.c). Those match a substring, so that the exact
+# DMI name is "Surface Go 3" is [H] until a report confirms it (the catalogue lists the SKUs Surface_Go_3_1901, _1926 and _2022).
+# Not validated on a device yet.
 tested = false
 
 [match]
@@ -14,5 +16,8 @@ variant = "classic"     # the driver package ships SMF core 3.137 (docs/research
 [outputs]
 # pl4: automatic (where powercap reports a value); set false to switch off. pl3 (MSR 0x615): only with pl3 = true, for devices
 # where Windows' write is verified (driver build or measurement); off by default.
-# PL3 stays off here: on the Go 3 the Windows CPU client takes its platform type from an ACPI _DSM, so MSR or MMIO is not
-# verified (docs/research/10-outputs.md 4.1) [H].
+# PL3: the blob has channel 59. The Windows CPU client (build 0d5efa50) binds to ACPI `MSHW0301` and takes its platform type from
+# that device's `_DSM` (revision 0, function 1); the public DSDT dump of the Go 3 returns 1 (Ice Lake type), whose table writes
+# channel 59 to MSR 0x615 bits 12:0 (docs/research/10-outputs.md 4.1) [C]. That current firmware returns the same value is [H]
+# until a report with `acpidump` confirms it (docs/plan.md I1, F7). Held while its EC inputs are invalid (spec outputs 3.1).
+pl3 = true
