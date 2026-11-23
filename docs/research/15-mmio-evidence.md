@@ -55,7 +55,7 @@ Both constants appear once in every client binary. Tables for types 3 (Gemini La
 ## 4. Measured firmware state of the MMIO copy [M, readings by testers and on the SB3]
 | Device | MMIO PL1 / PL2 | enabled | MSR copy PL1 / PL2 (firmware) |
 |---|---|---|---|
-| Book 3 15" | 25 / 61 W | **no** (both bits 0) | 30 / 61 W (read during a control run, not the firmware value) |
+| Book 3 15" | 25 / 61 W | **no** (both enable bits 0; PL1 clamp 1, PL2 clamp 0; both lock bits 0; register `0x000001e800dd00c8`, [M] 23.11.2026, also seen through the module's zone) | 30 / 61 W (read during a control run, not the firmware value) |
 | Pro 8 | 30 / 60 W | yes | 35 / 60 W |
 | Pro 9 Intel | 30 / 60 W | yes | 35 / 60 W |
 | Pro 10 | 28 / 35 W | yes | 35 / 64 W |
@@ -63,6 +63,6 @@ The lower enabled copy limits (`specs/deviations.md` DV-8): measured on the Pro 
 
 ## 5. Open
 - Access width and enable/clamp handling of the Windows write versus the kernel's zone (the SB3 has the copy disabled: a write needs the enable bit to take effect).
-- Whether the firmware's lock bit (31/63) is set on any device (raw registers show lock 0 on the Pro 9 and the Pro 10; not reported for the Pro 8 and the SB3).
+- Whether the firmware's lock bit (31/63) is set on any device (raw registers show lock 0 on the SB3 [M 23.11.2026], the Pro 9 and the Pro 10; not reported for the Pro 8).
 - MCHBAR of types 4–8 on devices other than the Pro 9 and Pro 10; Lunar Lake in particular.
 - Whether writing the MMIO copy has side effects beyond the limit (not measured by anybody; Windows does it on every Intel device).

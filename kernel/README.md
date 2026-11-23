@@ -8,10 +8,10 @@ linux-surface kernel and later for mainline. Concept and requirements: [`docs/re
 
 | Directory | Module | Spec | State |
 |---|---|---|---|
-| `surface-rapl-mmio/` | `surface_rapl_mmio`: powercap zone for the MMIO copy of PL1/PL2 | [`docs/specs/kernel-mmio-rapl.md`](../docs/specs/kernel-mmio-rapl.md) | skeleton, compiles; not loaded on any device yet |
+| `surface-rapl-mmio/` | `surface_rapl_mmio`: powercap zone for the MMIO copy of PL1/PL2 | [`docs/specs/kernel-mmio-rapl.md`](../docs/specs/kernel-mmio-rapl.md) | prototype; loaded read-only on the Surface Book 3 15" (23.11.2026: zone equals the registers, three clean unloads); never loaded with `allow_write=1` |
 | (not started) | `surface_pl3`: PL3 from the kernel | [`docs/specs/kernel-pl3.md`](../docs/specs/kernel-pl3.md) | concept |
 
 **Not for everyone:** the module acts only on devices in its DMI table, is read-only unless loaded with `allow_write=1`, and with that taints the kernel. It
 needs a matching kernel header package and, with Secure Boot, your own module signing (the prototype does not meet the project's "no extra setup" goal; the
 final form in the linux-surface kernel will). Build in a copy of the directory: `cp -r kernel/surface-rapl-mmio /tmp/srm && make -C /tmp/srm`.
-Do not load it on a device before the evidence steps in the spec (section 6) and the test plan (section 8) are done.
+With Secure Boot on, the kernel refuses an unsigned module (`Key was rejected by service`): sign your own build with a key your kernel trusts. Do not load it on a device before the evidence steps in the spec (section 6) and the test plan (section 8) are done.

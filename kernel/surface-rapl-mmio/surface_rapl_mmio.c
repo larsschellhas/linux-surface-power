@@ -84,6 +84,7 @@ static const struct dmi_system_id srm_devices[] = {
 	},
 	{ }
 };
+
 /* No MODULE_DEVICE_TABLE in the prototype: the module is loaded by hand, never by an alias on every Microsoft machine [spec 4]. */
 
 static bool allow_write;
@@ -147,10 +148,20 @@ static int srm_read_raw(int id, struct reg_action *ra, bool pmu_ctx)
 	return 0;
 }
 
+/* The power unit (bits 3:0) of the unit register, or 0 if the register is not sane (reads 0 or all ones) [spec 4.5]. */
+static u32 srm_power_unit(void)
+{
+	u32 reg = readl(srm_reg(SRM_REG_UNIT));
+
+	if (reg == U32_MAX)
+		return 0;
+	return reg & 0xf;
+}
+
 /* Raw value of `watts` in the power unit of the unit register, or 0 if the unit register is not sane. */
 static u64 srm_watts_to_raw(unsigned int watts)
 {
-	u32 unit = readl(srm_reg(SRM_REG_UNIT)) & 0xf;
+	u32 unit = srm_power_unit();
 
 	if (!unit)
 		return 0;
@@ -162,8 +173,13 @@ static int srm_write_raw(int id, struct reg_action *ra)
 	u64 val, new, min;
 	int ret = 0;
 
-	if (!allow_write || srm_removing)
+	/* The core's own clean-up at removal comes here too: refuse it silently, it is expected [spec 5.5]. */
+	if (srm_removing)
 		return -EPERM;
+	if (!allow_write) {
+		pr_warn_once("refused a write: the module is read-only (allow_write=0)\n");
+		return -EPERM;
+	}
 	/* Only the limit register, only the listed bit groups, never a lock bit [spec 5.3]. */
 	if (ra->reg.mmio != srm_reg(SRM_REG_LIMIT) || (ra->mask & ~SRM_WRITABLE) || (ra->value & ~ra->mask) ||
 	    ((ra->mask | ra->value) & SRM_LOCK_BITS)) {
@@ -221,6 +237,7 @@ static int srm_find_mchbar(enum srm_platform platform, u64 *base)
 	struct pci_dev *bridge;
 	u32 lo, hi;
 	u64 raw;
+	int ret;
 
 	bridge = pci_get_domain_bus_and_slot(0, 0, PCI_DEVFN(0, 0));
 	if (!bridge)
@@ -229,9 +246,14 @@ static int srm_find_mchbar(enum srm_platform platform, u64 *base)
 		pci_dev_put(bridge);
 		return -ENODEV;
 	}
-	pci_read_config_dword(bridge, SRM_MCHBAR_LO, &lo);
-	pci_read_config_dword(bridge, SRM_MCHBAR_HI, &hi);
+	ret = pci_read_config_dword(bridge, SRM_MCHBAR_LO, &lo);
+	if (!ret)
+		ret = pci_read_config_dword(bridge, SRM_MCHBAR_HI, &hi);
 	pci_dev_put(bridge);
+	if (ret) {
+		pr_err("cannot read the MCHBAR from the host bridge\n");
+		return -ENODEV;
+	}
 
 	raw = ((u64)hi << 32) | lo;
 	if (!(raw & BIT(0))) {
@@ -276,8 +298,8 @@ static int __init srm_init(void)
 	if (!srm_map)
 		return -ENOMEM;
 
-	if (!(readl(srm_reg(SRM_REG_UNIT)) & 0xf)) {
-		pr_err("the power unit register reads 0, not creating the zone\n");
+	if (!srm_power_unit()) {
+		pr_err("the power unit register reads 0 or all ones, not creating the zone\n");
 		ret = -ENODEV;
 		goto err_unmap;
 	}
