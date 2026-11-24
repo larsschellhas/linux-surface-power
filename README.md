@@ -43,7 +43,7 @@ updated in the same commit as every change of state, together with this section 
 |---|---|
 | A Foundations: root cause, Windows measurements, SMF decoded, requirements, specs | ✅ |
 | B Python reference implementation: loader, engine, adapters, supervisor, tools | 🔄 untested adapters; safety suite per device (B7, local) ⬜; CPU use ≈1 % against 0.5 % (B8) ⬜; daemon side of the MMIO write path implemented and tested on a fake sysfs (B11, B12, 24.11.2026); hardware check on the SB3 next |
-| C Reference device Surface Book 3 15" | 🔄 field tests ✅, control-run soak extended to 25.11.2026 |
+| C Reference device Surface Book 3 15" | 🔄 field tests ✅, control-run soak 17.–24.11.2026 evaluated: no crash, but too short for `tested`; base detach puts the daemon into emergency (B13); second soak after B12 and B13 |
 | D Kernel interfaces in linux-surface | 🔄 sensors/fans, DPTF data and the suspend fix merged; battery EWMA attribute, MMIO write path ⚠️ (decided 23.11.: preferred PL1/PL2 path via a separate module, prototype first; the prototype passed its tests on the Surface Book 3 15" on 23.–24.11.; MMIO copy enabled on Pro 8, 9 and 10), PL3 under lockdown ⚠️, temperature sensor nodes for several devices open |
 | E Mainline submission | ⬜ merged linux-surface patches first; MMIO and PL3 paths ⚠️ |
 | F Device validation and profiles | 🔄 Pro 9 and Pro 10 control runs, Pro 8 readings; every x64 SMF device has a profile since 23.11.2026, reports to confirm them 🙋; reports of 18.–21.11. evaluated on 23.11., follow-ups open |
@@ -107,7 +107,7 @@ packages (`scripts/corpus-report.py`, `docs/research/09-newer-blobs.md`). Only t
 
 | Device | Blob runs | Profile | Inputs | Outputs written | On device | State |
 |---|---|---|---|---|---|---|
-| Book 3 15" | ✓ | classic, tested after AC-L4 | all from sysfs and the EC data (kernel#195 or debug device) | [9 of 9](docs/devices/surface-book-3-15.md) | ✓ field tests match Windows; kernel#190, #195 merged | all outputs written; control run as a service since 17.11.2026 (the dry-run soak could not exercise the controllers) |
+| Book 3 15" | ✓ | classic, tested after AC-L4 | all from sysfs and the EC data (kernel#195 or debug device) | [9 of 9](docs/devices/surface-book-3-15.md) | ✓ field tests match Windows; kernel#190, #195 merged | all outputs written; control run as a service 17.–24.11.2026: no crash after the watchdog fix, skin controller 1 active, CPU 0.56 % (accepted for now); second soak after B12 and B13 |
 | Book 3 13" | ✓ | classic (shared with 15") | all from sysfs | [9 of 9](docs/devices/surface-book-3-13.md) | – | all outputs written; dry-run, not checked on a device |
 | Pro 7+ | ✓ | direct, untested (SKU from the driver-pack catalogue, 23.11.2026) | temperatures: no kernel sensor node yet (invalid on Linux), rest from sysfs | [12 of 12](docs/devices/surface-pro-7-plus.md) | – | all outputs written (PL3 since 23.11.2026); dry-run by default, untested on a device |
 | Pro 8 | ✓ | classic, untested | battery EWMA level: debug device (root); temperatures: no kernel sensor node yet | [13 of 14](docs/devices/surface-pro-8.md) | PL1/PL2 copies read (tester, 18.11.2026): the firmware's MMIO PL1 30 W caps package power at 30 W while the MSR copy (what the daemon writes) says 35 W | dry-run only |

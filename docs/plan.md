@@ -1,6 +1,6 @@
 # Project plan: from the reference device to a rollout on every SMF Surface
 
-Version 1.17, 24.11.2026. This is the single plan of the project: target, work packages, their state, and what comes next. Read it
+Version 1.18, 24.11.2026. This is the single plan of the project: target, work packages, their state, and what comes next. Read it
 first; it is kept current with every change of state (section 7). Evidence markers as in `docs/README.md`: [C] driver code or ACPI
 table, [M] measured, [H] hypothesis, [D] design decision.
 
@@ -60,17 +60,19 @@ kernel interfaces it needs are in the released linux-surface kernel; fail-safe c
 | B5 | Supervisor, monitor, daemon, tools, units, sleep hook | ✅ | – |
 | B6 | Report tool, tester guide, device pages generator | ✅ | – |
 | B7 | **Safety suite per device:** every profile and blob through extreme scenarios in simulation, run locally | ⬜ | criteria agreed 19.11.2026 (3, B7); fix the numbers, then write the script |
-| B8 | **CPU budget of the daemon:** about 1 % of one core on two devices (SB3 control run, Pro 9 dry-run 0.98 % over 59 h) against the AC-L4 criterion of 0.5 % | ⬜ | profile first (EC requests every 2 s, copy reads every 60 s, interpreter); cause unproven [H]; then reduce it or decide the criterion (maintainer) |
+| B8 | **CPU budget of the daemon:** about 1 % of one core on two devices (SB3 control run, Pro 9 dry-run 0.98 % over 59 h) against the AC-L4 criterion of 0.5 % | ⬜ | **0.56 % accepted for now** (maintainer, 24.11.2026, after C3): does not block C4/C6; stays open as an optimisation for later: profile first (EC requests every 2 s, copy reads every 60 s, interpreter); cause unproven [H] |
 | B9 | **PL3 stage when MSR `0x615` is not readable** although `0x606` is (Pro 9: EIO on `0x17`, `0x611`, `0x614`, `0x615`, F10): the setup reads only `0x606`, the supervisor's reaction to a failing write is not checked | ⬜ | check the behaviour, then test `0x615` before creating the target (code change, maintainer's yes) |
 | B10 | **Report tool vs daemon:** the report calls `0B7B5350/59` "writable as root" and the device "ready for control: yes" without a profile that switches PL3 on, while the daemon treats PL3 as log-only and stays in dry-run (Laptop 4 Intel report, 20.11.); it also says nothing about inputs without a source that reach written outputs (505/509 "not available") | ⬜ | make the report say what the daemon does (code change, maintainer's yes) |
 | B11 | **Daemon cannot read the MMIO copy under its systemd units** [M, SB3, 24.11.2026]: `status.json` of the running daemon shows `"mmio": null` in every state and the 60-second warning ("MMIO copy … below the computed …") never fires, although the copy was enabled at 20 W and `surface-power-report` run as root reads it. Cause: without `CAP_SYS_ADMIN` the kernel shows only the first 64 bytes of a PCI config [C, `pci-sysfs.c`], so reading the MCHBAR at offset 0x48 of 00:00.0 returns 0 bytes; both units (`packaging/systemd/surface-powerd.service`, `…-dryrun.service`) allow only `CAP_DAC_OVERRIDE CAP_SYS_RAWIO`; with `CAP_SYS_ADMIN` added the same sandbox reads the register. The daemon fails silently (`None`), and testers who run the dry-run unit would see no MMIO warning either [H, not checked on their devices] | 🔄 | decided 24.11.2026 (maintainer, `specs/kernel-mmio-daemon.md` 8.2, 13): E (log once with the reason) now, C (read the copy through the zone) as the target, B (privileged `ExecStartPre=+` helper) only as an optional temporary aid, A and D not used; implemented in B12 steps 1 and 5. **E and C implemented 24.11.2026** (B12 steps 1 and 5; C: the copy is read from an MMIO zone wherever one exists, so the warning works there under the units): the reason why the copy is not readable is logged once per run and shown in `status.json` (`rapl_copies.mmio_unreadable`) and in `surface-power-report`; address mask bits 41:15 as in the module; tests MB-1 … MB-4, MB-9; not yet checked under the unit on the SB3 (step 8) |
 | B12 | **Daemon side of the MMIO path (KM-9)**: choose the MMIO zone for PL1, PL2 and the window where it is writable (module zone with `allow_write=Y`, or the kernel's own zone), MSR copy back at its firmware value and left alone, `enabled=1` only where the copy is off, snapshot and restore of the MMIO copy, bounds, resume, foreign changes, dry-run; spec `specs/kernel-mmio-daemon.md` 0.2, tests MD-1 … MD-24, MB-1 … MB-9 (KM-A7) | 🔄 | steps 1–7 done 24.11.2026: implemented and tested on a fake sysfs (467 tests); next step 8: hardware checks on the SB3, each sub-step with the maintainer's yes |
+| B13 | **Base detached, base sensors lost:** on 19.11.2026 the SB3 base was detached and re-attached; the inputs `2E8B14C2/605` and `/609` stayed invalid and the supervisor's rule "controller inputs invalid for 60 s" put the daemon into `emergency` (firmware values for every output) for 39 minutes until it was stopped [M journal and series, `raw/…/c3-abschlussauswertung-2026-11-24.md` 3]. Wanted (maintainer, 24.11.2026): the way Windows handles it, e.g. only the outputs reached by the lost inputs degrade | 🔄 | analysis of the Windows drivers and the blob started 24.11.2026 (separate session, raw note `b13-basis-sensoren-2026-11-24.md`); then spec, tests, code with the maintainer's yes; **before C6** |
 | **C** | **Reference device Surface Book 3 15"** | 🔄 | |
 | C1 | Field tests AC-L1–L3 (skin 48 °C, ~32 W, psys 45/100 W) | ✅ | – |
 | C2 | PL3/PL4 measured, all 9 outputs written | ✅ | – |
-| C3 | Soak test (AC-L4): first dry-run failed, replaced by a control run since 17.11.2026; watchdog incident 18.11.2026 fixed (1a7520a, 829f24e) | 🔄 | evaluation of 23.11.: only three short runs (device off 21.–23.11.), skin controllers never active, CPU ≈1 % (B8), PL4 written to 0 by `surface-rapl.service` after resume (L8); extended to 25.11.2026 (maintainer, 23.11.) |
-| C4 | `tested = true` in the SB3 profile | ⬜ | after C3 (not recommended on the data of 21.–23.11.), maintainer's decision |
+| C3 | Soak test (AC-L4): first dry-run failed, replaced by a control run since 17.11.2026; watchdog incident 18.11.2026 fixed (1a7520a, 829f24e) | ✅ | ended by the maintainer 24.11.2026 15:43 and evaluated (raw note `c3-abschlussauswertung-2026-11-24.md`, separate session; numbers not re-checked in the main session): no daemon crash after the fix, memory ≤ 31 MB, skin controller 1 active 8 times (≤ 49.05 °C at a 48 °C set point); CPU 0.56 % (accepted for now, B8); **not sufficient for C4:** about 20 h awake against 3 days, controllers 2–4 never active, 39 min `emergency` after the base was detached (B13) → C6 |
+| C4 | `tested = true` in the SB3 profile | ⬜ | after C6 (not recommended on the C3 data), maintainer's decision |
 | C5 | Surface Book 3 13" (shares the profile) | ⏳ 🙋 | tester report with DMI values |
+| C6 | **Second soak (control) on the SB3** after B12 (MMIO path finished, new version installed) and B13: three awake days of normal use, with dGPU load so that controller 4 can act, `constraint_2_power_limit_uw` read after every resume (L8); criteria as C3, CPU per B8 | ⬜ | after B12 and B13 |
 | **D** | **Kernel interfaces in linux-surface** | 🔄 | |
 | D1 | SB3 sensors and fans, main and base ([kernel#190](https://github.com/linux-surface/kernel/pull/190)) | ✅ | merged 17.11.2026 (`v7.3-surface-devel`) |
 | D2 | DPTF battery data `0x53` and adapter rating ([kernel#195](https://github.com/linux-surface/kernel/pull/195)) | ✅ | merged 17.11.2026 (`v7.3-surface-devel`) |
@@ -185,9 +187,10 @@ behaviour of the SB3 is explained and specified (reached 14.11.2026). Open: requ
   Then: KM-A6/KM-A9 on a Pro 8, 9 or 10 (tester, 🙋), the tester's module source, linux-pm (E4).
 
 ### C. Reference device 🔄
-- **C3:** the control run as a service is evaluated daily until 21.11.2026 (scheduled task `sb3-regelbetrieb-auswertung`). Done when
-  there is no crash, no unexplained invalid input, CPU < 0.5 % and memory < 50 MB over the period (AC-L4 criteria applied to control).
-- **C4:** the maintainer decides on `tested = true` after C3.
+- **C3:** the control run 17.–24.11.2026 is evaluated (raw note `c3-abschlussauswertung-2026-11-24.md`); criteria were: no crash, no unexplained
+  invalid input, CPU < 0.5 % and memory < 50 MB over the period (AC-L4 criteria applied to control). Too short and too little load for C4.
+- **C6:** the same criteria over three awake days, after B12 and B13; CPU 0.56 % is accepted for now (maintainer, 24.11.2026, B8 stays open).
+- **C4:** the maintainer decides on `tested = true` after C6.
 - **C5:** the 13" shares the ACPI ID (MSHW0117) and the profile (match on `product_name`); its DMI values are not confirmed by a report.
 
 ### D. Kernel interfaces in linux-surface 🔄
@@ -279,7 +282,7 @@ model (`scripts/simulate-sb3.py`) so far. Source: device pages (23.11.2026), pro
 
 | Device | R1 Blob | R2 Profile | R3 Inputs | R4 Outputs | R5 Secure Boot | R6 Safety sim | R7 Validation | R8 | 🙋 | Blocking WPs |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Book 3 15" | ✅ | ✅ | 🔄 brightness fallback (G1) | ✅ 9/9 | 🔄 PL3 needs lockdown `none` | 🔄 closed-loop model only | ✅ field tests, soak 🔄 | ⬜ | – | C3, C4, D6, G1, B8, L8 |
+| Book 3 15" | ✅ | ✅ | 🔄 brightness fallback (G1) | ✅ 9/9 | 🔄 PL3 needs lockdown `none` | 🔄 closed-loop model only | ✅ field tests, soak C3 not sufficient, C6 ⬜ | ⬜ | – | C6, C4, B13, D6, G1, B8, L8 |
 | Book 3 13" | ✅ | 🔄 shared, DMI unconfirmed | 🔄 (G1) | ✅ 9/9 | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | C5 |
 | Pro 7+ | ✅ | 🔄 catalogue SKUs, 1960 confirmed | 🔄 no sensor node in the kernel (D11) | ✅ 12/12 | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | D11 |
 | Pro 8 | ✅ | ✅ | 🔄 debug device; no sensor node (D11) | ⬜ 13/14 (`/71`) | ⬜ MMIO caps at 30 W | ⬜ | 🔄 reads by tester | ⬜ | – | D4, D5, D11, H1 |
@@ -318,8 +321,9 @@ soak is extended to 25.11. (maintainer); the MMIO copy is enabled on a third dev
 the daemon itself (B8, B9, B10) come before the safety suite because they decide what a tester may be asked to run; the sensor nodes
 (D9–D11) and the offset frame (H6) are new and come after the F9 follow-ups.
 
-1. **C3/C4:** finish the SB3 control-run evaluation (extended to 25.11.2026, with load, a skin rise and a resume; check PL4 after the
-   resume, L8), then the decision on `tested = true`.
+1. **B12 step 8, B13, then C6/C4:** C3 ended 24.11.2026 without enough data for C4 (about 20 h awake, three controllers never active, `emergency`
+   after a base detach). Finish the MMIO path on the SB3 (B12 step 8), fix the base-detach case (B13), then the second soak (C6) and the decision on
+   `tested = true` (C4). CPU (B8) is accepted for now.
 2. **F2/D5:** the prototype module is built and tested on the SB3 (23.–24.11.2026, `specs/kernel-mmio-rapl.md` 8), the daemon side KM-9 and B11 is
    implemented (`specs/kernel-mmio-daemon.md` 0.3, B12 steps 1–7, 24.11.2026) and tested on a fake sysfs. Next: B12 step 8, the hardware checks on the SB3 (each
    sub-step with the maintainer's yes), a read-only test of the module on a device with an enabled copy (KM-A9,
@@ -370,3 +374,4 @@ the daemon itself (B8, B9, B10) come before the safety suite because they decide
 | 24.11.2026 | 1.15: B12 step 5: snapshot with the MMIO keys and the raw register (info only), predecessor kept and missing keys added, restore and `surface-power-reset` switch an MMIO copy that was off off first, then window, PL1, PL2, never touch an `enabled` that was 1, skip a zone that is gone; residual clamp (DS-5) logged once; the 60-second check reads the MMIO copy from the zone where the register is not readable (C, source in `status.json`), and on the mmio path warns about a lower MSR copy instead. Tests MD-13 … MD-17, MD-24, MB-8 (460 tests). |
 | 24.11.2026 | 1.16: B12 step 6: on the mmio path `enabled` reading 0 after the daemon set it and a changed MSR copy (PL1, PL2, window) are foreign changes, overwritten, the third in 60 s yields; a zone that disappears ends the run with an error and without the marker (the restart chooses again), no spurious foreign-change line; sleep restores the MMIO copy and the first cycle after the resume writes it and `enabled=1` again. Tests MD-19 … MD-22 (465 tests). |
 | 24.11.2026 | 1.17: B12 step 7: specs and documents on "implemented": `kernel-mmio-daemon.md` 0.3 (state, section 15 implementation notes), `outputs.md` 3.3, `supervisor.md` 3, 5, 6, 7 (profile option `outputs.mmio`), `monitoring.md` (`pl_path`, `rapl_copies`), `tools.md` and the report (PL path and the copy from the zone), `deviations.md` 0.3 (DV-8, DS-5), knowledge base, KM-A7 ✅; B11 E and C implemented; README. |
+| 24.11.2026 | 1.18: C3 ended by the maintainer and evaluated (not sufficient for C4: about 20 h awake, controllers 2–4 never active, 39 min `emergency` after a base detach); CPU 0.56 % accepted for now, B8 stays as a later optimisation; new B13 (base detached, sensors 605/609 lost; analysis started) and C6 (second soak after B12 and B13); C4 after C6. |
