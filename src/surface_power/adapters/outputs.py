@@ -9,7 +9,7 @@ import os
 from dataclasses import dataclass
 
 from ..loader.model import ChannelRef, OutputChannel
-from . import msr
+from . import msr, rapl_copies
 
 LIMITS = "0B7B5350-BB8C-4459-8D4A-A75C57073801"
 
@@ -41,6 +41,22 @@ MMIO_NAMES = ("pl1", "pl2")
 TOLERANCE_UW = 200_000
 
 
+class PathFailure(Exception):
+    """The mmio path cannot go on (spec kernel-mmio-daemon 4.1, 2.6): the daemon restores its snapshot and exits with an error.
+    `marker`: create /run/surface-power/mmio-unusable, so that the restart chooses msr for the rest of the boot (not when the
+    zone is simply gone: a restart then chooses again)."""
+
+    def __init__(self, reason: str, marker: bool = True):
+        super().__init__(reason)
+        self.marker = marker
+
+
+def _write(path: str, text: str) -> None:
+    """Every write of the stage goes through here (tests record the order)."""
+    with open(path, "w") as f:
+        f.write(text)
+
+
 def _read(path):
     try:
         with open(path) as f:
@@ -67,6 +83,10 @@ class Target:
         """How far a read-back value may differ from the written one (hardware rounding)."""
         return TOLERANCE_UW
 
+    def changed(self, uw: int) -> bool:
+        """Is `uw` a new value compared with the last one written (write on change only, spec outputs 1)?"""
+        return self.last_uw is None or abs(self.last_uw - uw) > self.tolerance(uw)
+
     @property
     def snapshot_key(self) -> str:
         return self.path
@@ -76,8 +96,7 @@ class Target:
         return int(v) if v and v.isdigit() else None
 
     def write_uw(self, uw: int) -> None:
-        with open(self.path, "w") as f:
-            f.write(str(uw))
+        _write(self.path, str(uw))
 
 
 @dataclass
@@ -98,6 +117,10 @@ class WindowTarget(Target):
 
     def tolerance(self, uw: int) -> int:
         return max(TOLERANCE_UW, int(uw * 0.15))
+
+    def changed(self, uw: int) -> bool:
+        """A new step is a change even when it is within the read-back tolerance of the last one (28 s -> 32 s is 14 %)."""
+        return self.wrote_uw != uw
 
 
 @dataclass
@@ -163,6 +186,10 @@ class OutputStage:
         self.root, self.ranges, self.dry_run = root, ranges, dry_run
         self.mmio_zone = mmio_zone
         self.notes: list[str] = []
+        self.events: list[tuple[str, str]] = []      # (priority, text) for the log, drained by the daemon every cycle
+        self._cut_logged: set[ChannelRef] = set()
+        self.own_enable = False                      # the firmware's MMIO copy was off: this daemon writes enabled=1 (spec 4.2)
+        self.enable_path = os.path.join(mmio_zone, "enabled") if mmio_zone else None
         self.targets: dict[ChannelRef, Target] = {}
         narrow = narrow or {}
         for name, value in narrow.items():
@@ -197,6 +224,28 @@ class OutputStage:
             self.targets[ChannelRef(SOC, WINDOW_CHANNEL)] = WindowTarget("pl1_window", wpath, *WINDOW_HARD_US)
         else:
             self.notes.append("pl1 time window: no powercap target (package-0/long_term time window), log-only")
+        # The mmio path: which targets are on the MMIO zone, the time unit for the window (spec 4.3), and the MSR copy's PL1, PL2 and
+        # window, which stay at their snapshot values and are only watched (spec 3).
+        self.mmio_refs = {r for r, t in self.targets.items() if mmio_zone and os.path.dirname(t.path) == mmio_zone}
+        self.msr_watch: list[tuple[str, str, Target]] = []
+        if mmio_zone:
+            wref = ChannelRef(SOC, WINDOW_CHANNEL)
+            if wref in self.targets:
+                unit, src = rapl_copies.time_unit(root)
+                if unit != 10:
+                    del self.targets[wref]
+                    self.mmio_refs.discard(wref)
+                    what = f"time unit {unit} in {src}" if unit is not None else src
+                    self.notes.append(f"pl1 time window: {what}, not 10 (1/1024 s) as the window steps assume, log-only")
+            mzone = find_zone(root, "package-0")
+            for label, cname in (("PL1", "long_term"), ("PL2", "short_term")):
+                path = find_constraint(mzone, cname) if mzone else None
+                if path:
+                    self.msr_watch.append((label, path, Target(label, path, 0, 0)))
+                    if cname == "long_term":
+                        wp = path[:-len("_power_limit_uw")] + "_time_window_us"
+                        if os.path.exists(wp):
+                            self.msr_watch.append(("PL1 window", wp, WindowTarget("PL1 window", wp, 0, 0)))
         if pl3 is False:
             self.notes.append("pl3: off in the device profile, log-only")
         elif pl3 is not True:
@@ -219,7 +268,73 @@ class OutputStage:
             if not isinstance(t, (MsrTarget, WindowTarget)):
                 keys.append(os.path.join(os.path.dirname(t.path), os.path.basename(t.path).split("_power")[0]
                                          + "_time_window_us"))
+        if self.mmio_zone:
+            keys += [path for _label, path, _t in self.msr_watch] + [self.enable_path]
         return list(dict.fromkeys(keys))
+
+    # --- the mmio path (spec kernel-mmio-daemon 3, 4) ---
+
+    def set_enable_owner(self, snapshot_values: dict[str, str]) -> None:
+        """The daemon writes enabled=1 only where the firmware left the MMIO copy off (spec 4.2); Pro 8/9/10 have it on [M]."""
+        if self.enable_path:
+            v = snapshot_values.get(self.enable_path, _read(self.enable_path))
+            self.own_enable = v == "0"
+
+    def restore_msr_copy(self, snapshot_values: dict[str, str]) -> list[str]:
+        """Spec 3: MSR PL1, PL2 and window back at their snapshot values where they differ beyond the tolerance. Returns what was
+        set back ("PL1 13 W -> 30 W"); raises OSError when a write fails."""
+        done = []
+        for label, path, t in self.msr_watch:
+            want, cur = snapshot_values.get(path), t.read_uw()
+            if want is None or not want.isdigit() or cur is None:
+                continue
+            if abs(cur - int(want)) > t.tolerance(int(want)):
+                _write(path, want)
+                unit, div = ("s", 1e6) if isinstance(t, WindowTarget) else ("W", 1e6)
+                done.append(f"{label} {cur / div:g} {unit} -> {int(want) / div:g} {unit}")
+        return done
+
+    def msr_copy_changes(self, snapshot_values: dict[str, str]) -> list["OutputStage.Foreign"]:
+        """The MSR copy's PL1, PL2 and window against the snapshot (spec 10): a change lowers the limit in force."""
+        found = []
+        for label, path, t in self.msr_watch:
+            want, cur = snapshot_values.get(path), t.read_uw()
+            if want is None or not want.isdigit():
+                continue
+            if cur is None or abs(cur - int(want)) > t.tolerance(int(want)):
+                found.append(self.Foreign(label, int(want), cur))
+        return found
+
+    def _enable(self) -> None:
+        """Spec 4.1 step 3: where the copy is off and the daemon owns enable, write enabled=1 once and read it back."""
+        cur = _read(self.enable_path)
+        if cur is None:
+            raise PathFailure(f"{self.enable_path} not readable (MMIO zone gone)", marker=False)
+        if cur != "0":
+            return
+        try:
+            _write(self.enable_path, "1")
+        except OSError as e:
+            raise PathFailure(f"enabled=1 failed ({e.strerror or e})") from e
+        if _read(self.enable_path) != "1":
+            raise PathFailure("enabled=1 written but enabled reads 0 (PL1 enable did not stick)")
+        self.events.append(("notice", "MMIO copy: enabled=1 written (sets PL1/PL2 enable and clamp)"))
+        self._check_bits()
+
+    def _check_bits(self) -> None:
+        """Spec 4.2: `enabled=1` proves PL1 enable only; where the register is readable, check all four bits."""
+        unit = msr.power_unit_w(self.root)
+        copy, _why = rapl_copies.read_mmio(self.root, unit) if unit else (None, None)
+        if copy is None:
+            return
+        bits = {"PL1 enable": copy.pl1[1], "PL1 clamp": copy.pl1[2], "PL2 enable": copy.pl2[1], "PL2 clamp": copy.pl2[2]}
+        missing = [n for n, v in bits.items() if not v]
+        if missing:
+            self.events.append(("warning", f"MMIO copy after enabled=1: {', '.join(missing)} not set ({copy.describe()})"))
+
+    def drain_events(self) -> list[tuple[str, str]]:
+        out, self.events = self.events, []
+        return out
 
     def kind(self, ref: ChannelRef) -> str:
         if ref in self.targets:
@@ -233,13 +348,29 @@ class OutputStage:
         if rng is not None:
             v = min(max(v, rng.min), rng.max)
         uw = int(round(v * 1000))
-        return t.shape(min(max(uw, t.hard_min_uw), t.hard_max_uw))
+        bounded = min(max(uw, t.hard_min_uw), t.hard_max_uw)
+        if bounded != uw and ref in self.mmio_refs and ref not in self._cut_logged:
+            # Spec kernel-mmio-daemon 6: the RAPL core wraps values from 4096 W silently, the module has no upper bound.
+            self._cut_logged.add(ref)
+            self.events.append(("warning", f"{t.name.upper()}: computed {uw / 1e6:g} W is outside the hard limit "
+                                           f"{t.hard_min_uw / 1e6:g}-{t.hard_max_uw / 1e6:g} W, written {bounded / 1e6:g} W"))
+        return t.shape(bounded)
+
+    @staticmethod
+    def _order(ref: ChannelRef) -> int:
+        """Window, then PL1, then PL2, then the rest (spec kernel-mmio-daemon 4.1; supervisor 3: never PL1 with a foreign window)."""
+        if ref == ChannelRef(SOC, WINDOW_CHANNEL):
+            return 0
+        return {51: 1, 52: 2}.get(ref.channel, 3) if ref.guid == LIMITS else 3
 
     def apply(self, values: dict[ChannelRef, float], hold: frozenset = frozenset()) -> dict[ChannelRef, Result]:
         """Clamp, convert and write the values. Channels in `hold` keep their current value (e.g. PL4 while its EC
         inputs are invalid, spec outputs 3). Returns one result per channel."""
         out = {}
-        for ref, mw in values.items():
+        if self.mmio_zone and not self.dry_run and self.mmio_refs and not os.path.isdir(self.mmio_zone):
+            raise PathFailure(f"{self.mmio_zone} is gone (module unloaded?)", marker=False)
+        for ref in sorted(values, key=self._order):
+            mw = values[ref]
             t = self.targets.get(ref)
             if t is None:
                 out[ref] = Result(ref, "log-only", mw, None, False)
@@ -254,10 +385,13 @@ class OutputStage:
             written = False
             current = t.read_uw()
             tol = t.tolerance(uw)
-            if t.last_uw is None or abs(t.last_uw - uw) > tol or current is None or abs(current - uw) > tol:
+            if t.changed(uw) or current is None or abs(current - uw) > tol:
                 try:
                     t.write_uw(uw)
                 except OSError as e:
+                    if ref in self.mmio_refs:
+                        gone = not os.path.isdir(self.mmio_zone)
+                        raise PathFailure(f"{t.name}: write to {t.path} failed ({e.strerror or e})", marker=not gone) from e
                     self.notes.append(f"{t.name}: write failed ({e}), log-only from now on")
                     del self.targets[ref]
                     out[ref] = Result(ref, "log-only", mw, None, False)
@@ -267,11 +401,13 @@ class OutputStage:
                 t.last_uw = back if back is not None else uw
                 t.wrote_uw = uw
             out[ref] = Result(ref, "written", mw, uw, written)
+        if self.own_enable and not self.dry_run and any(r in out and out[r].kind == "written" for r in self.mmio_refs):
+            self._enable()
         return out
 
     @dataclass(frozen=True)
     class Foreign:
-        ref: ChannelRef
+        ref: ChannelRef | str
         expected_uw: int
         found_uw: int | None
 

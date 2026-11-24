@@ -7,14 +7,15 @@ import tempfile
 import unittest
 
 from fakesys import MCHBAR, MMIO_PARAM, MMIO_ZONE, PROC_THERMAL, FakeSys
+from helpers import LIMITS as HL, SYSTEM, TEMP, BlobBuilder, G
 from test_daemon import blob_text
 
 from unittest import mock
 
 from surface_power import daemon, monitor, supervisor
-from surface_power.adapters import rapl_copies
-from surface_power.adapters.outputs import LIMITS, SOC, WINDOW_CHANNEL
-from surface_power.loader.model import ChannelRef
+from surface_power.adapters import outputs, rapl_copies
+from surface_power.adapters.outputs import LIMITS, SOC, WINDOW_CHANNEL, OutputStage, PathFailure
+from surface_power.loader.model import ChannelRef, OutputChannel
 
 MSR_ZONE = "sys/class/powercap/intel-rapl:0"
 UNIT = 0.125
@@ -140,6 +141,7 @@ class PathChoiceTest(MmioDaemonBase):
 
     def test_md1_writable_module_zone_gives_the_mmio_path(self):
         self.fs.add_mmio_zone()
+        self.fs.add_msr()                                                        # time unit 10 from MSR 0x606 (4.3)
         d = self.start("--control")
         self.assertEqual(d.pl_path.kind, "mmio")
         mmio, msrz = self.fs.path(MMIO_ZONE), self.fs.path(MSR_ZONE)
@@ -260,6 +262,213 @@ class PathChoiceTest(MmioDaemonBase):
         self.assertEqual(d.pl_path.kind, "msr")
         self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_power_limit_uw"), "25000000")
         d.stop()
+
+
+
+def window_blob(window_ms=28000):
+    """PL1 from a slider table (as blob_text), PL2 and the PL1 window (CF2F6076/61) as constants."""
+    b = BlobBuilder()
+    b.input_channel(TEMP, 509, 3681, 2731)
+    b.output_channel(HL, 51, 25000, 31000, 7500)
+    b.line(G["lookup_table"], 1, [(SYSTEM, 1)], [(HL, 51)], [6, 25000, 25000, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6,
+                                                            25000, 13000, 25000, 25000, 30000, 25000])
+    for id_, out, v in ((2, (HL, 52), 20000), (3, (SOC, 61), window_ms)):
+        b.line(G["lookup_table"], id_, [(SYSTEM, 1)], [out], [6, v, v, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6] + [v] * 6)
+    return b.text()
+
+
+class Recorder:
+    """Records every write of the output stage (constraint files and `enabled`) in order, then writes."""
+
+    def __init__(self, root):
+        self.root, self.writes, self.real = root, [], outputs._write
+
+    def __call__(self, path, text):
+        self.writes.append((os.path.relpath(path, self.root), text))
+        self.real(path, text)
+
+    def names(self, zone=MMIO_ZONE):
+        return [(os.path.basename(p), t) for p, t in self.writes if os.path.dirname(p) == zone]
+
+
+class WritingTest(MmioDaemonBase):
+    """Step 4: spec 3 (MSR copy), 4 (first write, enable, values), 6 (bounds). MD-7 ... MD-12, MD-18."""
+
+    def setUp(self):
+        super().setUp()
+        with open(self.blob, "w") as f:
+            f.write(window_blob())
+        self.fs.add_msr()
+
+    def control(self, profile=None):
+        with mock.patch.object(supervisor, "find_profile", return_value=profile or sb3_profile()):
+            return self.start("--control")
+
+    def test_md8_first_write_order_and_enable(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        rec = Recorder(self.fs.root)
+        with mock.patch.object(outputs, "_write", rec):
+            d.cycle(0)
+            d.cycle(1000)                                                   # nothing changed: nothing written again
+        self.assertEqual(rec.names(), [("constraint_0_time_window_us", "28000000"), ("constraint_0_power_limit_uw", "30000000"),
+                                       ("constraint_1_power_limit_uw", "20000000"), ("enabled", "1")])
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/enabled"), "1")
+        self.assertEqual(self.out.getvalue().count("enabled=1 written"), 1)
+        d.stop()
+
+    def test_md9_enabled_firmware_copy_is_never_enabled_again(self):
+        self.fs.add_mmio_zone(enabled=1, pl1_uw=28_000_000, pl2_uw=35_000_000)   # as on the Pro 10 [M]
+        d = self.control()
+        rec = Recorder(self.fs.root)
+        with mock.patch.object(outputs, "_write", rec):
+            for t in range(3):
+                d.cycle(t * 1000)
+        self.assertNotIn("enabled", [n for n, _ in rec.names()])
+        self.assertIn(("constraint_0_power_limit_uw", "30000000"), rec.names())
+        d.stop()
+
+    def test_md10_enable_that_does_not_stick(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        real = outputs._write
+
+        def refuse_enable(path, text):
+            real(path, "0" if path.endswith("/enabled") else text)        # the core reports success, the bit stays 0
+        with mock.patch.object(outputs, "_write", refuse_enable):
+            with self.assertRaises(PathFailure) as cm:
+                d.cycle(0)
+        self.assertIn("enabled reads 0", str(cm.exception))
+        d.stop()
+        marker = os.path.join(self.run.name, "mmio-unusable")
+        self.assertTrue(os.path.exists(marker))
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_power_limit_uw"), "25000000")   # snapshot restored
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_time_window_us"), "27983872")
+        self.assertIn("MMIO path failed", self.out.getvalue())
+        d2 = self.control()                                                  # the restart chooses msr for this boot
+        self.assertEqual(d2.pl_path.kind, "msr")
+        d2.stop()
+
+    def test_md10_constraint_write_fails_with_enodata(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        real = outputs._write
+
+        def refuse_pl1(path, text):
+            if path.endswith(f"{MMIO_ZONE}/constraint_0_power_limit_uw"):
+                raise OSError(61, "No data available")                     # how the module's refusal reaches user space
+            real(path, text)
+        with mock.patch.object(outputs, "_write", refuse_pl1):
+            with self.assertRaises(PathFailure):
+                d.cycle(0)
+        d.stop()
+        self.assertTrue(os.path.exists(os.path.join(self.run.name, "mmio-unusable")))
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/enabled"), "0")
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_time_window_us"), "27983872")
+
+    def test_md10_run_exits_with_an_error(self):
+        class Failing:
+            def __init__(self, *a, **k):
+                self.stopped = False
+
+            def cycle(self, now):
+                raise PathFailure("PL1: write failed", marker=True)
+
+            def stop(self):
+                Failing.stopped = True
+        with mock.patch.object(daemon, "Daemon", Failing):
+            self.assertEqual(daemon.run(["--root", self.fs.root, "--run-dir", self.run.name]), 1)
+        self.assertTrue(Failing.stopped)
+
+    def test_md7_msr_copy_back_at_its_snapshot_value_once(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        # a predecessor on the msr path that crashed: the MSR copy holds its 13 W, the snapshot the firmware's 30 W
+        d.snapshot.values[self.fs.path(f"{MSR_ZONE}/constraint_0_power_limit_uw")] = "30000000"
+        self.fs.write(f"{MSR_ZONE}/constraint_0_power_limit_uw", 13000000)
+        rec = Recorder(self.fs.root)
+        with mock.patch.object(outputs, "_write", rec):
+            d.cycle(0)
+            d.cycle(1000)
+        msr_writes = rec.names(MSR_ZONE)
+        self.assertEqual(msr_writes, [("constraint_0_power_limit_uw", "30000000")])
+        first_mmio = next(i for i, (p, _) in enumerate(rec.writes) if p.startswith(MMIO_ZONE))
+        self.assertLess(rec.writes.index((f"{MSR_ZONE}/constraint_0_power_limit_uw", "30000000")), first_mmio)
+        self.assertEqual(self.out.getvalue().count("MSR copy set back"), 1)
+        d.stop()
+
+    def test_md7_snapshot_holds_the_msr_keys_on_the_mmio_path(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        for k in ("constraint_0_power_limit_uw", "constraint_1_power_limit_uw", "constraint_0_time_window_us"):
+            self.assertIn(self.fs.path(f"{MSR_ZONE}/{k}"), d.snapshot.values)
+        d.stop()
+
+    def test_md12_time_unit_not_10_makes_the_window_log_only(self):
+        self.fs.add_mmio_zone(enabled=0)
+        self.fs.add_mmio_register(raw(25, 61, clamp1=True), units=0x000B0E03)      # register readable: time unit 11
+        d = self.control()
+        self.assertNotIn(WINDOW, d.outputs.targets)
+        self.assertEqual(self.out.getvalue().count("time unit 11"), 1)
+        d.stop()
+
+    def test_md12_time_unit_from_msr_0x606_without_the_register(self):
+        self.fs.add_mmio_zone(enabled=0)
+        self.fs.add_msr({0x606: 0x000B0E03})
+        d = self.control()
+        self.assertNotIn(WINDOW, d.outputs.targets)
+        d.stop()
+        self.fs.add_msr({0x606: 0x000A0E03})
+        d = self.control()
+        self.assertIn(WINDOW, d.outputs.targets)
+        d.stop()
+
+
+class StageTest(unittest.TestCase):
+    """The output stage on the mmio path alone: windows (MD-11) and bounds (MD-18)."""
+
+    def setUp(self):
+        self.fs = FakeSys()
+        self.fs.add_msr()
+        self.zone = self.fs.path(self.fs.add_mmio_zone())
+
+    def tearDown(self):
+        self.fs.cleanup()
+
+    def stage(self, ranges=None):
+        return OutputStage(self.fs.root, ranges or {}, mmio_zone=self.zone)
+
+    def test_md11_windows(self):
+        st = self.stage()
+        for ms, us in ((1000, 1_000_000), (8000, 8_000_000), (28000, 28_000_000), (30000, 32_000_000)):
+            st.apply({WINDOW: ms})
+            self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_time_window_us"), str(us))
+            self.fs.write(f"{MMIO_ZONE}/constraint_0_time_window_us", int(us * 0.9994))     # what the core reads back [C]
+            self.assertEqual(st.foreign_changes(), [])
+
+    def test_adjacent_window_step_is_written_on_either_path(self):
+        """28 s -> 32 s is 14 %, inside the read-back tolerance (15 %): before 24.11.2026 the change was not written."""
+        for st in (self.stage(), OutputStage(self.fs.root, {})):
+            path = os.path.join(os.path.dirname(st.targets[WINDOW].path), "constraint_0_time_window_us")
+            st.apply({WINDOW: 28000})
+            st.apply({WINDOW: 30000})
+            with open(path) as f:
+                self.assertEqual(f.read(), "32000000")
+            self.assertFalse(st.apply({WINDOW: 30000})[WINDOW].written)
+
+    def test_md18_bounds(self):
+        wide = OutputChannel(1, PL1, 25000, 10_000_000, 0)                      # a blob range far beyond the hard limits
+        st = self.stage({PL1: wide, PL2: OutputChannel(2, PL2, 25000, 10_000_000, 0)})
+        st.apply({PL1: 5_000_000, PL2: 5_000_000})                             # 5000 W
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_power_limit_uw"), "120000000")
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_1_power_limit_uw"), "200000000")
+        st.apply({PL1: 1000, PL2: 1000})                                       # 1 W
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_power_limit_uw"), "3000000")
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_1_power_limit_uw"), "3000000")
+        st.apply({PL1: 6_000_000})
+        cuts = [e for _p, e in st.drain_events() if "hard limit" in e]
+        self.assertEqual(len(cuts), 2, cuts)                                    # one line per target, not per write
+        self.assertIn("PL1", cuts[0])
 
 
 if __name__ == "__main__":

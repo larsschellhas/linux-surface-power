@@ -29,7 +29,7 @@ from .adapters.fan import FanStage, NullTransport, handles as fan_handles
 from .adapters import gpu
 from .adapters.gpu import ClockCapStandIn
 from .adapters import plpath, rapl_copies
-from .adapters.outputs import OutputStage
+from .adapters.outputs import OutputStage, PathFailure
 from .engine.engine import Engine
 from .engine.graph import build_graph, outputs_reached_by
 from .engine.pid import STATE_NAMES
@@ -265,6 +265,7 @@ class Daemon:
             self.snapshot, inherited = supervisor.Snapshot.take(args.run_dir, keys)
             self.snapshot.transport = self.fan.transport
             self.throttle.set_baseline(self.snapshot.values)
+            self.outputs.set_enable_owner(self.snapshot.values)
             if inherited:
                 self.log("warning", "kept the firmware snapshot of a predecessor that did not stop cleanly")
 
@@ -280,6 +281,7 @@ class Daemon:
         self.rapl_next_ms = 0
         self.rapl = None                      # last read of the PL1/PL2 copies (status), spec outputs 3.3
         self.mmio_capped: dict[str, float] = {}
+        self.msr_copy_checked = False         # spec kernel-mmio-daemon 3: MSR copy back at its snapshot value before the first write
         self.mmio_unreadable_logged = False   # the reason is logged once per run (spec kernel-mmio-daemon 8.3 E)
 
         tested = "tested" if (p and p.tested) else ("untested profile" if p else "no profile")
@@ -364,6 +366,31 @@ class Daemon:
             for n in self.mmio_capped.keys() - now.keys():
                 self.log("info", f"the MMIO copy of {n.upper()} no longer limits below the computed value")
             self.mmio_capped = now
+
+    def _msr_copy_back(self) -> None:
+        """Spec kernel-mmio-daemon 3: before the first MMIO write, the MSR copy's PL1, PL2 and window go back to the snapshot (a
+        previous run on the msr path may have crashed without restore); afterwards they are never written on this path."""
+        self.msr_copy_checked = True
+        try:
+            done = self.outputs.restore_msr_copy(self.snapshot.values)
+        except OSError as e:
+            self.log("error", f"MSR copy could not be set back to the snapshot ({e.strerror or e}); the lower copy is in force")
+            return
+        if done:
+            self.log("notice", "MSR copy set back to its snapshot value before the first MMIO write: " + ", ".join(done))
+
+    def _path_failed(self, e: PathFailure) -> None:
+        """Spec kernel-mmio-daemon 4.1, 2.6: log, mark the path unusable for this boot where it failed on a present zone; the
+        caller restores the snapshot (stop) and exits with an error; systemd restarts the daemon, which chooses again."""
+        tail = "the restart chooses msr for the rest of this boot" if e.marker else "the restart chooses the path again"
+        self.log("error", f"MMIO path failed: {e}; restoring the snapshot and exiting ({tail})")
+        if e.marker:
+            try:
+                os.makedirs(self.args.run_dir, exist_ok=True)
+                with open(os.path.join(self.args.run_dir, plpath.MARKER), "w") as f:
+                    f.write(f"{e}\n")
+            except OSError as err:
+                self.log("error", f"cannot create the marker {plpath.MARKER}: {err.strerror or err}")
 
     def _fan_touch(self, key: str, frame) -> None:
         """Before the first send of a fan channel: put its neutral frame into the snapshot (restore without read-back)."""
@@ -459,10 +486,16 @@ class Daemon:
                 if self.foreign.record(now_ms):
                     self._enter("yielded", "three foreign changes within 60 s")
         hold = frozenset(out for out, refs in self.ec_guard.items() if any(self.values.get(r) is None for r in refs))
-        if self.state == "control":
-            self.results = self.outputs.apply(rounded, hold)
-        else:
-            self.results = self.preview.apply(rounded, hold)
+        stage = self.outputs if self.state == "control" else self.preview
+        try:
+            if self.state == "control" and self.pl_path.kind == "mmio" and not self.msr_copy_checked:
+                self._msr_copy_back()
+            self.results = stage.apply(rounded, hold)
+        except PathFailure as e:
+            self._path_failed(e)
+            raise
+        for prio, text in stage.drain_events():
+            self.log(prio, text)
         self._check_mmio(now_ms)
         self.results.update((self.throttle if self.state == "control" else self.throttle_preview).apply(rounded, hold))
         fan = self.fan if self.state == "control" else self.fan_preview
@@ -668,6 +701,9 @@ def run(argv=None) -> int:
             offset = new_offset
             d.cycle(now)
             time.sleep(1 - (time.monotonic() % 1))
+    except PathFailure:     # logged by the daemon; restore and exit with an error, systemd restarts (spec kernel-mmio-daemon 4.1)
+        d.stop()
+        return 1
     except Exception as e:  # restore on any unhandled error (FR-S1)
         journal.log("error", f"unhandled error: {e!r}")
         d.stop()

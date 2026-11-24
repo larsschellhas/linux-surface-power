@@ -107,6 +107,24 @@ def read_mmio(root: str, unit_w: float) -> tuple[Copy | None, str | None]:
     return Copy(v, unit_w), None
 
 
+MMIO_UNIT_OFFSET = 0x5938          # the MMIO copy of MSR 0x606 (units); SB3: 0x000a0e03 [M]
+
+
+def time_unit(root: str) -> tuple[int | None, str]:
+    """RAPL time unit (bits 19:16; 10 = 1/1024 s) and where it came from: MCHBAR + 0x5938 where readable, else MSR 0x606
+    (spec kernel-mmio-daemon 4.3). (None, why) when neither is readable."""
+    base, why = mchbar(root)
+    if base is not None:
+        try:
+            return _mmio64(base + MMIO_UNIT_OFFSET, root) >> 16 & 0xF, "MCHBAR + 0x5938"
+        except OSError:
+            pass
+    v = msr.read(root, msr.RAPL_POWER_UNIT)
+    if v is not None:
+        return v >> 16 & 0xF, "MSR 0x606"
+    return None, "neither MCHBAR + 0x5938 nor MSR 0x606 readable"
+
+
 def read_msr(root: str, unit_w: float) -> Copy | None:
     v = msr.read(root, MSR_PL)
     return None if v is None else Copy(v, unit_w)
