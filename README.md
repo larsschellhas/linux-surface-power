@@ -42,7 +42,7 @@ updated in the same commit as every change of state, together with this section 
 | Group | State |
 |---|---|
 | A Foundations: root cause, Windows measurements, SMF decoded, requirements, specs | ✅ |
-| B Python reference implementation: loader, engine, adapters, supervisor, tools | 🔄 untested adapters; safety suite per device (B7, local) ⬜; CPU use ≈1 % against 0.5 % (B8) ⬜; daemon side of the MMIO write path implemented and tested on a fake sysfs (B11, B12, 24.11.2026); hardware check on the SB3 next |
+| B Python reference implementation: loader, engine, adapters, supervisor, tools | 🔄 untested adapters; safety suite per device (B7, local) ⬜; CPU use ≈1 % against 0.5 % (B8) ⬜; daemon side of the MMIO write path implemented and checked on the SB3 (B11, B12, 24.11.2026: 9.98 W at a 10 W MMIO PL1 against the MSR copy's 30 W) |
 | C Reference device Surface Book 3 15" | 🔄 field tests ✅, control-run soak 17.–24.11.2026 evaluated: no crash, but too short for `tested`; base detach puts the daemon into emergency (B13); second soak after B12 and B13 |
 | D Kernel interfaces in linux-surface | 🔄 sensors/fans, DPTF data and the suspend fix merged; battery EWMA attribute, MMIO write path ⚠️ (decided 23.11.: preferred PL1/PL2 path via a separate module, prototype first; the prototype passed its tests on the Surface Book 3 15" on 23.–24.11.; MMIO copy enabled on Pro 8, 9 and 10), PL3 under lockdown ⚠️, temperature sensor nodes for several devices open |
 | E Mainline submission | ⬜ merged linux-surface patches first; MMIO and PL3 paths ⚠️ |

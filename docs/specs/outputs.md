@@ -57,7 +57,7 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 - **Enable bits:** writes never change `enabled`. A disabled zone is reported. The daemon does not enable it.
 
 ### 3.3 PL1/PL2: Linux writes the MSR copy, Windows the MMIO copy [C for Windows, M on one Pro 10, D for Linux]
-- **MMIO path (implemented 24.11.2026, not yet run on hardware):** where the kernel module `surface_rapl_mmio` (with `allow_write=Y`) or the processor thermal driver
+- **MMIO path (implemented and checked on the SB3 24.11.2026):** where the kernel module `surface_rapl_mmio` (with `allow_write=Y`) or the processor thermal driver
   provides a writable `intel-rapl-mmio` zone, PL1, PL2 and the PL1 window go to the MMIO copy instead and the MSR copy stays at its snapshot value: `kernel-mmio-daemon.md`
   (KM-9, with B11); the path is chosen at start and shown as `pl_path` in `status.json`. Everything below describes the `msr` path,
   which stays the fallback.
@@ -100,7 +100,7 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
   - `scripts/mmio-pl-read.py` does the same standalone. Without root, `/dev/mem` or the msr module the copies show as "not readable".
 - **Not done [D]:** writing the MMIO copy from user space (`/dev/mem`, root, fails under lockdown and with `IO_STRICT_DEVMEM`); it will not be done. The
   kernel path is the module `surface_rapl_mmio` (`kernel-mmio-rapl.md`, tested on the SB3 23.–24.11.2026: with the copy enabled at 8 W the package held 8.0 W
-  against the MSR copy's 30 W [M]); the daemon side is implemented (`kernel-mmio-daemon.md`, 24.11.2026), not yet run on hardware.
+  against the MSR copy's 30 W [M]); the daemon side is implemented and checked on the SB3 (`kernel-mmio-daemon.md`, 24.11.2026: 9.98 W at a 10 W MMIO PL1 written by the daemon, MSR copy 30 W [M]).
 
 ### 3.2 PL1 time window (`CF2F6076/61`) [C for the meaning, H for the unit]
 - Windows: the Intel SoC client writes it into bits 23:17 of the PL1 register, rounded up to 4 steps per octave (`../research/12-remaining-outputs.md` 2.1).

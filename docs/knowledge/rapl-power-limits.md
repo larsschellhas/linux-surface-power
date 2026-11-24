@@ -9,7 +9,7 @@
   lock 31; PL2 the same at +32 [C].
 - **Windows writes the MMIO copy** (channels 51/52/61) with enable and clamp (`0x18000`) on every write, in every Intel client build of the corpus, and leaves the
   MSR copy alone (channels 56/57 used by no blob) [C, `research/15` 1]. **Linux writes the MSR copy** by default (DV-8); since 24.11.2026 the daemon writes the MMIO copy where a writable MMIO zone exists (`kernel-mmio-daemon.md`;
-  tested on a fake sysfs only, not yet on hardware).
+  checked on the SB3: 9.98 W at a 10 W MMIO PL1, MSR copy 30 W [M]).
 - **The lower enabled copy is in force:** measured on the Pro 10 (MSR below MMIO, tester), the Pro 8 (MMIO below MSR, tester) and the SB3 (MMIO enabled through
   the module at 8 W against MSR 30 W: package 8.0 W, 24.11.2026) [M]; as a general rule still [H]. A disabled copy does not limit [M, SB3].
 - Firmware state differs per device: SB3 MMIO 25/61 W **disabled** (PL1 clamp 1), MSR 30/61 W; Pro 8 MMIO 30/60 W enabled, MSR 35/60 W; Pro 9 MMIO 30/60 W
@@ -39,6 +39,7 @@
   refuses those writes and restores the register itself.
 - **Turbo budget:** PL1 limits an average over its window. After an idle phase the package may run above PL1 (up to PL2 and psys PL2) for some seconds: on the SB3
   ~10 s after a resume, consistent with a 28 s average [M for the burst, H for the explanation].
+  Without suspend, after 60 s idle at a 10 W MMIO PL1: 3–4 s up to 40 W, the package temperature briefly at 100 °C (TjMax), then PL1 [M, SB3, 24.11.2026].
 
 ## 4. Reading the MMIO copy
 - The address (MCHBAR) is in the PCI config of 00:00.0 at `0x48`. **Without `CAP_SYS_ADMIN` the kernel shows only the first 64 bytes of a PCI config** (128 for

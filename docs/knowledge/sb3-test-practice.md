@@ -31,6 +31,13 @@ own checks. Every write test needs the maintainer's yes before each step, and `s
   `intel-rapl:1/energy_uj` (psys), frequency as the mean of `scaling_cur_freq`, temperature from `x86_pkg_temp`. 1–2 s samples, mean of the tail of each cell.
 - Save every result file and every reading taken after a reboot into the test folder; a value that exists only in a chat or a note cannot be re-checked.
 
+## Kernel and the daemon's mode
+- The module is built for one kernel: after a kernel update (7.3.4-2 → 7.3.6-1-surface on 24.11.2026) it has to be rebuilt and signed again.
+- A write test through the daemon needs the daemon in control: if an input that reaches a written output is missing at start (the base sensors 605/609
+  after the prototype modules were removed, 24.11.2026), it falls back to dry-run and writes nothing. Check the mode in the journal before the
+  measurement; a script must stop when the expected register value is not there (the warm-restart check of 24.11.2026 was lost that way).
+- Result files written by a script run with `sudo` belong to root; corrections go into a separate file.
+
 ## Daemon sandbox
 - Scripts run in a transient unit with the daemon's sandbox must not lie in `/tmp` (`PrivateTmp` hides them).
 - The daemon's own MMIO check does not work under its units (B11); read the copies with `sudo python3 scripts/mmio-pl-read.py` or `surface-power-report`.

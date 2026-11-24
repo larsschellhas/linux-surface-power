@@ -139,9 +139,11 @@ independent re-check `raw/arbeitsordner/review-opus-sb3-tests-2026-11-24.md`.
 | T5 | Enable/clamp matrix | 5.4 (first run under low-power not evidence) |
 | T6 | Suspend with the copy enabled | register and limit kept, ~10 s burst (5.7) |
 | T7 | Daemon (control) next to the zone | the daemon never wrote the copy; it cannot read the copy under its units (`kernel-mmio-daemon.md` 8, plan B11) |
-| 5 | Daemon in dry-run and control uses the zone | daemon side implemented 24.11.2026 (`kernel-mmio-daemon.md`); hardware check open (plan B12 step 8) |
+| 5 | Daemon in dry-run and control uses the zone | passed 24.11.2026 (plan B12 step 8): dry-run writes nothing, control writes the zone (`enabled=1`, four bits), 9.98 W at a 10 W MMIO PL1 against MSR 30 W, restore at stop and before sleep |
+| 8.8a | Burst without suspend (5.7) | after 60 s idle: 3–4 s up to 40 W, package temperature briefly 100 °C, then PL1 |
+| 8.8b | Empty DMI table (KM-A3) | `insmod`: No such device, no log line of the module, no zone, register unchanged |
 
-Still to do on the SB3: a warm restart after a write; the burst test without suspend (5.7); a build with an empty DMI table for KM-A3; step 5. On other devices: KM-A6
+Still to do on the SB3: a warm restart after a write (24.11.2026 not conclusive: no write before the reboot); the module rebuilt and checked for 7.3.6-1-surface. On other devices: KM-A6
 (read-only report) and KM-A9 (unload with an enabled copy) on a Pro 8, 9 or 10.
 
 ## 9. Upstream form

@@ -199,6 +199,8 @@ class OutputStage:
             if value > HARD[name][1]:
                 raise ValueError(f"narrowing {name} to {value} W would widen the hard limit {HARD[name][1]} W")
 
+        self.narrowed = {n for n, v in narrow.items() if v < HARD[n][1]}
+
         def bounds(name):
             lo, hi = HARD[name][0] * 1_000_000, HARD[name][1] * 1_000_000
             return lo, min(hi, int(narrow[name] * 1_000_000)) if name in narrow else hi
@@ -360,8 +362,13 @@ class OutputStage:
         if bounded != uw and ref in self.mmio_refs and ref not in self._cut_logged:
             # Spec kernel-mmio-daemon 6: the RAPL core wraps values from 4096 W silently, the module has no upper bound.
             self._cut_logged.add(ref)
-            self.events.append(("warning", f"{t.name.upper()}: computed {uw / 1e6:g} W is outside the hard limit "
-                                           f"{t.hard_min_uw / 1e6:g}-{t.hard_max_uw / 1e6:g} W, written {bounded / 1e6:g} W"))
+            if uw > t.hard_max_uw and t.name in self.narrowed:
+                # The profile's narrowing (outputs.narrow), not the hard limit: intended, so a notice (seen on the SB3, B12 8.5).
+                self.events.append(("notice", f"{t.name.upper()}: computed {uw / 1e6:g} W, written {bounded / 1e6:g} W "
+                                              f"(narrowed by the device profile to {t.hard_max_uw / 1e6:g} W)"))
+            else:
+                self.events.append(("warning", f"{t.name.upper()}: computed {uw / 1e6:g} W is outside the hard limit "
+                                               f"{t.hard_min_uw / 1e6:g}-{t.hard_max_uw / 1e6:g} W, written {bounded / 1e6:g} W"))
         return t.shape(bounded)
 
     @staticmethod

@@ -447,6 +447,17 @@ class StageTest(unittest.TestCase):
             self.fs.write(f"{MMIO_ZONE}/constraint_0_time_window_us", int(us * 0.9994))     # what the core reads back [C]
             self.assertEqual(st.foreign_changes(), [])
 
+    def test_narrowing_is_named_as_such(self):
+        """B12 8.5 on the SB3: a value cut by outputs.narrow was logged as "outside the hard limit 3-10 W"."""
+        st = OutputStage(self.fs.root, {}, mmio_zone=self.zone, narrow={"pl1": 10})
+        st.apply({PL1: 30000})
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_power_limit_uw"), "10000000")
+        ev = st.drain_events()
+        self.assertEqual(ev, [("notice", "PL1: computed 30 W, written 10 W (narrowed by the device profile to 10 W)")])
+        st2 = OutputStage(self.fs.root, {PL1: OutputChannel(1, PL1, 25000, 10_000_000, 0)}, mmio_zone=self.zone, narrow={"pl1": 10})
+        st2.apply({PL1: 1000})                                           # below the hard minimum: still the hard-limit warning
+        self.assertIn("outside the hard limit 3-10 W", st2.drain_events()[0][1])
+
     def test_adjacent_window_step_is_written_on_either_path(self):
         """28 s -> 32 s is 14 %, inside the read-back tolerance (15 %): before 24.11.2026 the change was not written."""
         for st in (self.stage(), OutputStage(self.fs.root, {})):

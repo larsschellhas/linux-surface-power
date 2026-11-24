@@ -4,7 +4,7 @@ Version 0.3, 24.11.2026 (0.1 written after the re-check of the SB3 tests; 0.2 wi
 Implements KM-9 and KM-A7 of `../requirements/kernel-modules.md` and work packages B11 and B12 of `../plan.md`. Builds on
 `kernel-mmio-rapl.md` 0.4 (the module), `outputs.md` 1–3 (output stage), `supervisor.md` 3, 5, 7 (snapshot, foreign changes, suspend) and
 `monitoring.md` (status). Markers [C] source, [M] measured, [H] hypothesis, [D] design decision. **State: implemented 24.11.2026 (plan B12
-steps 1–6) and tested on a fake sysfs (`tests/test_mmio_path.py`, `tests/test_rapl_copies.py`); not yet run on hardware (plan B12 step 8).** B (8.2) is not
+steps 1–6) and tested on a fake sysfs (`tests/test_mmio_path.py`, `tests/test_rapl_copies.py`); **checked on the Surface Book 3 15" on 24.11.2026** (plan B12 step 8, raw note `b12-sb3-test-2026-11-24.md`): path choice, dry-run without a write, control on the module zone (package 9.98 W at a 10 W MMIO PL1, MSR copy at 30 W [M]), restore at stop and before sleep, one s2idle cycle; the window path cannot be checked there (the SB3 blob has no `CF2F6076/61`).** B (8.2) is not
 built. Where the code settles a point the text left open, section 15 says how.
 
 **Why a separate spec [D].** The path depends on a module outside the daemon and is switched per boot, not per channel. It touches the
@@ -242,9 +242,10 @@ copy under the unit; restore at stop and before sleep; the residual clamp line; 
 ## 14. Open points
 - The clamp on CPUs other than Ice Lake (no effect on parity, 4.2); the clamp bits of the Pro 8/9/10 firmware copies.
 - The 28-step rounding of the SB3 client (4.3) [H].
-- The restore before sleep within the hook's 1 s (7) [H].
+- The restore before sleep within the hook's 1 s (7): one s2idle cycle on the SB3 showed the restore and no foreign change after the resume [M, 24.11.2026]; more cycles not run.
 - Whether MCHBAR is constant for a boot (8.2 B, only if B is built) [H].
-- The first SMF device with 00:04.0 (13.1); the warm restart and the residual clamp (5.2).
+- The first SMF device with 00:04.0 (13.1); the warm restart and the residual clamp (5.2): the check of 24.11.2026 was not conclusive (no write before the reboot); unloading the module brings the clamp back [M].
+- The window path on a device whose blob has `CF2F6076/61` (not the SB3).
 
 ## 15. Implementation notes (24.11.2026)
 Points the code settles where the text above leaves room; none changes a decision of section 13.
@@ -262,7 +263,7 @@ Points the code settles where the text above leaves room; none changes a decisio
 - **MSR copy (3, 10):** checked against the snapshot every cycle after the first; a change is a foreign change and is set back to the snapshot value.
 - **Failure (4.1, 2.6):** `PathFailure` from the output stage; the daemon logs it, writes the marker (not for a zone that is gone), and `run()` restores through
   `stop()` and returns 1. A zone that is gone is detected before the foreign-change check, so it does not show as a foreign change.
-- **Bounds (6):** the line for a value cut by the hard limits is logged once per MMIO target per run.
+- **Bounds (6):** the line for a value cut by the hard limits is logged once per MMIO target per run (warning); a value cut by the profile's `outputs.narrow` is logged as a narrowing (notice), corrected after the SB3 check.
 - **Reading (8.3 C):** the register is preferred where readable (source `register`), else the zone (source `zone`). The zone shows no PL2 enable, so the warning about
   a lower copy covers PL1 only when it comes from the zone. On the mmio path the MSR copy comes from MSR `0x610`, else from `intel-rapl:0`.
 - **Window step (found while writing MD-11):** the window target wrote a new step only when it differed from the last one by more than the read-back tolerance (15 %),
