@@ -177,7 +177,8 @@ static int srm_write_raw(int id, struct reg_action *ra)
 	if (srm_removing)
 		return -EPERM;
 	if (!allow_write) {
-		pr_warn_once("refused a write: the module is read-only (allow_write=0)\n");
+		/* The RAPL core also writes its saved limits back after every resume, so this need not come from user space. */
+		pr_warn_once("refused a write: the module is read-only (allow_write=0); the RAPL core also writes its saved limits back after a resume\n");
 		return -EPERM;
 	}
 	/* Only the limit register, only the listed bit groups, never a lock bit [spec 5.3]. */
