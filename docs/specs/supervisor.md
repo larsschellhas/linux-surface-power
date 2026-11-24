@@ -60,9 +60,11 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
     known neutral value (the opt-in temperature thresholds) are listed as `unrestorable`.
 
   The file is `/run/surface-power/snapshot.json`, written atomically (write a temp file, then rename).
-  On the MMIO path (planned, `kernel-mmio-daemon.md`) the snapshot also holds the MMIO zone's PL1, PL2, window and `enabled`, and the restore order changes for
-  `enabled` (`kernel-mmio-daemon.md` 5).
-- **Predecessor:** if a snapshot from a crashed predecessor exists, it is kept and used as is. The current values may be the daemon's own.
+  On the MMIO path (`kernel-mmio-daemon.md`) the snapshot also holds the MMIO zone's PL1, PL2, window and `enabled` and the MSR copy's PL1, PL2 and window, and the
+  raw MMIO register under `info` where it is readable (never written back); the restore writes an `enabled` that was 0 first and never touches one that was 1, and
+  skips the keys of a zone that is gone (`kernel-mmio-daemon.md` 5, 15).
+- **Predecessor:** if a snapshot from a crashed predecessor exists, it is kept and used as is. The current values may be the daemon's own. Keys it does not have
+  (the predecessor ran on the other PL path) are added with their current values, because the predecessor never wrote them.
 - **Restore:**
   - on normal exit;
   - on any unhandled exception;
@@ -90,7 +92,7 @@ the blob's controllers that are temperatures; the CPU channel is the `coretemp` 
 - **Detection:** before each write cycle, the output stage compares each owned target with the last value it wrote or read back. A difference beyond the hardware rounding (PL1/PL2/psys: 0.2 W) is a foreign change. A changed PL1 time window is one too.
 - **First two changes within 60 s:** logged, then the own value is written again.
 - **Third change within 60 s:** the supervisor yields. It restores firmware values once, writes nothing more, logs it and shows it in the status file.
-- On the MMIO path (planned) the MMIO zone's `enabled` and the MSR copy left at its firmware value count as owned targets too (`kernel-mmio-daemon.md` 10).
+- On the MMIO path the MMIO zone's `enabled` (where the daemon set it) and the MSR copy left at its snapshot value count as owned targets too (`kernel-mmio-daemon.md` 10).
 
 ## 6. Device profiles (FR-D3)
 A profile is a small TOML file in `profiles/`. It holds no limit values (G-2). Fields:
@@ -107,8 +109,8 @@ A profile is a small TOML file in `profiles/`. It holds no limit values (G-2). F
   - `outputs.kernel_fan_profiles`: 1 by default; 1–3 = number of fans the kernel sends the fan profile to (`outputs.md` 9.3). Laptop Studio 2: 2;
   - top-level `notes`: lines the report (`note: ...`) and the daemon log print for the device;
   - `outputs.narrow`: optional upper limits per target (FR-S7, only narrowing);
-  - planned with the MMIO path (`kernel-mmio-daemon.md` 2): `outputs.mmio` (`true` by default; `false` keeps PL1/PL2 and the window on the MSR zone even
-    where a writable MMIO zone exists).
+  - `outputs.mmio`: unset or `true` by default (the MMIO path where a writable MMIO zone exists, `kernel-mmio-daemon.md` 2); `false` keeps PL1/PL2 and the window
+    on the MSR zone. No shipped profile sets it.
 - **Status:** `tested`, `true` when the device was validated against Windows (NFR-1).
 
 The SB3 15" profile is the only tested one in phase 4.
@@ -122,7 +124,7 @@ The reference implementation uses only the Python standard library, so it does n
   2. request EC data (`inputs.md` 6);
   3. a fresh energy reference for power readings;
   4. continue.
-- **MMIO path (planned):** the restore before sleep includes the MMIO copy; after the resume the first cycle writes it again (`kernel-mmio-daemon.md` 7).
+- **MMIO path:** the restore before sleep includes the MMIO copy; after the resume the first cycle writes it again (`kernel-mmio-daemon.md` 7).
 - **Fallback:** without the hook, a `CLOCK_BOOTTIME − CLOCK_MONOTONIC` jump of more than 5 s counts as a resume [D]. In that case
   the firmware values are not restored before sleep.
 

@@ -28,6 +28,8 @@ Temperatures are logged in °C, power in W. Blob units are converted for logging
   "device": {"product": "Surface Book 3", "sku": "...", "tested": true},
   "blob": {"source": "efivar", "form": "B", "lines": 101, "variant": "classic"},
   "state": "control",
+  "pl_path": "mmio",
+  "pl_path_reason": "intel-rapl-mmio:0 of surface_rapl_mmio, allow_write=Y",
   "slider": {"state": 5, "profile": "performance", "ac": true},
   "controllers": [{"line": 1, "input": "2E8B14C2/509", "state": "ACTIVE", "set": 5, "x": 48.1, "setpoint": 48.0, "u_w": 21.4}],
   "outputs": [{"channel": "0B7B5350/51", "name": "PL1", "value_w": 21.4, "target": "written", "hw_w": 21.375}],
@@ -38,7 +40,10 @@ Temperatures are logged in °C, power in W. Blob units are converted for logging
 - **Field values:**
   - `target` is one of `written`, `dry-run`, `log-only`, `firmware`, `held at firmware value (EC inputs invalid)` (also `... last written value ...`);
   - `value_w` is what is written (control) or would be written (dry-run), after clamping; for a held channel it is the value that stays in place, and `computed_w` holds the engine value;
-  - `events` holds the last 20 events.
+  - `events` holds the last 20 events;
+  - `pl_path` (`mmio` or `msr`) and `pl_path_reason`: where PL1, PL2 and the PL1 window go (`kernel-mmio-daemon.md` 2, 9);
+  - `rapl_copies` (every 60 s where readable): `mmio` and `msr` (the copies as text), `mmio_source` (`register` or `zone`), `mmio_unreadable` (why the MMIO copy
+    cannot be read, else null), `mmio_below_computed` (msr path) or `msr_below_computed` (mmio path) while the other copy is enabled below the computed value.
 
 ## 3. Time series (FR-M3)
 - **Location:** `/var/lib/surface-power/series-YYYYMMDD.csv`, one row per engine run.

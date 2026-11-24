@@ -39,4 +39,6 @@ Prints a short text that contains no blob content and no serial numbers:
 - the blob: found yes/no, form, size, a SHA-256 of the decoded text (to tell versions apart), the block types used, unknown GUIDs, the outputs and the instances used;
 - the inputs: for each input channel the blob reads, whether a Linux source exists and its current validity;
 - the outputs: for each output, its target and whether it is writable;
-- with `--with-ec` (root): whether the `0x53` and DPTF requests answer. Only yes/no is reported, not the values.
+- with `--with-ec` (root): whether the `0x53` and DPTF requests answer. Only yes/no is reported, not the values;
+- the PL1/PL2 copies: presence of 00:04.0 and of `intel-rapl-mmio`, the PL path the daemon would choose at its start with the reason (`kernel-mmio-daemon.md` 2),
+  the MMIO copy (register as root, else the zone, else why it is not readable) and the MSR copy.

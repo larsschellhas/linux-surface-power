@@ -153,6 +153,19 @@ class ReportTest(RaplCopiesBase):
         text = self.run_report()
         self.assertIn("MMIO (MCHBAR + 0x59A0): not readable (PCI config beyond 64 bytes needs CAP_SYS_ADMIN)", text)
 
+    def test_report_shows_the_pl_path_and_the_zone(self):
+        self.msr(raw(30, 61))
+        self.fs.add_mmio_zone(enabled=1, pl1_uw=20_000_000)
+        text = self.run_report()
+        self.assertIn("PL path of the daemon (chosen at its start): mmio (intel-rapl-mmio:0 of surface_rapl_mmio, "
+                      "allow_write=Y)", text)
+        self.assertIn("MMIO (MCHBAR + 0x59A0): PL1 20 W (on), PL2 61 W, window 27.984 s (from the zone: no PL2 enable, clamp or "
+                      "lock) [from the zone]", text)
+
+    def test_report_names_the_msr_path_without_a_zone(self):
+        text = self.run_report()
+        self.assertIn("PL path of the daemon (chosen at its start): msr (no MMIO zone)", text)
+
     def test_report_without_root_says_so(self):
         text = self.run_report()
         self.assertIn("processor thermal device 00:04.0: absent", text)

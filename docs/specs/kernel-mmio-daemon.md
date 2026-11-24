@@ -1,10 +1,11 @@
 # Spec: daemon side of the MMIO write path (KM-9) and reading the MMIO copy (B11)
 
-Version 0.2, 24.11.2026 (0.1 written after the re-check of the SB3 tests; 0.2 with the maintainer's decisions of the same day, section 13).
+Version 0.3, 24.11.2026 (0.1 written after the re-check of the SB3 tests; 0.2 with the maintainer's decisions of the same day, section 13; 0.3 implemented, section 15).
 Implements KM-9 and KM-A7 of `../requirements/kernel-modules.md` and work packages B11 and B12 of `../plan.md`. Builds on
 `kernel-mmio-rapl.md` 0.4 (the module), `outputs.md` 1–3 (output stage), `supervisor.md` 3, 5, 7 (snapshot, foreign changes, suspend) and
-`monitoring.md` (status). Markers [C] source, [M] measured, [H] hypothesis, [D] design decision. **State: 8.3 E implemented (24.11.2026,
-tests MB-1 … MB-4, MB-9); the rest is specification only.** The tests of section 12 come first, then the code, each step with the maintainer's yes.
+`monitoring.md` (status). Markers [C] source, [M] measured, [H] hypothesis, [D] design decision. **State: implemented 24.11.2026 (plan B12
+steps 1–6) and tested on a fake sysfs (`tests/test_mmio_path.py`, `tests/test_rapl_copies.py`); not yet run on hardware (plan B12 step 8).** B (8.2) is not
+built. Where the code settles a point the text left open, section 15 says how.
 
 **Why a separate spec [D].** The path depends on a module outside the daemon and is switched per boot, not per channel. It touches the
 target selection (`outputs.md` 3), the snapshot (`supervisor.md` 3), foreign changes (`supervisor.md` 5), suspend (`supervisor.md` 7), the
@@ -185,7 +186,7 @@ In addition, on the `mmio` path:
 ## 11. Dry-run
 Dry-run chooses the path, computes and logs the values for it and shows them in the status; it writes nothing: no MMIO value, no `enabled`, no MSR restore of section 3.
 
-## 12. Tests (to be written before the code; none exists yet)
+## 12. Tests (written before the code; all exist since 24.11.2026 except MB-5 … MB-7, which belong to the optional B)
 On the fake sysfs of `tests/fakesys.py`, extended by an MMIO zone (`sys/class/powercap/intel-rapl-mmio:0` with `name`, `enabled`, `constraint_0/1_*`), the module's
 parameter file `sys/module/surface_rapl_mmio/parameters/allow_write`, an optional `sys/bus/pci/devices/0000:04.0` and a fake register file for `/dev/mem` reads.
 
@@ -244,3 +245,26 @@ copy under the unit; restore at stop and before sleep; the residual clamp line; 
 - The restore before sleep within the hook's 1 s (7) [H].
 - Whether MCHBAR is constant for a boot (8.2 B, only if B is built) [H].
 - The first SMF device with 00:04.0 (13.1); the warm restart and the residual clamp (5.2).
+
+## 15. Implementation notes (24.11.2026)
+Points the code settles where the text above leaves room; none changes a decision of section 13.
+- **Modules:** `adapters/plpath.py` (choice, 2), `adapters/outputs.py` (targets on the MMIO zone, order, enable, MSR copy, `PathFailure`), `adapters/rapl_copies.py`
+  (reasons, mask, `time_unit`, `read_zone`), `supervisor.py` (snapshot `info`, restore order), `daemon.py` (log, status, foreign changes, exit), `tools/report.py`.
+- **Snapshot keys (5.1):** the MMIO keys are the plain powercap paths (`…/intel-rapl-mmio:0/constraint_0_power_limit_uw`, …, `…/enabled`), like every other powercap
+  key, not prefixed with `mmio:`; the restore recognises the zone by its path. The raw register is kept in a separate `info` section of `snapshot.json`, which is never
+  written back. Keys a predecessor's snapshot does not have (it ran on the other path) are added with their current values: that predecessor never wrote them.
+- **Restore (5.2):** an `enabled` key that was 0 is written first where it reads 1; one that was 1 is never touched, also when it reads 0. Keys of a zone that is gone
+  are skipped (2.6). The DS-5 line is logged once after a restore where the register is readable.
+- **Enable ownership (4.2, 10):** the daemon writes `enabled=1` only when the snapshot's `enabled` is 0, after a cycle that wrote a PL target; `enabled` reading 0
+  after that is a foreign change and is set again in the same cycle. A firmware-enabled copy's `enabled` is neither written nor watched.
+- **Order (4.1):** every apply writes the window, then PL1, then PL2, then the rest, on both paths.
+- **Time unit (4.3):** where neither MCHBAR + `0x5938` nor MSR `0x606` is readable, the window is log-only too (no assumption).
+- **MSR copy (3, 10):** checked against the snapshot every cycle after the first; a change is a foreign change and is set back to the snapshot value.
+- **Failure (4.1, 2.6):** `PathFailure` from the output stage; the daemon logs it, writes the marker (not for a zone that is gone), and `run()` restores through
+  `stop()` and returns 1. A zone that is gone is detected before the foreign-change check, so it does not show as a foreign change.
+- **Bounds (6):** the line for a value cut by the hard limits is logged once per MMIO target per run.
+- **Reading (8.3 C):** the register is preferred where readable (source `register`), else the zone (source `zone`). The zone shows no PL2 enable, so the warning about
+  a lower copy covers PL1 only when it comes from the zone. On the mmio path the MSR copy comes from MSR `0x610`, else from `intel-rapl:0`.
+- **Window step (found while writing MD-11):** the window target wrote a new step only when it differed from the last one by more than the read-back tolerance (15 %),
+  so a change of one step (28 s → 32 s, 14 %) was not written, on the msr path too. It now writes whenever the step differs; the tolerance applies to the read-back only.
+- **Report:** `surface-power-report` prints the path the daemon would choose and its reason, and the MMIO copy from the zone where the register is not readable.

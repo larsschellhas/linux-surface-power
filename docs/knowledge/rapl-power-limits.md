@@ -8,7 +8,8 @@
   exists only with the processor thermal device 00:04.0 or the module `surface_rapl_mmio`). Same layout: PL1 bits 14:0, enable 15, clamp 16, window 23:17,
   lock 31; PL2 the same at +32 [C].
 - **Windows writes the MMIO copy** (channels 51/52/61) with enable and clamp (`0x18000`) on every write, in every Intel client build of the corpus, and leaves the
-  MSR copy alone (channels 56/57 used by no blob) [C, `research/15` 1]. **Linux writes the MSR copy** today (DV-8); the MMIO path is specified, not built.
+  MSR copy alone (channels 56/57 used by no blob) [C, `research/15` 1]. **Linux writes the MSR copy** by default (DV-8); since 24.11.2026 the daemon writes the MMIO copy where a writable MMIO zone exists (`kernel-mmio-daemon.md`;
+  tested on a fake sysfs only, not yet on hardware).
 - **The lower enabled copy is in force:** measured on the Pro 10 (MSR below MMIO, tester), the Pro 8 (MMIO below MSR, tester) and the SB3 (MMIO enabled through
   the module at 8 W against MSR 30 W: package 8.0 W, 24.11.2026) [M]; as a general rule still [H]. A disabled copy does not limit [M, SB3].
 - Firmware state differs per device: SB3 MMIO 25/61 W **disabled** (PL1 clamp 1), MSR 30/61 W; Pro 8 MMIO 30/60 W enabled, MSR 35/60 W; Pro 9 MMIO 30/60 W
@@ -45,7 +46,8 @@
 - `/dev/mem` needs `CAP_SYS_RAWIO` and lockdown `none` [C, `mem.c`]. The daemon's units have `CAP_DAC_OVERRIDE CAP_SYS_RAWIO`, so the daemon cannot find the
   address under its units (plan B11) [M, SB3]; since 24.11.2026 it logs the reason once per run and shows it in `status.json`
   (`rapl_copies.mmio_unreadable`) [C]. `surface-power-report` as root can read the copy.
-- The module zone gives PL1, PL2, window and PL1 enable without any address; not PL2 enable, clamp or lock [C].
+- The module zone gives PL1, PL2, window and PL1 enable without any address; not PL2 enable, clamp or lock [C]. The daemon reads the copy from a zone wherever one
+  exists (since 24.11.2026, source `zone` in `status.json`).
 
 ## 5. Without the daemon the SB3 is held by psys
 With the daemon stopped, the firmware's psys limits 25 W (long) / 40 W (short) hold the whole platform: under full load the package sits at ~13–15 W after a
