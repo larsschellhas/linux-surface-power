@@ -2,7 +2,6 @@
 import contextlib
 import io
 import os
-import struct
 import tempfile
 import unittest
 from unittest import mock
@@ -35,23 +34,11 @@ class RaplCopiesBase(unittest.TestCase):
         self.fs.cleanup()
 
     def msr(self, value_610):
-        dev = self.fs.path("dev/cpu/0/msr")
-        os.makedirs(os.path.dirname(dev), exist_ok=True)
-        with open(dev, "wb") as f:
-            f.write(bytes(0x620))
-        with open(dev, "r+b") as f:
-            f.seek(0x606)
-            f.write(struct.pack("<Q", 0x000A0E03))
-            f.seek(0x610)
-            f.write(struct.pack("<Q", value_610))
+        self.fs.add_msr({0x610: value_610})
 
     def host_bridge(self, mchbar=MCHBAR | 1, size=None):
         """The host bridge's PCI config; `size` cuts it (64 bytes is what a process without CAP_SYS_ADMIN sees)."""
-        p = self.fs.path("sys/bus/pci/devices/0000:00:00.0/config")
-        os.makedirs(os.path.dirname(p), exist_ok=True)
-        data = bytes(0x48) + struct.pack("<Q", mchbar) + bytes(0x100 - 0x50)
-        with open(p, "wb") as f:
-            f.write(data if size is None else data[:size])
+        self.fs.add_host_bridge(mchbar, size)
 
     def mmio(self, value):
         def read(phys, root):

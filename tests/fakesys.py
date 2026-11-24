@@ -1,6 +1,14 @@
 """A fake sysfs/procfs tree for adapter, supervisor and daemon tests. Mirrors the layout on the SB3."""
 import os
+import struct
 import tempfile
+
+MMIO_ZONE = "sys/class/powercap/intel-rapl-mmio:0"
+MMIO_PARAM = "sys/module/surface_rapl_mmio/parameters/allow_write"
+PROC_THERMAL = "sys/bus/pci/devices/0000:00:04.0"
+HOST_BRIDGE = "sys/bus/pci/devices/0000:00:00.0/config"
+MCHBAR = 0xFED10000                     # the SB3's (Ice Lake) MCHBAR [M]
+RAPL_UNITS = 0x000A0E03                 # MSR 0x606 and MCHBAR + 0x5938 on the SB3: power 1/8 W, energy, time unit 10 [M]
 
 
 class FakeSys:
@@ -108,6 +116,79 @@ class FakeSys:
         self.write(f"{d}/available_frequencies", " ".join(map(str, freqs)))
         self.write(f"{d}/min_freq", freqs[0])
         self.write(f"{d}/max_freq", freqs[-1])
+
+    # --- the MMIO copy of PL1/PL2 (specs kernel-mmio-rapl.md, kernel-mmio-daemon.md 12) ---
+
+    def add_mmio_zone(self, kind: str = "module", allow_write: str = "Y", enabled: int = 0, pl1_uw: int = 25_000_000,
+                      pl2_uw: int = 61_000_000, window_us: int = 27983872) -> str:
+        """An `intel-rapl-mmio:0` zone as the RAPL core shows it. `kind` "module": made by surface_rapl_mmio, with its parameter
+        `allow_write` ("Y"/"N"); "kernel": made by the processor thermal driver (PCI 00:04.0 present), with a PL4 constraint and a
+        DRAM sub-zone. Values are the SB3's firmware MMIO copy (25/61 W, disabled) [M]. Returns the zone path relative to the root."""
+        z = MMIO_ZONE
+        self.write(f"{z}/name", "package-0")
+        self.write(f"{z}/enabled", enabled)
+        self.write(f"{z}/energy_uj", 0)
+        for i, (name, uw, win, mx) in enumerate((("long_term", pl1_uw, window_us, 15000000),
+                                                 ("short_term", pl2_uw, 2440, 0))):
+            self.write(f"{z}/constraint_{i}_name", name)
+            self.write(f"{z}/constraint_{i}_power_limit_uw", uw)
+            self.write(f"{z}/constraint_{i}_time_window_us", win)
+            self.write(f"{z}/constraint_{i}_max_power_uw", mx)
+        if kind == "module":
+            self.write(MMIO_PARAM, allow_write)
+        elif kind == "kernel":
+            os.makedirs(self.path(PROC_THERMAL), exist_ok=True)
+            self.write(f"{z}/constraint_2_name", "peak_power")
+            self.write(f"{z}/constraint_2_power_limit_uw", 0)
+            dram = f"{z}:0"
+            self.write(f"{dram}/name", "dram")
+            self.write(f"{dram}/enabled", 0)
+            self.write(f"{dram}/constraint_0_name", "long_term")
+            self.write(f"{dram}/constraint_0_power_limit_uw", 0)
+        else:
+            raise ValueError(kind)
+        return z
+
+    def add_msr(self, values: dict[int, int] | None = None) -> None:
+        """/dev/cpu/0/msr as a regular file (msr.read/write use positioned I/O). 0x606 defaults to the SB3's units."""
+        regs = {0x606: RAPL_UNITS, **(values or {})}
+        dev = self.path("dev/cpu/0/msr")
+        os.makedirs(os.path.dirname(dev), exist_ok=True)
+        if not os.path.exists(dev):
+            with open(dev, "wb") as f:
+                f.write(bytes(0x700))
+        with open(dev, "r+b") as f:
+            for reg, v in regs.items():
+                f.seek(reg)
+                f.write(struct.pack("<Q", v))
+
+    def add_host_bridge(self, mchbar: int = MCHBAR | 1, size: int | None = None) -> None:
+        """The host bridge's PCI config with MCHBAR at 0x48; `size` cuts it (64 = the view without CAP_SYS_ADMIN)."""
+        data = bytes(0x48) + struct.pack("<Q", mchbar) + bytes(0x100 - 0x50)
+        p = self.path(HOST_BRIDGE)
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "wb") as f:
+            f.write(data if size is None else data[:size])
+
+    def add_mmio_register(self, value: int, units: int = RAPL_UNITS, mchbar: int = MCHBAR) -> None:
+        """/dev/mem as a sparse file that holds the MMIO copy at MCHBAR + 0x59a0 and the unit register at MCHBAR + 0x5938, so
+        that rapl_copies reads it through its real mmap path. Adds the host bridge too."""
+        self.add_host_bridge(mchbar | 1)
+        p = self.path("dev/mem")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "ab"):
+            pass
+        os.truncate(p, max(os.path.getsize(p), mchbar + 0x6000))
+        with open(p, "r+b") as f:
+            f.seek(mchbar + 0x59A0)
+            f.write(struct.pack("<Q", value))
+            f.seek(mchbar + 0x5938)
+            f.write(struct.pack("<Q", units))
+
+    def mmio_register(self, mchbar: int = MCHBAR) -> int:
+        with open(self.path("dev/mem"), "rb") as f:
+            f.seek(mchbar + 0x59A0)
+            return struct.unpack("<Q", f.read(8))[0]
 
     def cleanup(self):
         self.tmp.cleanup()
