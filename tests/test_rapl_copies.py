@@ -45,14 +45,20 @@ class RaplCopiesBase(unittest.TestCase):
             f.seek(0x610)
             f.write(struct.pack("<Q", value_610))
 
-    def host_bridge(self, mchbar=MCHBAR | 1):
+    def host_bridge(self, mchbar=MCHBAR | 1, size=None):
+        """The host bridge's PCI config; `size` cuts it (64 bytes is what a process without CAP_SYS_ADMIN sees)."""
         p = self.fs.path("sys/bus/pci/devices/0000:00:00.0/config")
         os.makedirs(os.path.dirname(p), exist_ok=True)
+        data = bytes(0x48) + struct.pack("<Q", mchbar) + bytes(0x100 - 0x50)
         with open(p, "wb") as f:
-            f.write(bytes(0x48) + struct.pack("<Q", mchbar))
+            f.write(data if size is None else data[:size])
 
     def mmio(self, value):
-        return mock.patch.object(rapl_copies, "_mmio64", lambda phys, root: value if phys == self.MCHBAR + 0x59A0 else None)
+        def read(phys, root):
+            if phys != self.MCHBAR + 0x59A0:
+                raise OSError(14, "Bad address")
+            return value
+        return mock.patch.object(rapl_copies, "_mmio64", read)
 
 
 class DecodeTest(RaplCopiesBase):
@@ -66,11 +72,35 @@ class DecodeTest(RaplCopiesBase):
 
     def test_mchbar_needs_the_enable_bit(self):
         self.host_bridge()
-        self.assertEqual(rapl_copies.mchbar(self.fs.root), self.MCHBAR)
+        self.assertEqual(rapl_copies.mchbar(self.fs.root), (self.MCHBAR, None))
         self.host_bridge(self.MCHBAR)
-        self.assertIsNone(rapl_copies.mchbar(self.fs.root))
+        self.assertEqual(rapl_copies.mchbar(self.fs.root), (None, "MCHBAR not enabled"))                     # MB-2
         os.remove(self.fs.path("sys/bus/pci/devices/0000:00:00.0/config"))
-        self.assertIsNone(rapl_copies.mchbar(self.fs.root))
+        addr, why = rapl_copies.mchbar(self.fs.root)
+        self.assertIsNone(addr)
+        self.assertTrue(why.startswith("PCI config of 00:00.0 not readable"), why)
+
+    def test_mchbar_beyond_64_bytes_needs_cap_sys_admin(self):
+        """MB-1: without CAP_SYS_ADMIN the kernel shows 64 bytes of the config and returns 0 bytes at 0x48, without an error."""
+        self.host_bridge(size=64)
+        self.assertEqual(rapl_copies.mchbar(self.fs.root), (None, "PCI config beyond 64 bytes needs CAP_SYS_ADMIN"))
+
+    def test_mchbar_address_mask_is_bits_41_to_15(self):
+        """MB-4: the same mask as the module (GENMASK_ULL(41, 15)); bit 40 stays, bit 45 and the low bits go."""
+        self.host_bridge((1 << 45) | (1 << 40) | self.MCHBAR | 0x7FFE | 1)
+        self.assertEqual(rapl_copies.mchbar(self.fs.root), ((1 << 40) | self.MCHBAR, None))
+        self.assertEqual(rapl_copies.MCHBAR_ADDR_MASK, 0x3FF_FFFF_8000)
+
+    def test_read_mmio_gives_the_reason(self):
+        self.host_bridge(size=64)
+        self.assertEqual(rapl_copies.read_mmio(self.fs.root, UNIT), (None, "PCI config beyond 64 bytes needs CAP_SYS_ADMIN"))
+        self.host_bridge()                                                       # MB-3: no dev/mem in the fake tree
+        copy, why = rapl_copies.read_mmio(self.fs.root, UNIT)
+        self.assertIsNone(copy)
+        self.assertTrue(why.startswith("/dev/mem not readable"), why)
+        with self.mmio(raw(28, 35)):
+            copy, why = rapl_copies.read_mmio(self.fs.root, UNIT)
+        self.assertEqual((copy.pl1[0], why), (28.0, None))
 
     def test_presence_of_the_processor_thermal_device_and_zone(self):
         self.assertFalse(rapl_copies.has_proc_thermal(self.fs.root))
@@ -86,7 +116,11 @@ class DecodeTest(RaplCopiesBase):
         with self.mmio(raw(28, 35)):
             got = rapl_copies.read_all(self.fs.root)
         self.assertEqual(got["mmio"].pl1[0], 28.0)
+        self.assertIsNone(got["mmio_unreadable"])
         self.assertEqual(got["msr"].pl2[0], 61.0)
+        self.host_bridge(self.MCHBAR)
+        got = rapl_copies.read_all(self.fs.root)
+        self.assertEqual((got["mmio"], got["mmio_unreadable"]), (None, "MCHBAR not enabled"))
         self.assertIsNone(rapl_copies.read_all(self.fs.path("nowhere")))          # no msr device: nothing readable
 
     def test_caps_only_for_enabled_halves_below_our_value(self):
@@ -125,6 +159,12 @@ class ReportTest(RaplCopiesBase):
         self.assertIn("processor thermal device 00:04.0: present; powercap intel-rapl-mmio: absent", text)
         self.assertIn("MMIO (MCHBAR + 0x59A0): PL1 25 W (off), PL2 61 W (off)", text)
         self.assertIn("MSR 0x610:              PL1 30 W (on), PL2 61 W (on)", text)
+
+    def test_report_gives_the_reason_when_the_mmio_copy_is_not_readable(self):
+        self.msr(raw(30, 61))
+        self.host_bridge(size=64)
+        text = self.run_report()
+        self.assertIn("MMIO (MCHBAR + 0x59A0): not readable (PCI config beyond 64 bytes needs CAP_SYS_ADMIN)", text)
 
     def test_report_without_root_says_so(self):
         text = self.run_report()
@@ -173,7 +213,8 @@ class DaemonTest(RaplCopiesBase):
         self.assertIn("MMIO copy of PL1 no longer limits", self.out.getvalue())
         d.stop()
 
-    def test_silent_when_the_mmio_copy_is_off_or_unreadable(self):
+    def test_silent_when_the_mmio_copy_is_off(self):
+        """MB-9 (first half): an off copy does not limit, so nothing is said."""
         self.msr(raw(30, 61))
         self.host_bridge()
         d = self.start()
@@ -181,12 +222,39 @@ class DaemonTest(RaplCopiesBase):
             d.cycle(0)
         self.assertNotIn("MMIO copy", self.out.getvalue())
         self.assertNotIn("mmio_below_computed", self.status()["rapl_copies"])
-        d.stop()
-        d = self.start()
-        d.cycle(0)                                              # no MCHBAR in the fake tree: not readable, no warning
-        self.assertNotIn("MMIO copy of", self.out.getvalue())
+        self.assertIsNone(self.status()["rapl_copies"]["mmio_unreadable"])
         d.stop()
 
+    def unreadable(self, reason_start):
+        """MB-9 (second half): one line per run with the reason, the status keeps the reason, no warning about a lower copy."""
+        d = self.start()
+        d.cycle(0)
+        d.cycle(61000)                                          # a second read, same reason: no second line
+        text = self.out.getvalue()
+        self.assertEqual(text.count("the MMIO copy of PL1/PL2 is not readable"), 1, text)
+        self.assertIn(f"not readable ({reason_start}", text)
+        self.assertNotIn("below the computed", text)
+        self.assertTrue(self.status()["rapl_copies"]["mmio_unreadable"].startswith(reason_start))
+        self.assertIsNone(self.status()["rapl_copies"]["mmio"])
+        d.stop()
+
+    def test_one_line_when_the_config_shows_only_64_bytes(self):
+        """MB-1: the view under the packaged units (no CAP_SYS_ADMIN)."""
+        self.msr(raw(30, 61))
+        self.host_bridge(size=64)
+        self.unreadable("PCI config beyond 64 bytes needs CAP_SYS_ADMIN")
+
+    def test_one_line_when_mchbar_is_not_enabled(self):
+        """MB-2"""
+        self.msr(raw(30, 61))
+        self.host_bridge(self.MCHBAR)
+        self.unreadable("MCHBAR not enabled")
+
+    def test_one_line_when_dev_mem_is_not_readable(self):
+        """MB-3: no dev/mem in the fake tree."""
+        self.msr(raw(30, 61))
+        self.host_bridge()
+        self.unreadable("/dev/mem not readable")
 
 if __name__ == "__main__":
     unittest.main()

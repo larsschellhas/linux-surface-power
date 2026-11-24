@@ -5,7 +5,8 @@ enabled copy is in force (measured on a Pro 10, linux-surface#2383; as a general
 
 MCHBAR is the 64-bit register at config offset 0x48 of the host bridge 00:00.0, bit 0 = enabled. The MMIO copy has the layout of
 MSR 0x610: PL1 bits 14:0, enable bit 15, clamp bit 16; PL2 the same from bit 32; lock bit 63; the unit is MSR 0x606 bits 3:0.
-Reading /dev/mem and the MSR needs root; both can fail (kernel lockdown, STRICT_DEVMEM), then the value is None.
+Reading the config beyond 64 bytes needs CAP_SYS_ADMIN (the packaged units do not have it, plan B11), /dev/mem needs CAP_SYS_RAWIO and
+lockdown `none`; when the MMIO copy cannot be read, the value is None together with the reason (spec kernel-mmio-daemon 8.3 E).
 """
 import glob
 import mmap
@@ -17,6 +18,7 @@ from . import msr
 
 MCHBAR_CONFIG = "sys/bus/pci/devices/0000:00:00.0/config"
 MCHBAR_OFFSET = 0x48
+MCHBAR_ADDR_MASK = ((1 << 42) - 1) & ~0x7FFF      # bits 41:15, as GENMASK_ULL(41, 15) in kernel/surface-rapl-mmio
 MMIO_PL_OFFSET = 0x59A0
 MSR_PL = 0x610
 PROC_THERMAL = "sys/bus/pci/devices/0000:00:04.0"
@@ -50,35 +52,38 @@ class Copy:
         return f"{one('PL1', self.pl1)}, {one('PL2', self.pl2)}" + (", locked" if self.lock else "")
 
 
-def _mmio64(phys: int, root: str) -> int | None:
+def _mmio64(phys: int, root: str) -> int:
+    """64 bits at a physical address through /dev/mem; raises OSError (lockdown, STRICT_DEVMEM, no capability)."""
     page = phys & ~(mmap.PAGESIZE - 1)
-    try:
-        fd = os.open(os.path.join(root, "dev/mem"), os.O_RDONLY | os.O_SYNC)
-    except OSError:
-        return None
+    fd = os.open(os.path.join(root, "dev/mem"), os.O_RDONLY | os.O_SYNC)
     try:
         m = mmap.mmap(fd, mmap.PAGESIZE, mmap.MAP_SHARED, mmap.PROT_READ, offset=page)
         try:
             return struct.unpack("<Q", m[phys - page:phys - page + 8])[0]
         finally:
             m.close()
-    except (OSError, ValueError):
-        return None
+    except ValueError as e:
+        raise OSError(str(e)) from e
     finally:
         os.close(fd)
 
 
-def mchbar(root: str) -> int | None:
+def mchbar(root: str) -> tuple[int | None, str | None]:
+    """(address, None), or (None, reason)."""
     try:
         with open(os.path.join(root, MCHBAR_CONFIG), "rb") as f:
             f.seek(MCHBAR_OFFSET)
             raw = f.read(8)
-    except OSError:
-        return None
+    except OSError as e:
+        return None, f"PCI config of 00:00.0 not readable ({e.strerror or e})"
     if len(raw) != 8:
-        return None
+        # the kernel shows only the first 64 bytes of a PCI config without CAP_SYS_ADMIN and returns 0 bytes beyond, without an
+        # error [C, drivers/pci/pci-sysfs.c pci_read_config]
+        return None, "PCI config beyond 64 bytes needs CAP_SYS_ADMIN"
     v = struct.unpack("<Q", raw)[0]
-    return (v & ~0x7FFF & ((1 << 39) - 1)) if v & 1 else None
+    if not v & 1:
+        return None, "MCHBAR not enabled"
+    return v & MCHBAR_ADDR_MASK, None
 
 
 def has_proc_thermal(root: str) -> bool:
@@ -90,12 +95,16 @@ def has_rapl_mmio_zone(root: str) -> bool:
     return bool(glob.glob(os.path.join(root, "sys/class/powercap/intel-rapl-mmio:*")))
 
 
-def read_mmio(root: str, unit_w: float) -> Copy | None:
-    base = mchbar(root)
+def read_mmio(root: str, unit_w: float) -> tuple[Copy | None, str | None]:
+    """(copy, None), or (None, reason)."""
+    base, why = mchbar(root)
     if base is None:
-        return None
-    v = _mmio64(base + MMIO_PL_OFFSET, root)
-    return None if v is None else Copy(v, unit_w)
+        return None, why
+    try:
+        v = _mmio64(base + MMIO_PL_OFFSET, root)
+    except OSError as e:
+        return None, f"/dev/mem not readable ({e.strerror or e})"
+    return Copy(v, unit_w), None
 
 
 def read_msr(root: str, unit_w: float) -> Copy | None:
@@ -104,11 +113,13 @@ def read_msr(root: str, unit_w: float) -> Copy | None:
 
 
 def read_all(root: str) -> dict | None:
-    """{'unit_w', 'mmio': Copy|None, 'msr': Copy|None}, or None when the RAPL unit is not readable (no root / no msr device)."""
+    """{'unit_w', 'mmio': Copy|None, 'mmio_unreadable': reason|None, 'msr': Copy|None}, or None when the RAPL unit is not readable
+    (no root / no msr device)."""
     unit = msr.power_unit_w(root)
     if unit is None:
         return None
-    return {"unit_w": unit, "mmio": read_mmio(root, unit), "msr": read_msr(root, unit)}
+    mm, why = read_mmio(root, unit)
+    return {"unit_w": unit, "mmio": mm, "mmio_unreadable": why, "msr": read_msr(root, unit)}
 
 
 def mmio_caps(copies: dict | None, written_uw: dict[str, int]) -> list[tuple[str, float, float]]:

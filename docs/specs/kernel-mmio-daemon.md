@@ -3,8 +3,8 @@
 Version 0.2, 24.11.2026 (0.1 written after the re-check of the SB3 tests; 0.2 with the maintainer's decisions of the same day, section 13).
 Implements KM-9 and KM-A7 of `../requirements/kernel-modules.md` and work packages B11 and B12 of `../plan.md`. Builds on
 `kernel-mmio-rapl.md` 0.4 (the module), `outputs.md` 1–3 (output stage), `supervisor.md` 3, 5, 7 (snapshot, foreign changes, suspend) and
-`monitoring.md` (status). Markers [C] source, [M] measured, [H] hypothesis, [D] design decision. **State: specification only.** No code
-and no test of this spec exists yet; the tests of section 12 come first, then the code, each step with the maintainer's yes.
+`monitoring.md` (status). Markers [C] source, [M] measured, [H] hypothesis, [D] design decision. **State: 8.3 E implemented (24.11.2026,
+tests MB-1 … MB-4, MB-9); the rest is specification only.** The tests of section 12 come first, then the code, each step with the maintainer's yes.
 
 **Why a separate spec [D].** The path depends on a module outside the daemon and is switched per boot, not per channel. It touches the
 target selection (`outputs.md` 3), the snapshot (`supervisor.md` 3), foreign changes (`supervisor.md` 5), suspend (`supervisor.md` 7), the
@@ -151,7 +151,11 @@ through the zone (only through the report or B).
 - **E (in any case):** `rapl_copies.read_mmio()` returns a reason with `None` (`"PCI config beyond 64 bytes needs CAP_SYS_ADMIN"`, `"MCHBAR not enabled"`,
   `"/dev/mem not readable"`); the daemon logs the first reason once per run and puts it into `status.json` (`rapl_copies.mmio_unreadable`). The test
   `test_silent_when_the_mmio_copy_is_off_or_unreadable` (`tests/test_rapl_copies.py`) changes: silent for an off copy, one line for an unreadable one.
-- **Address mask:** one definition, bits 41:15 as in the module (today the daemon masks bits 38:15, the module and the test scripts 41:15; equal for the known addresses [C]).
+  **Implemented 24.11.2026:** `read_mmio()` and `mchbar()` return `(value, reason)`; a failure of `/dev/mem` carries the system's message
+  (`"/dev/mem not readable (Operation not permitted)"`), a config that cannot be opened `"PCI config of 00:00.0 not readable (…)"`; the line is logged at
+  `notice`; `surface-power-report` prints the reason in place of its general text.
+- **Address mask:** one definition, bits 41:15 as in the module (`rapl_copies.MCHBAR_ADDR_MASK`; before 24.11.2026 the daemon and `scripts/mmio-pl-read.py`
+  masked bits 38:15, the module 41:15; equal for the known addresses [C]). Implemented 24.11.2026.
 - **B (optional, temporary):** new script `surface-power-mchbar` (reads, checks bit 0, writes `/run/surface-power/mchbar` atomically, exits 0 also on failure so that the daemon starts);
   `ExecStartPre=+/usr/bin/surface-power-mchbar` in `surface-powerd.service` and `surface-powerd-dryrun.service`; `rapl_copies.mchbar()` reads that file first, then
   the config (which still works as root without a sandbox, for `surface-power-report`). `CapabilityBoundingSet=` unchanged.

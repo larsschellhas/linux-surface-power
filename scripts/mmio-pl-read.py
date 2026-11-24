@@ -17,7 +17,7 @@ def mchbar() -> int:
         v = struct.unpack("<Q", f.read(8))[0]
     if not v & 1:
         sys.exit("MCHBAR not enabled")
-    return v & ~0x7FFF & ((1 << 39) - 1)
+    return v & ((1 << 42) - 1) & ~0x7FFF            # bits 41:15, as rapl_copies.MCHBAR_ADDR_MASK and the module
 
 
 def mmio64(phys: int) -> int:

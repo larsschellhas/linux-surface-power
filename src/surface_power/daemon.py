@@ -276,6 +276,7 @@ class Daemon:
         self.rapl_next_ms = 0
         self.rapl = None                      # last read of the PL1/PL2 copies (status), spec outputs 3.3
         self.mmio_capped: dict[str, float] = {}
+        self.mmio_unreadable_logged = False   # the reason is logged once per run (spec kernel-mmio-daemon 8.3 E)
 
         tested = "tested" if (p and p.tested) else ("untested profile" if p else "no profile")
         self.log("notice", f"device {self.device.product!r} ({tested}), blob form {self.loaded.form}, "
@@ -334,6 +335,11 @@ class Daemon:
             return
         self.rapl_next_ms = now_ms + 60000
         self.rapl = rapl_copies.read_all(self.args.root)
+        why = self.rapl.get("mmio_unreadable") if self.rapl else None
+        if why and not self.mmio_unreadable_logged:
+            self.mmio_unreadable_logged = True
+            self.log("notice", f"the MMIO copy of PL1/PL2 is not readable ({why}): no warning about a lower MMIO copy in this run; "
+                               "surface-power-report run as root shows the copy")
         written = {}
         for ref, res in self.results.items():
             t = self.outputs.targets.get(ref)

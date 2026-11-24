@@ -43,7 +43,8 @@
 - The address (MCHBAR) is in the PCI config of 00:00.0 at `0x48`. **Without `CAP_SYS_ADMIN` the kernel shows only the first 64 bytes of a PCI config** (128 for
   CardBus) and returns 0 bytes beyond, without an error [C, `pci-sysfs.c`, `proc.c`]. `/proc/iomem` shows 0 addresses without it [C].
 - `/dev/mem` needs `CAP_SYS_RAWIO` and lockdown `none` [C, `mem.c`]. The daemon's units have `CAP_DAC_OVERRIDE CAP_SYS_RAWIO`, so the daemon cannot find the
-  address under its units (plan B11) [M, SB3]; `surface-power-report` as root can.
+  address under its units (plan B11) [M, SB3]; since 24.11.2026 it logs the reason once per run and shows it in `status.json`
+  (`rapl_copies.mmio_unreadable`) [C]. `surface-power-report` as root can read the copy.
 - The module zone gives PL1, PL2, window and PL1 enable without any address; not PL2 enable, clamp or lock [C].
 
 ## 5. Without the daemon the SB3 is held by psys

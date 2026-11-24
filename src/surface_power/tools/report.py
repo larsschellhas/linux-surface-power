@@ -91,8 +91,7 @@ def rapl_lines(root: str) -> list[str]:
     if copies is None:
         return lines + ["  copies not readable (needs root and the msr module)"]
     mm, ms = copies["mmio"], copies["msr"]
-    lines.append("  MMIO (MCHBAR + 0x59A0): " + (mm.describe() if mm else "not readable (needs root and /dev/mem; lockdown or "
-                                                 "STRICT_DEVMEM may forbid it)"))
+    lines.append("  MMIO (MCHBAR + 0x59A0): " + (mm.describe() if mm else f"not readable ({copies['mmio_unreadable']})"))
     lines.append("  MSR 0x610:              " + (ms.describe() if ms else "not readable"))
     return lines
 
