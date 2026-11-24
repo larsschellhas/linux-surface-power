@@ -12,7 +12,8 @@ Derived from `../requirements/`. Version 0.1 of all specs, 14.11.2026. Each spec
 | [`supervisor.md`](supervisor.md) | detection, snapshot/restore, emergency rules, foreign changes, profiles, suspend, watchdog, main loop | FR-D, FR-S, FR-M4, NFR-5 |
 | [`monitoring.md`](monitoring.md) | journal, `status.json`, time series, notifier | FR-M1 – M5 |
 | [`tools.md`](tools.md) | `blob`, `replay` (input format), `report` | FR-B9, FR-M6, FR-M7 |
-| [`kernel-mmio-rapl.md`](kernel-mmio-rapl.md) | kernel module for the MMIO copy of PL1/PL2: discovery, register access, opt-in per device, test plan (prototype in `../../kernel/`) | `../requirements/kernel-modules.md` KM-1 – KM-10 |
+| [`kernel-mmio-rapl.md`](kernel-mmio-rapl.md) | kernel module for the MMIO copy of PL1/PL2: discovery, register access, opt-in per device, test plan (prototype in `../../kernel/`) | `../requirements/kernel-modules.md` KM-1 – KM-13 |
+| [`kernel-mmio-daemon.md`](kernel-mmio-daemon.md) | daemon side of the MMIO path: zone choice, MSR copy at firmware value, snapshot/restore and enable of the MMIO copy, bounds, resume, foreign changes, reading the copy under the units (B11), tests | KM-9, KM-A7, plan B11 |
 | [`kernel-pl3.md`](kernel-pl3.md) | concept for PL3 from the kernel (MSR `0x615`) | KM-1, 2, 4, 6 |
 | [`deviations.md`](deviations.md) | every difference from Windows behaviour | G-3, NFR-10 |
 

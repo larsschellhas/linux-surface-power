@@ -5,8 +5,10 @@ Learned from the reviews of linux-surface/kernel#190, #195 and linux-surface/lin
 ## Layout
 
 - This repository holds the daemon (`src/surface_power/`), tests, packaging, specs (`docs/specs/`), device pages
-  (`docs/devices/`), committed research summaries (`docs/research/`) and the kernel module prototypes (`kernel/`, GPL-2.0-only, see
-  "Kernel modules" below).
+  (`docs/devices/`), committed research summaries (`docs/research/`), the knowledge base (`docs/knowledge/`: established facts and
+  known traps with evidence) and the kernel module prototypes (`kernel/`, GPL-2.0-only, see "Kernel modules" below).
+- This file holds working rules only. Facts about devices, kernel behaviour, tools and test practice go into `docs/knowledge/` (or
+  the specs and research they belong to), not here.
 - `docs/research/raw/` is git-ignored raw material: `raw/tools/` (firmware packages per device, decompiled Windows drivers) and
   `raw/arbeitsordner/` (the working folder: measurements, SMF blobs in `smf-blob/`, drafts, `STAND-UND-PLAN.md`). Never commit it.
   Files there are mostly German working notes.
@@ -16,7 +18,8 @@ Learned from the reviews of linux-surface/kernel#190, #195 and linux-surface/lin
   (commits touching `kernel/`, patches, cover letters) follows the kernel's AI rule, see "Kernel modules".
 
 ## Project plan (read first)
-- **Read `docs/plan.md` first in every session, before anything else** (also after context compaction), then `STAND-UND-PLAN.md`.
+- **Read `docs/plan.md` first in every session, before anything else** (also after context compaction), then `STAND-UND-PLAN.md`,
+  then `docs/knowledge/README.md` and the knowledge files that touch the task (power limits, hardware tests, kernel code).
   It is the single plan of the project: target (rollout on every SMF Surface, Secure Boot without extra setup), rollout gates
   R1-R8 per device, work packages with status, help-wanted items, rollout matrix, critical path.
 - Keep it current, always: every change of state (a work package started or finished, a device gate met, a tester report
@@ -75,8 +78,8 @@ Decided 23.11.2026; concept `docs/requirements/kernel-modules.md`, specs `docs/s
 Always applies, also after context compaction: nothing from memory or by analogy to another device. Every step on the device
 itself, in this order. Paths: `raw/` = `docs/research/raw/`, working folder = `raw/arbeitsordner/`.
 
-0. **Start:** read `docs/plan.md` first, then `raw/arbeitsordner/STAND-UND-PLAN.md` and this list. For questions about earlier decisions search the transcript,
-   do not guess.
+0. **Start:** read `docs/plan.md` first, then `raw/arbeitsordner/STAND-UND-PLAN.md`, `docs/knowledge/` and this list. For questions about earlier decisions
+   search the transcript, do not guess.
 1. **Record the report:** comment ID, tester, device (DMI `product_name`/`sku` from the report), kernel, repo state (commit), mode
    (dry-run/control), what was stopped beforehand (thermald, PPD, tuned ...).
 2. **Device page** `docs/devices/<device>.md`: blob(s), core/variant, all inputs and outputs with Linux path, "ready for control".
@@ -107,9 +110,11 @@ itself, in this order. Paths: `raw/` = `docs/research/raw/`, working folder = `r
 12. **Update in the same step:** raw note, research and specs, `deviations.md`, profile, `scripts/device-docs.py` (device pages),
     README table, `docs/plan.md` (work packages and rollout matrix), `STAND-UND-PLAN.md`; then the draft of the reply (only what was done, checked per device).
 
-Known traps (from earlier mistakes):
-- PL1/PL2: Windows writes the MMIO copy (MCHBAR + 0x59a0), Linux writes the MSR copy through powercap (DV-8). The lower enabled one
-  is in force [H as a general rule; measured on a Pro 10 and a Pro 8].
+Known traps (rules from earlier mistakes; the facts behind them are in `docs/knowledge/`):
+- PL1/PL2: before saying which limit is in force on a device, check which copy (MSR or MMIO) is enabled there and at which value
+  (`docs/knowledge/rapl-power-limits.md` 1, DV-8).
+- Hardware tests on the SB3 follow `docs/knowledge/sb3-test-practice.md` (services stopped and masked, CPU state recorded, valid
+  suspend cycles, every result saved to a file).
 - PL3 only with `pl3 = true`, and only after proof in the driver of this device (DV-9).
 - A finding on one device does not apply to others, not even with the same client build: platform type, blob and firmware values
   differ.

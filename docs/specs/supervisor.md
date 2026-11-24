@@ -60,6 +60,8 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
     known neutral value (the opt-in temperature thresholds) are listed as `unrestorable`.
 
   The file is `/run/surface-power/snapshot.json`, written atomically (write a temp file, then rename).
+  On the MMIO path (planned, `kernel-mmio-daemon.md`) the snapshot also holds the MMIO zone's PL1, PL2, window and `enabled`, and the restore order changes for
+  `enabled` (`kernel-mmio-daemon.md` 5).
 - **Predecessor:** if a snapshot from a crashed predecessor exists, it is kept and used as is. The current values may be the daemon's own.
 - **Restore:**
   - on normal exit;
@@ -88,6 +90,7 @@ the blob's controllers that are temperatures; the CPU channel is the `coretemp` 
 - **Detection:** before each write cycle, the output stage compares each owned target with the last value it wrote or read back. A difference beyond the hardware rounding (PL1/PL2/psys: 0.2 W) is a foreign change. A changed PL1 time window is one too.
 - **First two changes within 60 s:** logged, then the own value is written again.
 - **Third change within 60 s:** the supervisor yields. It restores firmware values once, writes nothing more, logs it and shows it in the status file.
+- On the MMIO path (planned) the MMIO zone's `enabled` and the MSR copy left at its firmware value count as owned targets too (`kernel-mmio-daemon.md` 10).
 
 ## 6. Device profiles (FR-D3)
 A profile is a small TOML file in `profiles/`. It holds no limit values (G-2). Fields:
@@ -103,7 +106,9 @@ A profile is a small TOML file in `profiles/`. It holds no limit values (G-2). F
   - `outputs.pl4_requires_ec`: `false` by default; `true` refuses control unless the EC inputs on the PL4 path are valid within `outputs.pl4_ec_wait_s` (default 10) of the start (`outputs.md` 3.2). Pro 10 only;
   - `outputs.kernel_fan_profiles`: 1 by default; 1–3 = number of fans the kernel sends the fan profile to (`outputs.md` 9.3). Laptop Studio 2: 2;
   - top-level `notes`: lines the report (`note: ...`) and the daemon log print for the device;
-  - `outputs.narrow`: optional upper limits per target (FR-S7, only narrowing).
+  - `outputs.narrow`: optional upper limits per target (FR-S7, only narrowing);
+  - planned with the MMIO path (`kernel-mmio-daemon.md` 2): `outputs.mmio` (`true` by default; `false` keeps PL1/PL2 and the window on the MSR zone even
+    where a writable MMIO zone exists).
 - **Status:** `tested`, `true` when the device was validated against Windows (NFR-1).
 
 The SB3 15" profile is the only tested one in phase 4.
@@ -117,6 +122,7 @@ The reference implementation uses only the Python standard library, so it does n
   2. request EC data (`inputs.md` 6);
   3. a fresh energy reference for power readings;
   4. continue.
+- **MMIO path (planned):** the restore before sleep includes the MMIO copy; after the resume the first cycle writes it again (`kernel-mmio-daemon.md` 7).
 - **Fallback:** without the hook, a `CLOCK_BOOTTIME − CLOCK_MONOTONIC` jump of more than 5 s counts as a resume [D]. In that case
   the firmware values are not restored before sleep.
 

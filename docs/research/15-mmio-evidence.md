@@ -1,6 +1,6 @@
 # Evidence for the MMIO write path of PL1/PL2 (per platform type)
 
-23.11.2026. Basis of `specs/kernel-mmio-rapl.md`. Markers as in `README.md`: [C] driver code or kernel source, [M] measured, [H] hypothesis.
+23.11.2026, updated 24.11.2026 (SB3 module tests). Basis of `specs/kernel-mmio-rapl.md`. Markers as in `README.md`: [C] driver code or kernel source, [M] measured, [H] hypothesis.
 Nothing here names Windows functions or reproduces code; it states behaviour, registers and parameters.
 
 ## 1. What the Windows CPU client writes [C]
@@ -60,10 +60,13 @@ Both constants appear once in every client binary. Tables for types 3 (Gemini La
 | Pro 9 Intel | 30 / 60 W | yes | 35 / 60 W |
 | Pro 10 | 28 / 35 W | yes | 35 / 64 W |
 Further registers read on the SB3 [M, 24.11.2026, read-only through `/dev/mem`]: info `0x5930` = `0x78` (thermal spec 15.000 W, min 0, max 0, window 0, so no upper bound can be derived from the device), units `0x5938` = `0x000a0e03` (1/8 W, 1/16384 J, 1/1024 s), MMIO PL4 `0x59b0` field 87.625 W (effect unknown, the module does not touch it).
-The lower enabled copy limits (`specs/deviations.md` DV-8): measured on the Pro 10 with four MSR values below the MMIO value; on the others static only.
+The lower enabled copy limits (`specs/deviations.md` DV-8): measured on the Pro 10 with four MSR values below the MMIO value, and on the SB3 with the copy enabled through the test module (PL1 8 W in the MMIO copy, 30 W in the MSR copy: package 8.0 W) [M, 24.11.2026]; on the Pro 8 and Pro 9 static only.
+On the SB3 [M, 24.11.2026, `specs/kernel-mmio-rapl.md` 5.4]: a limit in the copy takes effect when its **enable** bit is set, with or without clamp, for PL1 and PL2 independently; the clamp alone does nothing; the firmware's state (PL1 enable 0, clamp 1) leaves a written limit without effect. The register survives s2idle; a cold boot restores the firmware value.
 
 ## 5. Open
-- Access width and enable/clamp handling of the Windows write versus the kernel's zone (the SB3 has the copy disabled: a write needs the enable bit to take effect).
+- Access width of the Windows write (dword at `0x59a4` in most tables) versus the module's 64-bit read-modify-write (works on the SB3 [M]).
+- The clamp on CPUs other than Ice Lake (on the SB3 not needed [M]); the clamp bits of the enabled firmware copies of the Pro 8, 9, 10 (not reported).
 - Whether the firmware's lock bit (31/63) is set on any device (raw registers show lock 0 on the SB3 [M 23.11.2026], the Pro 9 and the Pro 10; not reported for the Pro 8).
 - MCHBAR of types 4–8 on devices other than the Pro 9 and Pro 10; Lunar Lake in particular.
-- Whether writing the MMIO copy has side effects beyond the limit (not measured by anybody; Windows does it on every Intel device).
+- Whether writing the MMIO copy has side effects beyond the limit: none seen in the SB3 tests of 23.–24.11.2026 (energy counter equal to the MSR zone's, MSR copy and the untouched register bits unchanged [M]); not measured elsewhere.
+- The window rounding table of the SB3 client `8030e5ac` (read in the Pro 10 client, `research/12` 2.1).

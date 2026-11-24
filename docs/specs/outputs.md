@@ -57,6 +57,9 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
 - **Enable bits:** writes never change `enabled`. A disabled zone is reported. The daemon does not enable it.
 
 ### 3.3 PL1/PL2: Linux writes the MSR copy, Windows the MMIO copy [C for Windows, M on one Pro 10, D for Linux]
+- **Planned (24.11.2026, not implemented):** where the kernel module `surface_rapl_mmio` provides a writable `intel-rapl-mmio` zone, PL1, PL2 and the PL1 window
+  go to the MMIO copy instead and the MSR copy stays at its firmware value: `kernel-mmio-daemon.md` (KM-9, with B11). Everything below describes the `msr` path,
+  which stays the fallback.
 - **Windows:** the CPU client writes channels 51/52 (and the PL1 time window `CF2F6076/61`) to the MMIO copy of the package power
   limit, MCHBAR + `0x59a0` (PL2 in its upper half; Gemini Lake: `0x70a8`), bits 14:0, with enable and clamp set, in every descriptor
   table of every client build of the corpus. MCHBAR is a fixed address per platform type in the client (`0xfed10000` Ice Lake,
@@ -88,14 +91,15 @@ The powercap value `constraint_*_max_power_uw` is **not** used as a bound. On th
   "no second limit".
 - **On the Pro 10** (tester, 18.11.2026, daemon stopped) [M]: MMIO copy PL1 28 W and PL2 35 W, both enabled; MSR copy PL1 35 W, PL2 64 W; 00:04.0 and `intel-rapl-mmio` absent; MCHBAR `0xfedc0000` (the client's constant). Writing the MSR PL1 at 30.0, 29.2, 27.3 and 25.5 W gave package power of 28.0, 28.0, 27.6 and 25.5 W: the lower copy is in force (measuring method not stated). Windows holds about 30 W on AC in Best performance for the first 3.5 minutes (tester's observation), which fits the blob's 30 W written to the MMIO copy [C blob, engine replay with assumed EC inputs]. The Windows write goes to `0x59a0`/`0x59a4` of this device's client (build `463d42bc`) with mask `0x7fff` and enable and clamp set [C, read 23.11.2026].
 - **On the Pro 9 Intel** (tester, 18.–21.11.2026, read-only, unchanged over 59 hours) [M]: MMIO copy PL1 30 W and PL2 60 W, both enabled; MSR copy PL1 35 W, PL2 60 W; no 00:04.0, no `intel-rapl-mmio`. The blob's Slider 5 on AC is PL1 35 W / PL2 60 W (engine replay with assumed inputs), so Linux would give 30 W where Windows gives 35 W [H]. After the Pro 8 and Pro 10 this is the third device other than the SB3 whose firmware enables the MMIO copy.
-- **The daemon's own MMIO check does not work under the packaged units** [M, SB3, 24.11.2026]: with the copy enabled at 20 W the running daemon showed `"mmio": null` in `status.json` and logged no warning, while `surface-power-report` run as root read the copy. The MCHBAR is read from the PCI config of 00:00.0 at offset 0x48, which returns nothing without `CAP_SYS_ADMIN`; the units allow `CAP_DAC_OVERRIDE CAP_SYS_RAWIO` only (a transient unit with the unit's sandbox plus `CAP_SYS_ADMIN` reads the register). Plan B11.
+- **The daemon's own MMIO check does not work under the packaged units** [M, SB3, 24.11.2026]: with the copy enabled at 20 W the running daemon showed `"mmio": null` in `status.json` and logged no warning, while `surface-power-report` run as root read the copy. The MCHBAR is read from the PCI config of 00:00.0 at offset 0x48; without `CAP_SYS_ADMIN` the kernel shows only the first 64 bytes of a PCI config and returns 0 bytes beyond, without an error [C, `drivers/pci/pci-sysfs.c` `pci_read_config`]; the units allow `CAP_DAC_OVERRIDE CAP_SYS_RAWIO` only (a transient unit with the unit's sandbox plus `CAP_SYS_ADMIN` reads the register [M]). Plan B11; options in `kernel-mmio-daemon.md` 8, the decision is the maintainer's.
 - **Per device:** the firmware state of the copies differs. Read-only visibility, no write:
   - `surface-power-report` (as root) prints the presence of 00:04.0 and of `intel-rapl-mmio`, and both copies (PL1/PL2, enable, clamp, lock);
-  - the daemon reads the copies every 60 s (`adapters/rapl_copies.py`), logs a warning when an *enabled* MMIO half is below the
+  - the daemon reads the copies every 60 s (`adapters/rapl_copies.py`; the MMIO copy only with `CAP_SYS_ADMIN`, so not under the packaged units, B11), logs a warning when an *enabled* MMIO half is below the
     value computed here, and puts both copies into `status.json` (`rapl_copies`, with `mmio_below_computed` while one limits);
   - `scripts/mmio-pl-read.py` does the same standalone. Without root, `/dev/mem` or the msr module the copies show as "not readable".
-- **Not done [D]:** writing the MMIO copy from user space (`/dev/mem`, root, fails under lockdown and with `IO_STRICT_DEVMEM`) or a
-  kernel path for it. Open until the SB3 values are known and the question is put to the platform maintainers.
+- **Not done [D]:** writing the MMIO copy from user space (`/dev/mem`, root, fails under lockdown and with `IO_STRICT_DEVMEM`); it will not be done. The
+  kernel path is the module `surface_rapl_mmio` (`kernel-mmio-rapl.md`, tested on the SB3 23.–24.11.2026: with the copy enabled at 8 W the package held 8.0 W
+  against the MSR copy's 30 W [M]); the daemon side is specified in `kernel-mmio-daemon.md`, not implemented.
 
 ### 3.2 PL1 time window (`CF2F6076/61`) [C for the meaning, H for the unit]
 - Windows: the Intel SoC client writes it into bits 23:17 of the PL1 register, rounded up to 4 steps per octave (`../research/12-remaining-outputs.md` 2.1).

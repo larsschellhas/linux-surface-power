@@ -90,6 +90,7 @@ flowchart LR
 | Folder | What is in it |
 |---|---|
 | [`plan.md`](plan.md) | the project plan: target, rollout gates, work packages with their state, next steps |
+| [`knowledge/`](knowledge/README.md) | established facts and known traps with evidence: the two copies of PL1/PL2, the kernel's RAPL core, test practice on the reference device |
 | [`devices/`](devices/README.md) | one page per Surface: blob, inputs, outputs, block types, where Linux gets or puts each value (generated) |
 | [`research/`](research/README.md) | findings: SB3 root cause, Windows measurements, SMF architecture, device survey, Linux interfaces, field tests, newer blobs |
 | [`requirements/`](requirements/README.md) | requirements, acceptance criteria, architecture, ideas |
