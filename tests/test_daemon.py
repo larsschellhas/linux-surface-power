@@ -116,12 +116,14 @@ class DaemonTest(unittest.TestCase):
         with open(self.blob, "w") as f:
             f.write(blob_text(absent_sensor=True))
         d = self.start("--control", "--allow-partial-outputs")     # the dGPU limit loses its stand-in here
-        self.assertIn(daemon.ChannelRef(TEMP, 609), d.reader.unavailable)
+        # Since B13 (24.11.2026) a missing base sensor is absent (its device may come back), not unavailable (spec supervisor 4.1).
+        self.assertIn(daemon.ChannelRef(TEMP, 609), d.reader.absent)
         for t in range(0, 70000, 1000):
             d.cycle(t)
         self.assertEqual(d.state, "control")
-        # The SB3 profile enables the dGPU stand-in, but its input is missing: only the stand-in goes off.
+        # The SB3 profile enables the dGPU stand-in, but its input is missing: the stand-in waits for it.
         self.assertIsNone(d.dgpu)
+        self.assertIsNotNone(d.dgpu_pending)
         self.assertIn("2E8B14C2/609", d.dgpu_note)
         d.stop()
 

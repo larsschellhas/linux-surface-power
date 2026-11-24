@@ -90,6 +90,25 @@ class FakeSys:
         self.write("sys/class/hwmon/hwmon10/name", "surface_thermal")
         self.link("sys/class/hwmon/hwmon10/device", "sys/devices/platform/MSHW0117:00/00:00:01:11:00/01:03:02:00:02")
 
+    def remove_base_sensors(self, index: int = 10) -> None:
+        """The base is taken off: its hwmon device disappears (spec supervisor 4.1)."""
+        import shutil
+        shutil.rmtree(self.path(f"sys/class/hwmon/hwmon{index}"), ignore_errors=True)
+
+    def readd_base_sensors(self, index: int = 10, celsius: float = 31.0, name: str = "surface_thermal",
+                           device: str = "sys/devices/platform/MSHW0117:00/00:00:01:11:00/01:03:02:00:02") -> None:
+        """The base is attached again: the hub creates the device anew, possibly under another hwmon index (7.3.6-1-surface:
+        hwmon5 -> hwmon11, the old index then belongs to a fan [M, 24.11.2026]). `name`/`device` give a foreign device."""
+        labels = [f"I_RTS{i}" for i in range(1, 9)] + ["I_VTS1"]
+        for i, label in enumerate(labels, start=1):
+            self.write(f"sys/class/hwmon/hwmon{index}/temp{i}_label", label)
+            self.write(f"sys/class/hwmon/hwmon{index}/temp{i}_input", int(celsius * 1000))
+        self.write(f"sys/class/hwmon/hwmon{index}/name", name)
+        link = self.path(f"sys/class/hwmon/hwmon{index}/device")
+        if os.path.lexists(link):
+            os.remove(link)
+        self.link(f"sys/class/hwmon/hwmon{index}/device", device)
+
     def add_cpufreq(self, policies=((0, "0-3"), (4, "4-7")), lo=400000, hi=4000000):
         """cpufreq policies as on a CPU with clusters; scaling_max_freq starts at the maximum."""
         for n, cpus in policies:

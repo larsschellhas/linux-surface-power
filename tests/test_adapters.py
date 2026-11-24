@@ -453,7 +453,8 @@ class InputsTest(unittest.TestCase):
     def test_reader_reports_missing_once(self):
         wanted = {ref(TEMP, 509), ref(TEMP, 609), ref(SYSTEM, 1), ref("99999999-9999-9999-9999-999999999999", 1)}
         r = inputs.InputReader(wanted, [inputs.HwmonTemperatures(self.fs.root), inputs.SliderState(self.fs.root)])
-        self.assertEqual(r.unavailable, [ref(TEMP, 609)])           # the placeholder is not reported
+        self.assertEqual(r.unavailable, [])                          # the placeholder is not reported; the base sensor 609 is
+        self.assertEqual(r.absent, {ref(TEMP, 609)})                  # absent (its device may come back), spec supervisor 4.1
         v = r.read(0)
         self.assertEqual(set(v), wanted)
         self.assertIsNone(v[ref(TEMP, 609)])

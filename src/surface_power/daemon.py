@@ -198,6 +198,8 @@ class Daemon:
 
         # dGPU stand-in (DO-1, per profile): with it, the dGPU limit counts as a written output.
         self.dgpu = None
+        self.dgpu_pending = None          # the stand-in waits for an absent input (base detached at start), spec supervisor 4.1
+        self.dgpu_wait: set = set()
         self.dgpu_note = ""
         written = set(self.outputs.targets)
         # Thermal-policy actions (hibernate / power off, spec outputs 7): handled wherever the blob has them.
@@ -239,8 +241,24 @@ class Daemon:
             self.dgpu = None
             blocking = {r: [o for o in outs if o != DGPU] for r, outs in blocking.items()}
             blocking = {r: outs for r, outs in blocking.items() if outs}
+        # Absent inputs (spec supervisor 4.1): a source that is not present now (SB3: base detached). Like an unavailable input they
+        # block control only where they reach a written limit; unlike it, the thermal actions do not count, because the base part of
+        # the hibernate/shutdown criteria falls to its block default (window comparator 1, no request), as on Windows, where the base
+        # thermal client is removed with the base [C, raw note b13-basis-sensoren-2026-11-24.md 1, 2]. The dGPU stand-in waits.
+        limit_outputs = written - self.actions.channels - {DGPU} - set(self.not_needed)
+        detachable = {r for r in self.graph.inputs if inp.is_base_channel(r) and r not in self.reader.unavailable}
+        self.absent_reach = {ref: [o for o in outputs_reached_by(ref, lines) if o in limit_outputs] for ref in detachable}
+        absent_start = self.reader.absent
+        for ref in sorted(absent_start):
+            if self.absent_reach.get(ref):
+                blocking[ref] = self.absent_reach[ref]
+        if self.dgpu and any(DGPU in outputs_reached_by(r, lines) for r in absent_start):
+            self.dgpu_wait = {r for r in absent_start if DGPU in outputs_reached_by(r, lines)}
+            self.dgpu_pending, self.dgpu = self.dgpu, None
+            self.dgpu_note = (f"dGPU stand-in waits for input {', '.join(map(str, sorted(self.dgpu_wait)))} "
+                              "(absent: base detached?); it starts when the input is back")
         # Every output must have a Linux path before the blob may control (spec supervisor 2.6) [D].
-        if not self.dgpu:
+        if not self.dgpu and not self.dgpu_pending:
             written.discard(DGPU)
         self.unwritten = sorted(set(self.graph.outputs) - written)
         reasons = []
@@ -272,8 +290,9 @@ class Daemon:
             self.throttle.dry_run = True
             self.fan.dry_run = True
             self.prochot.dry_run = True
-            if self.dgpu:
-                self.dgpu.dry_run = True
+            for g in (self.dgpu, self.dgpu_pending):
+                if g:
+                    g.dry_run = True
         self.snapshot = None
         if self.mode == "control":
             keys = [k for k in self.outputs.snapshot_keys() + self.throttle.snapshot_keys()
@@ -315,6 +334,9 @@ class Daemon:
             self.log("info", note)
         for ref in self.reader.unavailable:
             self.log("warning", f"input {ref} unavailable on this system; it stays invalid")
+        for ref in sorted(self.reader.absent):
+            self.log("notice", f"input {ref} absent: its source device is not present (base detached?); it is looked for again "
+                               "every 5 s, controllers on it stay OFF meanwhile (spec supervisor 4.1)")
         self.log("notice", self.pl_path.describe())
         if self.mode_reason:
             self.log("warning", f"dry-run only: {self.mode_reason}")
@@ -470,7 +492,12 @@ class Daemon:
         slider = ChannelRef(inp.SYSTEM, 1)
         if slider in self.graph.inputs:
             refs.append(slider)
-        absent = set(self.reader.unavailable)
+        # Spec supervisor 4.1: an absent input (source device gone) does not count, unless it reaches a written limit; then it counts
+        # as lost even if no controller reads it.
+        now_absent = self.reader.absent
+        counting = {r for r in now_absent if self.absent_reach.get(r)}
+        refs += sorted(counting)
+        absent = set(self.reader.unavailable) | (now_absent - counting)
         return any(self.values.get(r) is None for r in refs
                    if r.guid not in (inp.POWER, INTERNAL_NODE) and r not in absent)
 
@@ -516,6 +543,11 @@ class Daemon:
                 self.writers = now_writers
                 self._warn_writers()
         self.values = self.reader.read(now_ms)
+        for prio, text in self.reader.drain_events():
+            self.log(prio, text)
+        if self.dgpu_pending and not (self.dgpu_wait & self.reader.absent):
+            self.dgpu, self.dgpu_pending = self.dgpu_pending, None
+            self.log("notice", f"dGPU stand-in on: input {', '.join(map(str, sorted(self.dgpu_wait)))} is back")
         runs = self.sched.step(now_ms, self.values)
         rounded = self.engine.rounded_outputs()
 
@@ -660,6 +692,8 @@ class Daemon:
         }
         if self.writers:
             status["competing_writers"] = self.writers
+        if self.reader.absent:
+            status["inputs_absent"] = sorted(str(r) for r in self.reader.absent)
         if self.rapl:
             status["rapl_copies"] = {k: (v.describe() if isinstance(v, (rapl_copies.Copy, rapl_copies.ZoneCopy)) else v) for k, v in self.rapl.items()
                                      if k != "unit_w"}

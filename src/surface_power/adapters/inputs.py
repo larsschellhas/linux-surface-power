@@ -2,6 +2,7 @@
 
 Every adapter takes `root` (default "/") so that tests can run on a fake sysfs tree.
 """
+import errno
 import glob
 import os
 import struct
@@ -76,35 +77,129 @@ def _ssam_target(hwmon_dir: str) -> int | None:
     return None
 
 
+def is_base_channel(ref: ChannelRef) -> bool:
+    """KIP (base) temperatures 601-699: they exist only while a detachable base is attached (Surface Book 3; the only blobs of the
+    corpus that read them [C, 24.11.2026]). Their source can disappear and come back under another hwmon index (spec supervisor 4.1)."""
+    return ref.guid == TEMP and 600 < ref.channel < 700
+
+
+# Errors that mean "the device is gone" (absent), not "the read failed" (lost), spec supervisor 4.1.
+GONE = (errno.ENOENT, errno.ENODEV, errno.ENXIO)
+RELOOKUP_MS = 5000                     # a missing base source is looked for again at most this often
+
+
+def _device_id(hwmon_dir: str) -> str:
+    return os.path.basename(os.path.realpath(os.path.join(hwmon_dir, "device")))
+
+
 class HwmonTemperatures(Source):
-    """SAM sensors 501-509 and KIP (base) sensors 601-609 from hwmon `surface_thermal` (temp<iid>_input),
-    CPU package 102 from `coretemp`. Without an SSAM device link, a `surface_thermal` counts as SAM."""
+    """SAM sensors 501-509 and KIP (base) sensors 601-699 from hwmon `surface_thermal` (temp<iid>_input),
+    CPU package 102 from `coretemp`. Without an SSAM device link, a `surface_thermal` counts as SAM.
+
+    The base sensors are looked up again when their device disappears or is missing (spec supervisor 4.1): at most every 5 s, with the
+    name and the SSAM target of the device checked, because the kernel can give the re-created device another hwmon index and the old
+    index to another device (7.3.6-1-surface: base thermal hwmon5 -> hwmon11, hwmon5 then a fan [M, 24.11.2026])."""
 
     def __init__(self, root: str = "/"):
-        self.paths: dict[ChannelRef, str] = {}
-        for d in _hwmon_dirs(root, "surface_thermal"):
+        self.root = root
+        self.lookups = 0
+        self.paths, self.devices = self._resolve()
+        self.channels = set(self.paths)
+        self.wanted_base: set[ChannelRef] = set()
+        self.absent_now: set[ChannelRef] = set()
+        self.events: list[tuple[str, str]] = []
+        self.next_lookup_ms = 0
+
+    def _resolve(self) -> tuple[dict[ChannelRef, str], dict[str, str]]:
+        """All channels and, for the base, the hwmon directory -> device id it was found with."""
+        self.lookups += 1
+        paths, devices = {}, {}
+        for d in _hwmon_dirs(self.root, "surface_thermal"):
+            parts = _device_id(d).split(":")
+            if len(parts) == 5 and parts[1] != "03":
+                continue                        # an SSAM device of another category (01:05:… is a fan) under a reused index
             base = THERMAL_CHANNEL_BASE.get(_ssam_target(d) or 1)
             if base is None:
                 continue                        # a target we do not know: not mapped
             for p in glob.glob(os.path.join(d, "temp*_input")):
                 iid = int(os.path.basename(p)[4:-len("_input")])
-                self.paths[ChannelRef(TEMP, base + iid)] = p
-        for d in _hwmon_dirs(root, "coretemp"):
+                paths[ChannelRef(TEMP, base + iid)] = p
+            if base == 600:
+                devices[d] = _device_id(d)
+        for d in _hwmon_dirs(self.root, "coretemp"):
             for lab in glob.glob(os.path.join(d, "temp*_label")):
                 if _read(lab) == "Package id 0":
-                    self.paths[ChannelRef(TEMP, 102)] = lab[:-len("_label")] + "_input"
-        self.channels = set(self.paths)
+                    paths[ChannelRef(TEMP, 102)] = lab[:-len("_label")] + "_input"
+        return paths, devices
+
+    def may_provide(self, ref: ChannelRef) -> bool:
+        """Base channels can appear later (the daemon started with the base detached)."""
+        return is_base_channel(ref)
 
     def restrict(self, wanted: set[ChannelRef]) -> None:
         """Read only the channels the blob uses: each surface_thermal read is an EC request (~2 ms) [M]."""
         self.paths = {r: p for r, p in self.paths.items() if r in wanted}
+        self.wanted_base = {r for r in wanted if is_base_channel(r)}
+        self.absent_now = {r for r in self.wanted_base if r not in self.paths}
+
+    def _drop_base(self, hwmon_dir: str | None = None) -> None:
+        for r in [r for r, p in self.paths.items() if is_base_channel(r) and (hwmon_dir is None or os.path.dirname(p) == hwmon_dir)]:
+            del self.paths[r]
+        self.devices = {d: v for d, v in self.devices.items() if hwmon_dir is not None and d != hwmon_dir}
+
+    def _relookup(self) -> None:
+        paths, devices = self._resolve()
+        self._drop_base()
+        for r in self.wanted_base:
+            if r in paths:
+                self.paths[r] = paths[r]
+        used = {os.path.dirname(p) for r, p in self.paths.items() if is_base_channel(r)}
+        self.devices = {d: v for d, v in devices.items() if d in used}
 
     def read(self, now_ms):
+        stale = False
+        for d, dev in list(self.devices.items()):
+            # Same index, other device: the base was taken off and the index given to another device.
+            if _read(os.path.join(d, "name")) != "surface_thermal" or _device_id(d) != dev:
+                self._drop_base(d)
+                stale = True
         out = {}
-        for ref, p in self.paths.items():
-            v = _int(p)
-            out[ref] = mc_to_dk(v) if v is not None else None
+        for ref, p in list(self.paths.items()):
+            try:
+                with open(p) as f:
+                    out[ref] = mc_to_dk(int(f.read().strip()))
+            except OSError as e:
+                out[ref] = None
+                if is_base_channel(ref) and e.errno in GONE:
+                    del self.paths[ref]
+                    stale = True
+            except ValueError:
+                out[ref] = None
+        missing = {r for r in self.wanted_base if r not in self.paths}
+        if (stale or missing) and now_ms >= self.next_lookup_ms:
+            self.next_lookup_ms = now_ms + RELOOKUP_MS
+            self._relookup()
+            for ref in missing | {r for r in self.wanted_base if r in self.paths and out.get(r) is None}:
+                if ref in self.paths:
+                    v = _int(self.paths[ref])
+                    out[ref] = mc_to_dk(v) if v is not None else None
+        absent = {r for r in self.wanted_base if r not in self.paths}
+        for r in absent:
+            out[r] = None
+        if absent != self.absent_now:
+            gone, back = sorted(absent - self.absent_now), sorted(self.absent_now - absent)
+            if gone:
+                self.events.append(("notice", f"input {', '.join(map(str, gone))} absent: its source device is gone (base detached?); "
+                                              "the blob runs on its block defaults, no emergency (spec supervisor 4.1)"))
+            if back:
+                where = sorted({os.path.basename(os.path.dirname(self.paths[r])) for r in back})
+                self.events.append(("notice", f"input {', '.join(map(str, back))} back ({', '.join(where)})"))
+            self.absent_now = absent
         return out
+
+    def drain_events(self) -> list[tuple[str, str]]:
+        ev, self.events = self.events, []
+        return ev
 
 
 _MAINS: dict[str, str] = {}      # root -> the Mains supply's directory, found once (the glob runs twice per second otherwise)
@@ -874,10 +969,23 @@ class InputReader:
         self.wanted = set(wanted)
         self.sources = sources
         provided = set().union(*(s.channels for s in sources)) if sources else set()
-        self.unavailable = sorted(r for r in self.wanted - provided if r.guid != PLACEHOLDER)
+        later = {r for r in self.wanted - provided if any(getattr(s, "may_provide", lambda _r: False)(r) for s in sources)}
+        self.unavailable = sorted(r for r in self.wanted - provided - later if r.guid != PLACEHOLDER)
         for s in sources:
             if hasattr(s, "restrict"):
                 s.restrict(self.wanted)
+
+    @property
+    def absent(self) -> set[ChannelRef]:
+        """Channels whose source device is not present now (spec supervisor 4.1); they are invalid, but not lost."""
+        return set().union(*(getattr(s, "absent_now", set()) for s in self.sources)) & self.wanted
+
+    def drain_events(self) -> list[tuple[str, str]]:
+        out = []
+        for s in self.sources:
+            if hasattr(s, "drain_events"):
+                out += s.drain_events()
+        return out
 
     def read(self, now_ms: int) -> dict[ChannelRef, float | None]:
         out: dict[ChannelRef, float | None] = {r: None for r in self.wanted}
