@@ -95,9 +95,9 @@ When the supervisor restores (exit, unhandled exception, `PrepareForSleep`/`SIGU
 3. If the snapshot's `enabled` is 1: `enabled` is not touched.
 - **Residual difference [M on the SB3]:** where the firmware left the copy disabled with PL1 clamp 1 (SB3), `enabled=0` also clears that clamp; the zone cannot set it
   again. The copy is then PL1 enable 0 / clamp 0 instead of 0 / 1. On the SB3 both states have the same effect (no limit: 14.9 W in both cells of the matrix,
-  `kernel-mmio-rapl.md` 5.4); the bit comes back with the module's restore at unload or a cold boot (`kernel-mmio-rapl.md` 5.5). The daemon logs it once where the
-  register is readable. Recorded as DS-5 in `deviations.md`. **Accepted by the maintainer on 24.11.2026 (13.3).** Only a cold boot was tested; whether a
-  warm restart restores the bit is not known.
+  `kernel-mmio-rapl.md` 5.4); the bit comes back with the module's restore at unload, a cold boot or a warm restart (`kernel-mmio-rapl.md` 5.5). The daemon logs it once where the
+  register is readable. Recorded as DS-5 in `deviations.md`. **Accepted by the maintainer on 24.11.2026 (13.3).** A cold boot and a warm restart
+  were tested (one cycle each, SB3) [M].
 - Where the firmware's copy is enabled (`enabled` is 1 in the snapshot) the restore writes only the fields, so the register ends bit-identical to the snapshot: the
   power fields are exact multiples of the unit and the window code writes back to itself [C, M on the SB3].
 - The MSR keys are restored as before; on the `mmio` path they were not written (3), so their restore changes nothing unless someone else wrote them.
@@ -244,7 +244,7 @@ copy under the unit; restore at stop and before sleep; the residual clamp line; 
 - The 28-step rounding of the SB3 client (4.3) [H].
 - The restore before sleep within the hook's 1 s (7): one s2idle cycle on the SB3 showed the restore and no foreign change after the resume [M, 24.11.2026]; more cycles not run.
 - Whether MCHBAR is constant for a boot (8.2 B, only if B is built) [H].
-- The first SMF device with 00:04.0 (13.1); the warm restart and the residual clamp (5.2): the check of 24.11.2026 was not conclusive (no write before the reboot); unloading the module brings the clamp back [M].
+- The first SMF device with 00:04.0 (13.1); the residual clamp (5.2) is settled on the SB3: unload, cold boot and warm restart bring it back [M].
 - The window path on a device whose blob has `CF2F6076/61` (not the SB3).
 
 ## 15. Implementation notes (24.11.2026)

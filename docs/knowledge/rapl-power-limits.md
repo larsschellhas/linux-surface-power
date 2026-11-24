@@ -24,7 +24,7 @@
 - A write to a constraint file changes only the limit field [C, M SB3].
 - SB3 (Ice Lake) [M, 24.11.2026]: **enable alone makes a limit effective, for PL1 and PL2 independently; clamp alone does nothing; the clamp was not needed with
   `scaling_min_freq` 2.0 GHz.** Other CPUs: not measured.
-- `enabled=0` also clears a clamp bit the firmware had set (SB3: PL1 clamp) [M]; only the module's restore at unload or a cold boot brings it back.
+- `enabled=0` also clears a clamp bit the firmware had set (SB3: PL1 clamp) [M]; the module's restore at unload, a cold boot or a warm restart brings it back [M, SB3, one cycle each; warm restart 24.11.2026].
 
 ## 3. What the RAPL core does with a write
 - **Wrap above the field:** the value is converted to units, shifted and masked to the field width before the driver sees it; `set_power_limit` has no upper

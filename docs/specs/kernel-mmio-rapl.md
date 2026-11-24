@@ -67,7 +67,7 @@ Package domain only, `limits = {PL2}` (so PL1 and PL2). No PL4 constraint: Windo
 ### 5.5 Restore (KM-6, KM-11)
 At load the module records the limit register (all 64 bits). At unload it first sets a flag that makes `write_raw` refuse (the core's package removal clears enable and clamp of every limit and would switch the firmware's limit off on a device with an enabled copy [C, `rapl_remove_package_cpuslocked`] (R)), then removes the zone, then, with `allow_write=1`, writes the recorded value back if the register is not locked (the log line "limit register restored" appears also when nothing had changed).
 **SB3 [M]:** after every test the register was bit-identical to the value at load (`0x000001e800dd00c8`), also after PL1, PL2, the window and the four enable/clamp bits had been changed and the firmware's PL1 clamp had been lost through `enabled=0` (steps 4e, t234, t5b, t6, t7). On the SB3 the enable bits are 0 at load, so a failure of the refusal at removal could not show; KM-A9 needs a device with an enabled copy.
-**Cold boot [M, one cycle]:** with a changed register (`0x00000190001b00a0`) and the module left loaded (no restore), a complete shutdown and power-on gave back the firmware value: the firmware re-initialises the copy at a cold boot. A warm restart was not tested.
+**Cold boot [M, one cycle]:** with a changed register (`0x00000190001b00a0`) and the module left loaded (no restore), a complete shutdown and power-on gave back the firmware value: the firmware re-initialises the copy at a cold boot. **Warm restart [M, one cycle]:** a warm restart (`systemctl reboot`, kernel 7.3.6-1-surface, 24.11.2026) after the DS-5 state `0x000001e800dc00c8` with the module left loaded gave back the firmware value `0x000001e800dd00c8`, PL1 clamp 1 included [M, one cycle].
 ### 5.6 Bounds [D, measured]
 - **Floor:** a PL1 or PL2 below 3 W is refused (smallest minimum of the corpus' blobs) [M].
 - **No upper bound in the module:** 200 W is accepted [M]. The RAPL core converts the µW value to units, shifts and **masks it to the field width before `write_raw` is called** (`rapl_write_data_raw`), and `set_power_limit` has no upper check [C]: a value from 4096 W up wraps silently (5 000 000 000 µW became 7232 units = 904 W [M]). The module only sees the wrapped value and cannot detect the wrap; values from 4096 W to below 4099 W wrap below the floor and are refused, 4099 W wraps to exactly 3 W and is accepted [C]. The same holds for every RAPL zone, `intel-rapl:0` included.
@@ -77,7 +77,7 @@ At load the module records the limit register (all 64 bits). At unload it first 
 - The RAPL core saves the limits at `PM_SUSPEND_PREPARE` and writes **only the limit fields** back at `PM_POST_SUSPEND`, and only those it read as non-zero [C, `power_limit_state_save/restore`]; enable and clamp bits are never touched by this path. In read-only mode the write-back is refused and logged once (the log line names the resume as a possible cause).
 - Three valid s2idle cycles through `systemctl suspend` with an RTC alarm (about 37 s asleep): read-only; `allow_write=1` with PL1 20 W and the copy disabled; `allow_write=1` with PL1 10 W and `enabled=1`. **The register was unchanged after each cycle**, and with the copy enabled the 10 W limit held after the resume (9.6 W against 9.9 W before) [M]. A direct `rtcwake -m freeze` is not a valid test on this machine (the nvidia driver refuses a suspend that bypasses systemd [M]).
 - **Burst after the resume [M]:** with the copy enabled, the first ~10 s of load after the resume ran at 24.6–28.9 W (held by psys PL2 40 W), then the 10 W PL1 held; before the suspend, with the limit switched on just before the load, there was no burst. **Explanation [H, quantitative]:** PL1 limits the average over its time window (28 s); after ~46 s near 0 W (pause, suspend, wait) a running average with τ ≈ 28 s starts at about 2.7 W and reaches 10 W after 28 s · ln(24.3/17) ≈ 10 s at ~27 W, which matches the measured 10–11 s. This is the normal turbo budget after an idle phase, not a resume effect; Windows, whose copy is always enabled, has the same. Open: why no burst followed the switch-on before the suspend (the average may not start empty when the enable bit goes from 0 to 1 [H]). Test without suspend: enable, 60 s idle, then load.
-- Not tested: S3, hibernation, a warm restart.
+- Not tested: S3, hibernation.
 
 ## 6. Opt-in per device
 ### 6.1 Evidence required for a table entry (all of it, per device; the SB3 entry is the one exception, it is the test bed and gets items 3 and 5 from the test plan before anything else)
@@ -143,7 +143,7 @@ independent re-check `raw/arbeitsordner/review-opus-sb3-tests-2026-11-24.md`.
 | 8.8a | Burst without suspend (5.7) | after 60 s idle: 3–4 s up to 40 W, package temperature briefly 100 °C, then PL1 |
 | 8.8b | Empty DMI table (KM-A3) | `insmod`: No such device, no log line of the module, no zone, register unchanged |
 
-Still to do on the SB3: a warm restart after a write (24.11.2026 not conclusive: no write before the reboot); the module rebuilt and checked for 7.3.6-1-surface. On other devices: KM-A6
+Done on the SB3 24.11.2026: warm restart after a write (firmware value back); module rebuilt and checked for 7.3.6-1-surface (same source, `W=1` and checkpatch clean, `intel_rapl.h` unchanged). On other devices: KM-A6
 (read-only report) and KM-A9 (unload with an enabled copy) on a Pro 8, 9 or 10.
 
 ## 9. Upstream form
@@ -155,7 +155,7 @@ Still to do on the SB3: a warm restart after a write (24.11.2026 not conclusive:
 - Access width of the Windows write (5.3) [H].
 - The clamp on CPUs other than Ice Lake (5.4); not needed for parity.
 - Restore on a device with an enabled copy (KM-A9, 5.5); read-only report from such a device (KM-A6).
-- Why no burst follows a switch-on, and the burst test without suspend (5.7); warm restart (5.5); S3 and hibernation.
+- Why no burst follows a switch-on, and the burst test without suspend (5.7); S3 and hibernation.
 - Lock bits on the Pro 8 (SB3, Pro 9, Pro 10: 0 [M]).
 - MCHBAR of types 4–8 beyond the Pro 9/10 (`research/15` 5); width of the address field (4.3).
 - Whether the upstream form bounds the values (5.6); in-tree form (9); the exact `Assisted-by` format in mainline (KM-10).

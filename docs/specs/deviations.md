@@ -42,7 +42,7 @@ SMF is listed here. Intended improvements are opt-in and off by default; none ex
 | DS-2 | Emergency rules (`supervisor.md` 4) | on |
 | DS-3 | Yielding to foreign changes (`supervisor.md` 5) | on |
 | DS-4 | Firmware values before suspend | on |
-| DS-5 | Restore of the MMIO copy through its zone (implemented 24.11.2026, `kernel-mmio-daemon.md` 5.2). Limitation: on a copy the firmware left disabled with PL1 clamp 1 (SB3 [M]) the restore writes `enabled=0`, which clears that clamp too; the zone cannot set single bits. Same effect as the firmware state on the SB3 (no limit either way [M]); the module's restore at unload or a cold boot brings the bit back [M]. Logged once. | with the MMIO path |
+| DS-5 | Restore of the MMIO copy through its zone (implemented 24.11.2026, `kernel-mmio-daemon.md` 5.2). Limitation: on a copy the firmware left disabled with PL1 clamp 1 (SB3 [M]) the restore writes `enabled=0`, which clears that clamp too; the zone cannot set single bits. Same effect as the firmware state on the SB3 (no limit either way [M]); the module's restore at unload, a cold boot or a warm restart brings the bit back [M, one cycle each]. Logged once. | with the MMIO path |
 
 ## 4. Stand-ins (a different mechanism for Windows behaviour)
 
