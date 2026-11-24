@@ -59,6 +59,7 @@ Both constants appear once in every client binary. Tables for types 3 (Gemini La
 | Pro 8 | 30 / 60 W | yes | 35 / 60 W |
 | Pro 9 Intel | 30 / 60 W | yes | 35 / 60 W |
 | Pro 10 | 28 / 35 W | yes | 35 / 64 W |
+Further registers read on the SB3 [M, 24.11.2026, read-only through `/dev/mem`]: info `0x5930` = `0x78` (thermal spec 15.000 W, min 0, max 0, window 0, so no upper bound can be derived from the device), units `0x5938` = `0x000a0e03` (1/8 W, 1/16384 J, 1/1024 s), MMIO PL4 `0x59b0` field 87.625 W (effect unknown, the module does not touch it).
 The lower enabled copy limits (`specs/deviations.md` DV-8): measured on the Pro 10 with four MSR values below the MMIO value; on the others static only.
 
 ## 5. Open
