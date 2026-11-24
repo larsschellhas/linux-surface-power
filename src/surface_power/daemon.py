@@ -29,6 +29,7 @@ from .adapters.fan import FanStage, NullTransport, handles as fan_handles
 from .adapters import gpu
 from .adapters.gpu import ClockCapStandIn
 from .adapters import plpath, rapl_copies
+from .adapters import outputs as outputs_mod
 from .adapters.outputs import OutputStage, PathFailure
 from .engine.engine import Engine
 from .engine.graph import build_graph, outputs_reached_by
@@ -262,7 +263,13 @@ class Daemon:
         if self.mode == "control":
             keys = [k for k in self.outputs.snapshot_keys() + self.throttle.snapshot_keys()
                     if k.startswith("msr:") or os.path.exists(k)]
-            self.snapshot, inherited = supervisor.Snapshot.take(args.run_dir, keys)
+            info = {}
+            if self.pl_path.kind == "mmio":                # spec kernel-mmio-daemon 5.1: the raw register, for the report and DS-5
+                unit = rapl_copies.msr.power_unit_w(root)
+                copy, _why = rapl_copies.read_mmio(root, unit) if unit else (None, None)
+                if copy is not None:
+                    info["mmio-raw@0x59a0"] = f"{copy.raw:#018x}"
+            self.snapshot, inherited = supervisor.Snapshot.take(args.run_dir, keys, info)
             self.snapshot.transport = self.fan.transport
             self.throttle.set_baseline(self.snapshot.values)
             self.outputs.set_enable_owner(self.snapshot.values)
@@ -281,6 +288,8 @@ class Daemon:
         self.rapl_next_ms = 0
         self.rapl = None                      # last read of the PL1/PL2 copies (status), spec outputs 3.3
         self.mmio_capped: dict[str, float] = {}
+        self.msr_capped: dict[str, float] = {}     # on the mmio path: the MSR copy below the computed value (spec 9)
+        self.residual_logged = False               # DS-5, spec kernel-mmio-daemon 5.2
         self.msr_copy_checked = False         # spec kernel-mmio-daemon 3: MSR copy back at its snapshot value before the first write
         self.mmio_unreadable_logged = False   # the reason is logged once per run (spec kernel-mmio-daemon 8.3 E)
 
@@ -336,8 +345,9 @@ class Daemon:
                                                                           else ""))
 
     def _check_mmio(self, now_ms: int) -> None:
-        """Every 60 s: read the MMIO copy of PL1/PL2 (what Windows writes) and say when it is enabled and below the value computed
-        here, so it limits on top of the MSR value this daemon writes (spec outputs 3.3, DV-8). Reads only."""
+        """Every 60 s: read the copies of PL1/PL2 (spec outputs 3.3, DV-8; kernel-mmio-daemon 8.3, 9). The MMIO copy comes from the
+        register where it is readable, else from an MMIO zone. On the msr path, say when the MMIO copy is enabled and below the
+        value computed here; on the mmio path the same for the MSR copy (the lower enabled copy is in force). Reads only."""
         if now_ms < self.rapl_next_ms:
             return
         self.rapl_next_ms = now_ms + 60000
@@ -346,7 +356,8 @@ class Daemon:
             if zone:                                      # spec 2.5: noticed, not switched at run time
                 self.mmio_later_watch = False
                 self.log("notice", f"a writable MMIO zone appeared after the start ({why}): restart the daemon to use it")
-        self.rapl = rapl_copies.read_all(self.args.root)
+        zone = self.pl_path.zone or plpath.find_mmio_zone(self.args.root)
+        self.rapl = rapl_copies.read_all(self.args.root, zone)
         why = self.rapl.get("mmio_unreadable") if self.rapl else None
         if why and not self.mmio_unreadable_logged:
             self.mmio_unreadable_logged = True
@@ -357,15 +368,42 @@ class Daemon:
             t = self.outputs.targets.get(ref)
             if t is not None and t.name in ("pl1", "pl2") and res.value_uw is not None:
                 written[t.name] = res.value_uw
-        now = {n: mm for n, mm, _ours in rapl_copies.mmio_caps(self.rapl, written)}
-        if now != self.mmio_capped:
-            for n, mm, ours in rapl_copies.mmio_caps(self.rapl, written):
-                if self.mmio_capped.get(n) != mm:
-                    self.log("warning", f"the MMIO copy of {n.upper()} is {mm:g} W (enabled), below the computed {ours:g} W: it "
-                                        "limits on top of the MSR value written here (Windows writes the MMIO copy)")
-            for n in self.mmio_capped.keys() - now.keys():
-                self.log("info", f"the MMIO copy of {n.upper()} no longer limits below the computed value")
-            self.mmio_capped = now
+        if self.pl_path.kind == "mmio":
+            if self.rapl is not None and self.rapl.get("msr") is None:
+                msr_zone = outputs_mod.find_zone(self.args.root, "package-0")
+                self.rapl["msr"] = rapl_copies.read_zone(msr_zone) if msr_zone else None
+            self.msr_capped = self._report_caps("msr", "MSR", self.msr_capped, written,
+                                                "the lower enabled copy is in force (DV-8); the daemon writes the MMIO copy")
+        else:
+            self.mmio_capped = self._report_caps("mmio", "MMIO", self.mmio_capped, written,
+                                                 "it limits on top of the MSR value written here (Windows writes the MMIO copy)")
+
+    def _report_caps(self, which: str, label: str, before: dict, written: dict, why: str) -> dict:
+        caps = rapl_copies.mmio_caps(self.rapl, written, which)
+        now = {n: mm for n, mm, _ours in caps}
+        if now != before:
+            for n, mm, ours in caps:
+                if before.get(n) != mm:
+                    self.log("warning", f"the {label} copy of {n.upper()} is {mm:g} W (enabled), below the computed {ours:g} W: {why}")
+            for n in before.keys() - now.keys():
+                self.log("info", f"the {label} copy of {n.upper()} no longer limits below the computed value")
+        return now
+
+    def _residual_clamp(self) -> None:
+        """DS-5 (spec kernel-mmio-daemon 5.2, accepted 24.11.2026): enabled=0 also clears a PL1 clamp the firmware had set; the zone
+        cannot set it again. Logged once where the register is readable."""
+        raw = self.snapshot.info.get("mmio-raw@0x59a0") if self.snapshot else None
+        if raw is None or self.residual_logged:
+            return
+        unit = rapl_copies.msr.power_unit_w(self.args.root)
+        copy, _why = rapl_copies.read_mmio(self.args.root, unit) if unit else (None, None)
+        if copy is None:
+            return
+        was = rapl_copies.Copy(int(raw, 16), unit)
+        if was.pl1[2] and not copy.pl1[2] and not copy.pl1[1]:
+            self.residual_logged = True
+            self.log("notice", "MMIO copy after the restore: PL1 enable 0, PL1 clamp 0 instead of 1 (enabled=0 also clears the "
+                               "firmware's clamp; same effect on the SB3, back after unloading the module or a cold boot; DS-5)")
 
     def _msr_copy_back(self) -> None:
         """Spec kernel-mmio-daemon 3: before the first MMIO write, the MSR copy's PL1, PL2 and window go back to the snapshot (a
@@ -434,6 +472,7 @@ class Daemon:
             self.prochot.forget()
             for e in errors:
                 self.log("error", f"restore failed: {e}")
+            self._residual_clamp()
         self.state = state
 
     def _log_changes(self) -> None:
@@ -593,10 +632,12 @@ class Daemon:
         if self.writers:
             status["competing_writers"] = self.writers
         if self.rapl:
-            status["rapl_copies"] = {k: (v.describe() if isinstance(v, rapl_copies.Copy) else v) for k, v in self.rapl.items()
+            status["rapl_copies"] = {k: (v.describe() if isinstance(v, (rapl_copies.Copy, rapl_copies.ZoneCopy)) else v) for k, v in self.rapl.items()
                                      if k != "unit_w"}
             if self.mmio_capped:
                 status["rapl_copies"]["mmio_below_computed"] = {n.upper(): w for n, w in self.mmio_capped.items()}
+            if self.msr_capped:
+                status["rapl_copies"]["msr_below_computed"] = {n.upper(): w for n, w in self.msr_capped.items()}
         if self.dgpu:
             status["dgpu"] = self.dgpu.status()
         if self.actions.channels & set(self.graph.outputs):
@@ -665,6 +706,7 @@ class Daemon:
             errors = self.snapshot.restore()
             for e in errors:
                 self.log("error", f"restore failed: {e}")
+            self._residual_clamp()
             if not errors:
                 self.snapshot.remove()
         self.series.close()

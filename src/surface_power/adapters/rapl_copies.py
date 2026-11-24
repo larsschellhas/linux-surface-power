@@ -52,6 +52,49 @@ class Copy:
         return f"{one('PL1', self.pl1)}, {one('PL2', self.pl2)}" + (", locked" if self.lock else "")
 
 
+@dataclass(frozen=True)
+class ZoneCopy:
+    """The MMIO copy as an `intel-rapl-mmio` zone shows it (spec kernel-mmio-daemon 8.3 C): PL1, PL2, the PL1 window and PL1
+    enable; the zone shows no PL2 enable, clamp or lock bit [C, get_domain_enable]. Same interface as Copy; unknown bits are None."""
+    pl1_w: float
+    pl2_w: float
+    pl1_enabled: bool
+    window_s: float | None = None
+
+    @property
+    def pl1(self) -> tuple[float, bool, None]:
+        return self.pl1_w, self.pl1_enabled, None
+
+    @property
+    def pl2(self) -> tuple[float, None, None]:
+        return self.pl2_w, None, None
+
+    lock = None
+
+    def describe(self) -> str:
+        w = f", window {self.window_s:g} s" if self.window_s is not None else ""
+        return f"PL1 {self.pl1_w:g} W ({'on' if self.pl1_enabled else 'off'}), PL2 {self.pl2_w:g} W{w} (from the zone: no PL2 " \
+               "enable, clamp or lock)"
+
+
+def _num(path: str) -> int | None:
+    try:
+        with open(path) as f:
+            v = f.read().strip()
+    except OSError:
+        return None
+    return int(v) if v.isdigit() else None
+
+
+def read_zone(zone: str) -> ZoneCopy | None:
+    """PL1/PL2 of a powercap package zone (constraint 0 = long_term, 1 = short_term, as the RAPL core orders them)."""
+    pl1, pl2, en = (_num(os.path.join(zone, n)) for n in ("constraint_0_power_limit_uw", "constraint_1_power_limit_uw", "enabled"))
+    if pl1 is None or pl2 is None or en is None:
+        return None
+    win = _num(os.path.join(zone, "constraint_0_time_window_us"))
+    return ZoneCopy(pl1 / 1e6, pl2 / 1e6, bool(en), None if win is None else round(win / 1e6, 3))
+
+
 def _mmio64(phys: int, root: str) -> int:
     """64 bits at a physical address through /dev/mem; raises OSError (lockdown, STRICT_DEVMEM, no capability)."""
     page = phys & ~(mmap.PAGESIZE - 1)
@@ -130,21 +173,28 @@ def read_msr(root: str, unit_w: float) -> Copy | None:
     return None if v is None else Copy(v, unit_w)
 
 
-def read_all(root: str) -> dict | None:
-    """{'unit_w', 'mmio': Copy|None, 'mmio_unreadable': reason|None, 'msr': Copy|None}, or None when the RAPL unit is not readable
-    (no root / no msr device)."""
+def read_all(root: str, zone: str | None = None) -> dict | None:
+    """{'unit_w', 'mmio': Copy|ZoneCopy|None, 'mmio_source': 'register'|'zone'|None, 'mmio_unreadable': reason|None,
+    'msr': Copy|None}. The register where it is readable, else the MMIO zone `zone` (spec kernel-mmio-daemon 8.3 C). None when
+    neither the RAPL unit (no root / no msr device) nor a zone is readable."""
     unit = msr.power_unit_w(root)
-    if unit is None:
+    zc = read_zone(zone) if zone else None
+    if unit is None and zc is None:
         return None
-    mm, why = read_mmio(root, unit)
-    return {"unit_w": unit, "mmio": mm, "mmio_unreadable": why, "msr": read_msr(root, unit)}
+    mm, why = read_mmio(root, unit) if unit is not None else (None, "MSR 0x606 (power unit) not readable")
+    src = "register" if mm is not None else None
+    if mm is None and zc is not None:
+        mm, why, src = zc, None, "zone"
+    return {"unit_w": unit, "mmio": mm, "mmio_source": src, "mmio_unreadable": why,
+            "msr": read_msr(root, unit) if unit is not None else None}
 
 
-def mmio_caps(copies: dict | None, written_uw: dict[str, int]) -> list[tuple[str, float, float]]:
-    """Enabled MMIO halves that are below what we wrote, as (name, MMIO W, our W). `written_uw`: 'pl1'/'pl2' -> µW."""
-    if not copies or copies.get("mmio") is None:
+def mmio_caps(copies: dict | None, written_uw: dict[str, int], which: str = "mmio") -> list[tuple[str, float, float]]:
+    """Enabled halves of the copy `which` ("mmio" or "msr") that are below what we wrote, as (name, copy W, our W).
+    `written_uw`: 'pl1'/'pl2' -> µW. A half whose enable is unknown (None, from a zone) is not reported."""
+    if not copies or copies.get(which) is None:
         return []
-    mm = copies["mmio"]
+    mm = copies[which]
     out = []
     for name, half in (("pl1", mm.pl1), ("pl2", mm.pl2)):
         ours = written_uw.get(name)

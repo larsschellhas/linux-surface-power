@@ -170,6 +170,14 @@ def find_profile(device: Device, directory: str = PROFILE_DIR) -> Profile | None
 
 # --- snapshot and restore (spec supervisor 3) ---
 
+MMIO_KEY = "/intel-rapl-mmio:"      # keys of an MMIO zone (spec kernel-mmio-daemon 5)
+
+
+def _write(path: str, text: str) -> None:
+    with open(path, "w") as fh:
+        fh.write(text)
+
+
 def _read_any(key: str) -> str | None:
     """A powercap file's text, or an MSR's value as hex for an `msr:` key."""
     m = msr.parse_key(key)
@@ -189,29 +197,40 @@ class Snapshot:
     FILE = "snapshot.json"
 
     def __init__(self, path: str, values: dict[str, str], fan: dict[str, dict] | None = None,
-                 fan_unrestorable: list[str] | None = None, fan_device: str = SSAM_CDEV):
+                 fan_unrestorable: list[str] | None = None, fan_device: str = SSAM_CDEV, info: dict[str, str] | None = None):
         self.path, self.values = path, values
+        self.info = info or {}                       # for the report only, never written back (e.g. the raw MMIO register)
         self.fan = fan or {}                         # key "fan:101" -> frame (Frame.to_dict) to send at the restore
         self.fan_unrestorable = fan_unrestorable or []
         self.fan_device = fan_device
         self.transport = None                        # for tests and the daemon; default: the debug device in `fan_device`
 
     @classmethod
-    def take(cls, run_dir: str, files: list[str]) -> tuple["Snapshot", bool]:
-        """Save the current values. If a predecessor's snapshot exists, keep it: the current values may be ours."""
+    def take(cls, run_dir: str, files: list[str], info: dict[str, str] | None = None) -> tuple["Snapshot", bool]:
+        """Save the current values. If a predecessor's snapshot exists, keep it: the current values may be ours. Keys the
+        predecessor did not have (it ran on the other PL path, spec kernel-mmio-daemon 5.1) it never wrote: they are added with
+        their current values."""
         path = os.path.join(run_dir, cls.FILE)
         if os.path.exists(path):
             snap = cls.load(path)
             if snap is not None:
+                added = {f: v for f in files if f not in snap.values and (v := _read_any(f)) is not None}
+                extra = {k: v for k, v in (info or {}).items() if k not in snap.info}
+                if added or extra:
+                    snap.values.update(added)
+                    snap.info.update(extra)
+                    snap.save()
                 return snap, True
         values = {f: v for f in files if (v := _read_any(f)) is not None}
         os.makedirs(run_dir, exist_ok=True)
-        snap = cls(path, values)
+        snap = cls(path, values, info=info)
         snap.save()
         return snap, False
 
     def save(self) -> None:
         data = {"version": 1, "values": self.values}
+        if self.info:
+            data["info"] = self.info
         if self.fan or self.fan_unrestorable:
             data["fan"] = {"device": self.fan_device, "frames": self.fan, "unrestorable": self.fan_unrestorable}
         tmp = self.path + ".tmp"
@@ -226,7 +245,7 @@ class Snapshot:
                 data = json.load(fh)
             fan = data.get("fan", {})
             return cls(path, dict(data["values"]), dict(fan.get("frames", {})), list(fan.get("unrestorable", [])),
-                       fan.get("device", SSAM_CDEV))
+                       fan.get("device", SSAM_CDEV), dict(data.get("info", {})))
         except (OSError, ValueError, KeyError, AttributeError, TypeError):
             return None
 
@@ -246,9 +265,24 @@ class Snapshot:
         return sorted(self.values, key=lambda p: (0 if p.endswith("_time_window_us") else 1, p))
 
     def restore(self) -> list[str]:
-        """Write back every value that differs and send the neutral fan frames. Returns error texts (empty on success)."""
+        """Write back every value that differs and send the neutral fan frames. Returns error texts (empty on success).
+
+        An `enabled` key (only the MMIO zone's, spec kernel-mmio-daemon 5.2): if it was 0 and is 1 now, it is written first, so
+        the limit stops at once; if it was 1 it is not touched. Keys of an MMIO zone that is gone are skipped: the module restores
+        the register itself when it is unloaded (spec 2.6)."""
         errors = []
+        enables = [p for p in self.values if os.path.basename(p) == "enabled"]
+        for p in enables:
+            if self.values[p] == "0" and _read(p) not in (None, "0"):
+                try:
+                    _write(p, "0")
+                except OSError as e:
+                    errors.append(f"{p}: {e.strerror}")
         for p in self.order():
+            if p in enables:
+                continue
+            if MMIO_KEY in p and not os.path.exists(p):
+                continue
             want = self.values[p]
             if _read_any(p) == want:
                 continue
@@ -258,8 +292,7 @@ class Snapshot:
                     errors.append(f"{p}: MSR write failed")
                 continue
             try:
-                with open(p, "w") as fh:
-                    fh.write(want)
+                _write(p, want)
             except OSError as e:
                 errors.append(f"{p}: {e.strerror}")
         if self.fan:

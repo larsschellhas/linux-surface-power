@@ -13,6 +13,7 @@ from test_daemon import blob_text
 from unittest import mock
 
 from surface_power import daemon, monitor, supervisor
+from surface_power.tools import reset
 from surface_power.adapters import outputs, rapl_copies
 from surface_power.adapters.outputs import LIMITS, SOC, WINDOW_CHANNEL, OutputStage, PathFailure
 from surface_power.loader.model import ChannelRef, OutputChannel
@@ -469,6 +470,179 @@ class StageTest(unittest.TestCase):
         cuts = [e for _p, e in st.drain_events() if "hard limit" in e]
         self.assertEqual(len(cuts), 2, cuts)                                    # one line per target, not per write
         self.assertIn("PL1", cuts[0])
+
+
+
+class SnapshotRestoreTest(MmioDaemonBase):
+    """Step 5: spec 5 (snapshot, restore, surface-power-reset), 8.3 C (reading through the zone), 9 (the MSR warning).
+    MD-13 ... MD-17, MD-24, MB-8."""
+
+    def setUp(self):
+        super().setUp()
+        with open(self.blob, "w") as f:
+            f.write(window_blob())
+        self.fs.add_msr()
+
+    def control(self, profile=None):
+        with mock.patch.object(supervisor, "find_profile", return_value=profile or sb3_profile()):
+            return self.start("--control")
+
+    def key(self, name):
+        return self.fs.path(f"{MMIO_ZONE}/{name}")
+
+    def snapshot_file(self):
+        with open(os.path.join(self.run.name, "snapshot.json")) as f:
+            return json.load(f)
+
+    def record_restore(self):
+        rec = []
+        real = supervisor._write
+
+        def w(path, text):
+            rec.append((os.path.relpath(path, self.fs.root), text))
+            real(path, text)
+        return rec, mock.patch.object(supervisor, "_write", w)
+
+    def test_md13_snapshot_holds_the_mmio_keys_and_the_raw_register_before_any_write(self):
+        self.fs.add_mmio_zone(enabled=0)
+        self.fs.add_mmio_register(raw(25, 61, clamp1=True))
+        d = self.control()
+        snap = self.snapshot_file()
+        for name, want in (("constraint_0_power_limit_uw", "25000000"), ("constraint_1_power_limit_uw", "61000000"),
+                           ("constraint_0_time_window_us", "27983872"), ("enabled", "0")):
+            self.assertEqual(snap["values"][self.key(name)], want)
+        self.assertEqual(snap["info"]["mmio-raw@0x59a0"], f"{raw(25, 61, clamp1=True):#018x}")
+        d.stop()
+
+    def test_md14_restore_switches_off_first_then_window_pl1_pl2(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        d.cycle(0)
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/enabled"), "1")
+        rec, patch = self.record_restore()
+        with patch:
+            d.stop()
+        mm = [(os.path.basename(p), t) for p, t in rec if p.startswith(MMIO_ZONE)]
+        self.assertEqual(mm, [("enabled", "0"), ("constraint_0_time_window_us", "27983872"),
+                              ("constraint_0_power_limit_uw", "25000000"), ("constraint_1_power_limit_uw", "61000000")])
+
+    def test_md15_enabled_firmware_copy_gets_its_fields_back_only(self):
+        self.fs.add_mmio_zone(enabled=1, pl1_uw=28_000_000, pl2_uw=35_000_000)
+        d = self.control()
+        d.cycle(0)
+        self.fs.write(f"{MMIO_ZONE}/enabled", 0)                    # even if someone switched it off: not touched by the restore
+        rec, patch = self.record_restore()
+        with patch:
+            d.stop()
+        names = [os.path.basename(p) for p, _t in rec if p.startswith(MMIO_ZONE)]
+        self.assertNotIn("enabled", names)
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_power_limit_uw"), "28000000")
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_1_power_limit_uw"), "35000000")
+
+    def test_md16_surface_power_reset_in_the_same_order(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        d.cycle(0)                                                  # then the daemon dies without restore (SIGKILL)
+        rec, patch = self.record_restore()
+        out = io.StringIO()
+        with patch, mock.patch("sys.stdout", out):
+            self.assertEqual(reset.main(["--run-dir", self.run.name]), 0)
+        mm = [(os.path.basename(p), t) for p, t in rec if p.startswith(MMIO_ZONE)]
+        self.assertEqual(mm[0], ("enabled", "0"))
+        self.assertEqual([n for n, _ in mm[1:]], ["constraint_0_time_window_us", "constraint_0_power_limit_uw",
+                                                  "constraint_1_power_limit_uw"])
+        self.assertFalse(os.path.exists(os.path.join(self.run.name, "snapshot.json")))
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_power_limit_uw"), "25000000")
+
+    def test_md17_predecessor_snapshot_is_kept_and_used_as_is(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        d.cycle(0)                                                  # predecessor wrote 30 W and enabled=1, then died
+        d2 = self.control()
+        self.assertEqual(d2.snapshot.values[self.key("constraint_0_power_limit_uw")], "25000000")
+        self.assertEqual(d2.snapshot.values[self.key("enabled")], "0")
+        self.assertTrue(d2.outputs.own_enable)
+        self.assertIn("kept the firmware snapshot of a predecessor", self.out.getvalue())
+        d2.stop()
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/enabled"), "0")
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_power_limit_uw"), "25000000")
+
+    def test_predecessor_on_the_msr_path_gets_the_mmio_keys_added(self):
+        """A predecessor without a zone never wrote the MMIO copy: its current values are the firmware's."""
+        d = self.control()
+        d.cycle(0)                                                  # msr path, dies without restore
+        self.fs.add_mmio_zone(enabled=0)
+        d2 = self.control()
+        self.assertEqual(d2.pl_path.kind, "mmio")
+        self.assertEqual(d2.snapshot.values[self.key("enabled")], "0")
+        self.assertEqual(d2.snapshot.values[self.fs.path(f"{MSR_ZONE}/constraint_0_power_limit_uw")], "30000000")
+        d2.stop()
+
+    def test_restore_skips_the_keys_of_a_zone_that_is_gone(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        d.cycle(0)
+        import shutil
+        shutil.rmtree(self.fs.path(MMIO_ZONE))                      # module unloaded: it restored the register itself
+        self.assertEqual(d.snapshot.restore(), [])
+
+    def test_residual_clamp_is_logged_once(self):
+        """DS-5: enabled=0 also clears the firmware's PL1 clamp; logged once where the register is readable."""
+        self.fs.add_mmio_zone(enabled=0)
+        self.fs.add_mmio_register(raw(25, 61, clamp1=True))
+        d = self.control()
+        d.cycle(0)
+        self.fs.add_mmio_register(raw(25, 61))                      # what the register holds after enabled=0
+        d.before_sleep()
+        d.after_resume(5000)
+        d.cycle(5000)
+        d.stop()
+        self.assertEqual(self.out.getvalue().count("PL1 clamp 0 instead of 1"), 1)
+
+    def test_mb8_zone_values_on_the_msr_path_and_the_warning(self):
+        self.fs.add_mmio_zone(allow_write="N", enabled=1, pl1_uw=20_000_000)
+        d = self.start("--dry-run")
+        d.cycle(0)
+        st = self.status()["rapl_copies"]
+        self.assertEqual(st["mmio_source"], "zone")
+        self.assertIsNone(st["mmio_unreadable"])
+        self.assertIn("PL1 20 W (on)", st["mmio"])
+        self.assertEqual(st["mmio_below_computed"], {"PL1": 20.0})
+        self.assertEqual(self.out.getvalue().count("the MMIO copy of PL1 is 20 W"), 1)
+        d.stop()
+
+    def test_mb8_zone_values_on_the_mmio_path(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        d.cycle(0)
+        st = self.status()["rapl_copies"]
+        self.assertEqual(st["mmio_source"], "zone")
+        self.assertIn("PL1 30 W (on)", st["mmio"])
+        self.assertNotIn("not readable", self.out.getvalue())
+        d.stop()
+
+    def test_mb8_register_preferred_where_readable(self):
+        self.fs.add_mmio_zone(allow_write="N")
+        self.fs.add_mmio_register(raw(25, 61, clamp1=True))
+        d = self.start("--dry-run")
+        d.cycle(0)
+        st = self.status()["rapl_copies"]
+        self.assertEqual(st["mmio_source"], "register")
+        self.assertEqual(st["mmio"], "PL1 25 W (off, clamp), PL2 61 W (off)")
+        d.stop()
+
+    def test_md24_lower_msr_copy_on_the_mmio_path(self):
+        self.fs.add_mmio_zone(enabled=0)
+        self.fs.add_msr({0x610: raw(25, 61, en1=True, en2=True)})  # MSR copy 25 W enabled, the blob computes 30 W
+        self.fs.write(f"{MSR_ZONE}/constraint_0_power_limit_uw", 25000000)
+        d = self.control()
+        d.cycle(0)
+        d.cycle(61000)
+        text = self.out.getvalue()
+        self.assertEqual(text.count("the MSR copy of PL1 is 25 W (enabled), below the computed 30 W"), 1)
+        self.assertNotIn("the MMIO copy of PL1 is", text)
+        self.assertEqual(self.status()["rapl_copies"]["msr_below_computed"], {"PL1": 25.0})
+        d.stop()
 
 
 if __name__ == "__main__":
