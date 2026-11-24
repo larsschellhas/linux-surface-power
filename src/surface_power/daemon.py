@@ -91,6 +91,21 @@ def _sd_notify(message: str) -> None:
 _sleep, _clock = time.sleep, time.monotonic      # replaced in tests
 
 
+def _foreign_text(c) -> str:
+    """One foreign change for the log: a limit in W, a window in s, the MMIO enable bit, or the MSR copy on the mmio path."""
+    if c.ref == "enabled":
+        return f"MMIO enabled ({c.expected_uw} -> {c.found_uw})"
+    if isinstance(c.ref, str):
+        name, window = f"MSR copy {c.ref}", c.ref.endswith("window")
+    else:
+        name = OUTPUT_NAMES.get(c.ref.channel, str(c.ref)) if c.ref.guid == LIMITS_GUID else str(c.ref)
+        window = c.ref.guid != LIMITS_GUID
+        if window and c.ref.channel == 61:
+            name = "PL1 window"
+    unit = "s" if window else "W"
+    return f"{name} ({(c.expected_uw or 0) / 1e6:g} -> {(c.found_uw or 0) / 1e6:g} {unit})"
+
+
 def _celsius(dk: float) -> float:
     return round((dk - 2731) / 10, 1)
 
@@ -510,14 +525,28 @@ class Daemon:
         elif self.state == "emergency" and not self.guard.emergency:
             self._enter(self.mode, "emergency condition cleared")
 
+        mmio = self.pl_path.kind == "mmio"
         if self.state == "control":
+            if mmio:
+                try:
+                    self.outputs.check_zone()
+                except PathFailure as e:
+                    self._path_failed(e)
+                    raise
             changed = self.outputs.foreign_changes()
+            msr_changed = self.outputs.msr_copy_changes(self.snapshot.values) if mmio and self.msr_copy_checked else []
+            changed += msr_changed
             if changed:
-                names = ", ".join(f"{OUTPUT_NAMES.get(c.ref.channel, c.ref)} "
-                                  f"({(c.expected_uw or 0) / 1e6:g} -> {(c.found_uw or 0) / 1e6:g} W)" for c in changed)
-                self.log("warning", f"limit changed by another process: {names}")
+                self.log("warning", "limit changed by another process: " + ", ".join(map(_foreign_text, changed)))
                 if self.foreign.record(now_ms):
                     self._enter("yielded", "three foreign changes within 60 s")
+                elif msr_changed:
+                    # Spec kernel-mmio-daemon 10: through the lower-copy rule a lower MSR copy lowers the limit in force; overwritten
+                    # with the snapshot value like an owned target.
+                    try:
+                        self.outputs.restore_msr_copy(self.snapshot.values)
+                    except OSError as e:
+                        self.log("error", f"MSR copy could not be set back ({e.strerror or e})")
         if self.state == "control":
             for f in self.throttle.foreign_changes():
                 self.log("warning", f"throttle target changed by another process: {f.target} ({f.expected} -> {f.found}); "

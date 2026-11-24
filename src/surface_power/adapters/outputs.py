@@ -189,6 +189,7 @@ class OutputStage:
         self.events: list[tuple[str, str]] = []      # (priority, text) for the log, drained by the daemon every cycle
         self._cut_logged: set[ChannelRef] = set()
         self.own_enable = False                      # the firmware's MMIO copy was off: this daemon writes enabled=1 (spec 4.2)
+        self.enable_written = False                  # enabled is 1 through this daemon since the last restore (spec 10)
         self.enable_path = os.path.join(mmio_zone, "enabled") if mmio_zone else None
         self.targets: dict[ChannelRef, Target] = {}
         narrow = narrow or {}
@@ -311,6 +312,7 @@ class OutputStage:
         if cur is None:
             raise PathFailure(f"{self.enable_path} not readable (MMIO zone gone)", marker=False)
         if cur != "0":
+            self.enable_written = True
             return
         try:
             _write(self.enable_path, "1")
@@ -318,6 +320,7 @@ class OutputStage:
             raise PathFailure(f"enabled=1 failed ({e.strerror or e})") from e
         if _read(self.enable_path) != "1":
             raise PathFailure("enabled=1 written but enabled reads 0 (PL1 enable did not stick)")
+        self.enable_written = True
         self.events.append(("notice", "MMIO copy: enabled=1 written (sets PL1/PL2 enable and clamp)"))
         self._check_bits()
 
@@ -331,6 +334,11 @@ class OutputStage:
         missing = [n for n, v in bits.items() if not v]
         if missing:
             self.events.append(("warning", f"MMIO copy after enabled=1: {', '.join(missing)} not set ({copy.describe()})"))
+
+    def check_zone(self) -> None:
+        """Spec 2.6: the MMIO zone is gone (module unloaded): the path cannot go on; a restart chooses again (no marker)."""
+        if self.mmio_zone and self.mmio_refs and not os.path.isdir(self.mmio_zone):
+            raise PathFailure(f"{self.mmio_zone} is gone (module unloaded?)", marker=False)
 
     def drain_events(self) -> list[tuple[str, str]]:
         out, self.events = self.events, []
@@ -367,8 +375,8 @@ class OutputStage:
         """Clamp, convert and write the values. Channels in `hold` keep their current value (e.g. PL4 while its EC
         inputs are invalid, spec outputs 3). Returns one result per channel."""
         out = {}
-        if self.mmio_zone and not self.dry_run and self.mmio_refs and not os.path.isdir(self.mmio_zone):
-            raise PathFailure(f"{self.mmio_zone} is gone (module unloaded?)", marker=False)
+        if not self.dry_run:
+            self.check_zone()
         for ref in sorted(values, key=self._order):
             mw = values[ref]
             t = self.targets.get(ref)
@@ -425,9 +433,14 @@ class OutputStage:
                 continue
             if cur_uw is None or abs(cur_uw - t.last_uw) > t.tolerance(t.last_uw):
                 found.append(self.Foreign(ref, t.last_uw, cur_uw))
+        if self.own_enable and self.enable_written and _read(self.enable_path) == "0":
+            # Spec kernel-mmio-daemon 10: thermald's RAPL cooling device or its workaround writes enabled=0 [C]. The next apply sets
+            # it again (overwritten like a limit); enabled of a copy the firmware had on is never watched (the daemon never set it).
+            found.append(self.Foreign("enabled", 1, 0))
         return found
 
     def forget(self) -> None:
         """After a restore to firmware values: we no longer own the current values."""
         for t in self.targets.values():
             t.last_uw = t.wrote_uw = None
+        self.enable_written = False

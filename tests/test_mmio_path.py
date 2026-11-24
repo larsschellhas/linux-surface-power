@@ -473,9 +473,8 @@ class StageTest(unittest.TestCase):
 
 
 
-class SnapshotRestoreTest(MmioDaemonBase):
-    """Step 5: spec 5 (snapshot, restore, surface-power-reset), 8.3 C (reading through the zone), 9 (the MSR warning).
-    MD-13 ... MD-17, MD-24, MB-8."""
+class MmioControlBase(MmioDaemonBase):
+    """The window blob, the MSR file and control with the SB3 profile's options."""
 
     def setUp(self):
         super().setUp()
@@ -486,6 +485,11 @@ class SnapshotRestoreTest(MmioDaemonBase):
     def control(self, profile=None):
         with mock.patch.object(supervisor, "find_profile", return_value=profile or sb3_profile()):
             return self.start("--control")
+
+
+class SnapshotRestoreTest(MmioControlBase):
+    """Step 5: spec 5 (snapshot, restore, surface-power-reset), 8.3 C (reading through the zone), 9 (the MSR warning).
+    MD-13 ... MD-17, MD-24, MB-8."""
 
     def key(self, name):
         return self.fs.path(f"{MMIO_ZONE}/{name}")
@@ -643,6 +647,89 @@ class SnapshotRestoreTest(MmioDaemonBase):
         self.assertNotIn("the MMIO copy of PL1 is", text)
         self.assertEqual(self.status()["rapl_copies"]["msr_below_computed"], {"PL1": 25.0})
         d.stop()
+
+
+
+class ForeignResumeTest(MmioControlBase):
+    """Step 6: spec 7 (suspend and resume), 10 (foreign changes), 2.6 (lost zone). MD-19 ... MD-22."""
+
+    def test_md19_sleep_restores_and_resume_writes_again(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        d.cycle(0)
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/enabled"), "1")
+        d.before_sleep()                                            # SIGUSR2
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/enabled"), "0")
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_power_limit_uw"), "25000000")
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_time_window_us"), "27983872")
+        d.cycle(1000)                                               # paused: nothing written
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/enabled"), "0")
+        d.after_resume(2000)                                        # SIGUSR1
+        d.cycle(2000)
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/enabled"), "1")
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_power_limit_uw"), "30000000")
+        self.assertEqual(self.out.getvalue().count("enabled=1 written"), 2)
+        self.assertNotIn("changed by another process", self.out.getvalue())
+        d.stop()
+
+    def test_md20_foreign_enabled_0_counts_and_the_third_yields(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        d.cycle(0)
+        for t in (1000, 2000):
+            self.fs.write(f"{MMIO_ZONE}/enabled", 0)                # thermald's RAPL cooling device or its workaround
+            d.cycle(t)
+            self.assertEqual(self.fs.read(f"{MMIO_ZONE}/enabled"), "1")   # overwritten
+        self.assertEqual(self.out.getvalue().count("MMIO enabled (1 -> 0)"), 2)
+        self.fs.write(f"{MMIO_ZONE}/enabled", 0)
+        d.cycle(3000)
+        self.assertEqual(d.state, "yielded")
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/enabled"), "0")
+        self.assertEqual(self.fs.read(f"{MMIO_ZONE}/constraint_0_power_limit_uw"), "25000000")
+        d.stop()
+
+    def test_md20_enabled_of_an_enabled_firmware_copy_is_not_watched(self):
+        self.fs.add_mmio_zone(enabled=1)
+        d = self.control()
+        d.cycle(0)
+        self.fs.write(f"{MMIO_ZONE}/enabled", 0)
+        d.cycle(1000)
+        self.assertNotIn("MMIO enabled", self.out.getvalue())
+        d.stop()
+
+    def test_md21_foreign_msr_pl1_on_the_mmio_path(self):
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        d.cycle(0)
+        self.fs.write(f"{MSR_ZONE}/constraint_0_power_limit_uw", 12000000)
+        d.cycle(1000)
+        self.assertIn("limit changed by another process: MSR copy PL1 (30 -> 12 W)", self.out.getvalue())
+        self.assertEqual(self.fs.read(f"{MSR_ZONE}/constraint_0_power_limit_uw"), "30000000")   # set back
+        for t in (2000, 3000):
+            self.fs.write(f"{MSR_ZONE}/constraint_0_power_limit_uw", 12000000)
+            d.cycle(t)
+        self.assertEqual(d.state, "yielded")
+        d.stop()
+
+    def test_md22_zone_removed_during_the_run(self):
+        import shutil
+        self.fs.add_mmio_zone(enabled=0)
+        d = self.control()
+        d.cycle(0)
+        self.fs.write(f"{MSR_ZONE}/constraint_1_power_limit_uw", 50000000)    # something to restore on the MSR side
+        shutil.rmtree(self.fs.path(MMIO_ZONE))                     # module unloaded; it restores the register itself
+        with self.assertRaises(PathFailure) as cm:
+            d.cycle(1000)
+        self.assertFalse(cm.exception.marker)
+        self.assertNotIn("changed by another process", self.out.getvalue())
+        d.stop()
+        self.assertEqual(self.fs.read(f"{MSR_ZONE}/constraint_1_power_limit_uw"), "61000000")
+        self.assertFalse(os.path.exists(os.path.join(self.run.name, "snapshot.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.run.name, "mmio-unusable")))
+        self.assertNotIn("restore failed", self.out.getvalue())
+        d2 = self.control()                                         # the restart chooses again: msr without a zone
+        self.assertEqual(d2.pl_path.kind, "msr")
+        d2.stop()
 
 
 if __name__ == "__main__":
