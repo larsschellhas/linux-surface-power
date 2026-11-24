@@ -35,6 +35,8 @@ WINDOW_CHANNEL = 61
 WINDOW_UNITS = [round(2 ** y * (1 + f / 4)) for y in range(10, 17) for f in range(4)]
 WINDOW_STEPS_US = [round(u * 1_000_000 / 1024) for u in WINDOW_UNITS]
 WINDOW_HARD_US = (WINDOW_STEPS_US[0], WINDOW_STEPS_US[-1])      # 1.0 s ... 112 s
+# On the mmio path these go to the MMIO zone; PL4 and psys stay on their MSR zones (spec kernel-mmio-daemon 2.3).
+MMIO_NAMES = ("pl1", "pl2")
 # Hardware rounding tolerance for foreign-change detection (spec supervisor 5).
 TOLERANCE_UW = 200_000
 
@@ -153,9 +155,13 @@ def find_constraint(zone: str, name: str) -> str | None:
 
 class OutputStage:
     def __init__(self, root: str, ranges: dict[ChannelRef, OutputChannel], dry_run: bool = False,
-                 narrow: dict[str, float] | None = None, pl3: bool | None = None, pl4: bool | None = None):
-        """pl3 / pl4: None = automatic, True = always where the target exists, False = never (device profile)."""
+                 narrow: dict[str, float] | None = None, pl3: bool | None = None, pl4: bool | None = None,
+                 mmio_zone: str | None = None):
+        """pl3 / pl4: None = automatic, True = always where the target exists, False = never (device profile).
+        mmio_zone: the `intel-rapl-mmio` zone that takes PL1, PL2 and the PL1 window (the mmio path, spec kernel-mmio-daemon 2);
+        None: the MSR zone `intel-rapl:0` takes them (the msr path)."""
         self.root, self.ranges, self.dry_run = root, ranges, dry_run
+        self.mmio_zone = mmio_zone
         self.notes: list[str] = []
         self.targets: dict[ChannelRef, Target] = {}
         narrow = narrow or {}
@@ -173,7 +179,7 @@ class OutputStage:
             if name == "pl4" and pl4 is False:
                 self.notes.append("pl4: off in the device profile, log-only")
                 continue
-            zone = find_zone(root, zone_name)
+            zone = mmio_zone if (mmio_zone and name in MMIO_NAMES) else find_zone(root, zone_name)
             path = find_constraint(zone, cname) if zone else None
             if not path:
                 self.notes.append(f"{name}: no powercap target ({zone_name}/{cname}), log-only")
@@ -184,7 +190,7 @@ class OutputStage:
                 continue
             self.targets[ChannelRef(LIMITS, ch)] = Target(name, path, *bounds(name))
         # PL1 time window (CF2F6076/61): written to the same powercap constraint as PL1, `long_term`.
-        wzone = find_zone(root, "package-0")
+        wzone = mmio_zone or find_zone(root, "package-0")
         wlimit = find_constraint(wzone, "long_term") if wzone else None
         wpath = wlimit[:-len("_power_limit_uw")] + "_time_window_us" if wlimit else None
         if wpath and os.path.exists(wpath):

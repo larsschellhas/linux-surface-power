@@ -28,7 +28,7 @@ from .adapters.prochot import BATT_MODE, ProchotStage
 from .adapters.fan import FanStage, NullTransport, handles as fan_handles
 from .adapters import gpu
 from .adapters.gpu import ClockCapStandIn
-from .adapters import rapl_copies
+from .adapters import plpath, rapl_copies
 from .adapters.outputs import OutputStage
 from .engine.engine import Engine
 from .engine.graph import build_graph, outputs_reached_by
@@ -152,9 +152,13 @@ class Daemon:
         self.reader = inp.InputReader(set(self.graph.inputs) | {self.cpu_ref}, sources)
         self.slider = next(s for s in sources if isinstance(s, inp.SliderState))
 
-        # Outputs.
+        # Outputs. PL path first (spec kernel-mmio-daemon 2): once at start, before the snapshot.
         p = self.profile
-        kw = dict(narrow=p.narrow if p else None, pl3=p.pl3 if p else None, pl4=p.pl4 if p else None)
+        self.pl_path = plpath.choose(root, args.run_dir, p.mmio if p else None)
+        # Spec 2.5: watch for a writable zone that appears later only where none was there at start (not after a switch-off).
+        self.mmio_later_watch = plpath.writable_zone(root)[0] is None
+        kw = dict(narrow=p.narrow if p else None, pl3=p.pl3 if p else None, pl4=p.pl4 if p else None,
+                  mmio_zone=self.pl_path.zone)
         self.outputs = OutputStage(root, self.graph.output_ranges, dry_run=(self.mode != "control"), **kw)
         self.preview = OutputStage(root, self.graph.output_ranges, dry_run=True, **kw)
         # Throttle requests (spec outputs 8): frequency caps for CPU policies and the GPU, where this machine has them.
@@ -285,6 +289,7 @@ class Daemon:
             self.log("info", note)
         for ref in self.reader.unavailable:
             self.log("warning", f"input {ref} unavailable on this system; it stays invalid")
+        self.log("notice", self.pl_path.describe())
         if self.mode_reason:
             self.log("warning", f"dry-run only: {self.mode_reason}")
         if self.dgpu_note:
@@ -334,6 +339,11 @@ class Daemon:
         if now_ms < self.rapl_next_ms:
             return
         self.rapl_next_ms = now_ms + 60000
+        if self.mmio_later_watch:
+            zone, _source, why = plpath.writable_zone(self.args.root)
+            if zone:                                      # spec 2.5: noticed, not switched at run time
+                self.mmio_later_watch = False
+                self.log("notice", f"a writable MMIO zone appeared after the start ({why}): restart the daemon to use it")
         self.rapl = rapl_copies.read_all(self.args.root)
         why = self.rapl.get("mmio_unreadable") if self.rapl else None
         if why and not self.mmio_unreadable_logged:
@@ -536,6 +546,8 @@ class Daemon:
             "blob": {"source": self.loaded.source, "form": self.loaded.form, "lines": len(self.loaded.parsed.algorithms),
                      "variant": self.graph.variant},
             "state": self.state,
+            "pl_path": self.pl_path.kind,
+            "pl_path_reason": self.pl_path.reason,
             "slider": {"state": self.values.get(ChannelRef(inp.SYSTEM, 1)), "profile": self.slider.profile,
                        "ac": self.slider.ac},
             "controllers": [{"line": c.line.id, "input": str(c.line.inputs[0]), "state": STATE_NAMES.get(c.state),

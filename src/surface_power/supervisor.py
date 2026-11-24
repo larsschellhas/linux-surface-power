@@ -121,11 +121,18 @@ class Profile:
     notes: tuple = ()                 # lines the report and the daemon log print for this device
     kernel_fan_profiles: int = 1      # fans (1-3) the kernel sends the fan profile to: `fan_count` of its node (spec outputs 9.3)
     dgpu_clock_cap_dry_run: bool = False   # opt-in: the stand-in computes and logs its cap but never sets one (spec outputs 6.2)
+    mmio: bool | None = None          # false: never the MMIO path for PL1/PL2 (emergency switch, spec kernel-mmio-daemon 2.1)
 
 
 def _fan_profiles(v, path: str) -> int:
     if isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 3:
         raise ValueError(f"profile {os.path.basename(path)}: outputs.kernel_fan_profiles must be 1, 2 or 3")
+    return v
+
+
+def _mmio(v, path: str) -> bool | None:
+    if v is not None and not isinstance(v, bool):
+        raise ValueError(f"profile {os.path.basename(path)}: outputs.mmio must be true or false")
     return v
 
 
@@ -149,7 +156,8 @@ def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
                            bool(o.get("fan_thresholds", False)), bool(o.get("pl4_requires_ec", False)),
                            float(o.get("pl4_ec_wait_s", 10.0)), tuple(d.get("notes", ())),
                            kernel_fan_profiles=_fan_profiles(o.get("kernel_fan_profiles", 1), path),
-                           dgpu_clock_cap_dry_run=bool(o.get("dgpu_clock_cap_dry_run", False))))
+                           dgpu_clock_cap_dry_run=bool(o.get("dgpu_clock_cap_dry_run", False)),
+                           mmio=_mmio(o.get("mmio"), path)))
     return out
 
 
