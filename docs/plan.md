@@ -1,6 +1,6 @@
 # Project plan: from the reference device to a rollout on every SMF Surface
 
-Version 1.25, 25.11.2026. This is the single plan of the project: target, work packages, their state, and what comes next. Read it
+Version 1.26, 25.11.2026. This is the single plan of the project: target, work packages, their state, and what comes next. Read it
 first; it is kept current with every change of state (section 7). Evidence markers as in `docs/README.md`: [C] driver code or ACPI
 table, [M] measured, [H] hypothesis, [D] design decision.
 
@@ -102,7 +102,7 @@ kernel interfaces it needs are in the released linux-surface kernel; fail-safe c
 | F8 | Docs and code consistency | 🔄 | `specs/outputs.md` 4 corrected 19.11.2026; keep README, device pages and specs in step |
 | F9 | Evaluate the reports of 18.–21.11.2026 in #2383: Pro 10 MMIO answers (technosf, 18.11.), Laptop 4 Intel 15" (hypergol-d, 20.11.), Laptop Go 1 with kernel#198 (neveltyc, 20.11.), Pro 9 59-hour dry-run (NexGen-3D-Printing, 20.11.), Laptop Studio 2 fans (VibeCodingAnimal, 21.11.) | 🔄 | evaluated 23.11.2026 (raw notes `f9-1` … `f9-5`); reply drafts exist, nothing posted; follow-ups: B8–B10, D9, D10, F10, H6, H7, L8 |
 | F10 | Pro 9: MSR reads of `0x17`, `0x611`, `0x614`, `0x615` fail with EIO, also after a clean reboot and before the daemon starts [M, tester]; cause unknown | ⏳ 🙋 | questions to the tester (`rdmsr -p 0`, `dmesg`, hypervisor flag, the reading script); B9 |
-| F11 | **Tester kit:** one `sudo` script that runs every check a device needs (report with EC, short dry-run, read-only module test where allowed) and prepares a device-specific issue in this repository (maintainer's wish, 25.11.2026) | ⬜ | concept `specs/tester-kit.md` 0.1 with five open decisions; then build, then the tester package (push, request) |
+| F11 | **Tester kit:** one `sudo` script that runs every check a device needs (report with EC, short dry-run, read-only module test where allowed) and prepares a device-specific issue in this repository (maintainer's wish, 25.11.2026) | 🔄 | built 25.11.2026 (`scripts/surface-power-check`, spec `tester-kit.md` 0.2 with the maintainer's decisions: module test on every Intel device with a profile, existing DKMS key only, cdev loaded for the run, one issue per model here); next: a run on the SB3, then the tester package (push, request) |
 | **G** | **Inputs to settle** | 🔄 | |
 | G1 | Display brightness in millinits (`1FB53D4C/41`, SB3 13"/15"): no source, block default 3 W display power (DV-3); reaches PL4 | ⬜ | where Windows takes the value from (display client), and whether Linux can give nits |
 | G2 | Battery EWMA level and max-charge flag (`28B7BD85/13, 16`): debug device only | 🔄 | D4 |
@@ -382,3 +382,4 @@ the daemon itself (B8, B9, B10) come before the safety suite because they decide
 | 25.11.2026 | 1.23: C6 started 10:29 on the SB3: 24 h, MMIO path, module loaded at boot (maintainer's decision; local configuration of the reference device). |
 | 25.11.2026 | 1.24: B10 ✅ (report reviewed and its verdict taken from the daemon); daemon fixes: a missing input reaching only a not-needed output does not block control, no dGPU → the dGPU limit is not needed, the writer warning names what each writer changes. |
 | 25.11.2026 | 1.25: new F11 (tester kit), concept `specs/tester-kit.md` 0.1. |
+| 25.11.2026 | 1.26: F11 built (tester kit, issue template); decisions in `tester-kit.md` 6. |

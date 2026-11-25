@@ -1,6 +1,6 @@
 # Spec: tester kit (one command for a device check)
 
-Version 0.1, 25.11.2026. **Draft, not implemented.** Wish of the maintainer (25.11.2026): a tester runs one script with `sudo`; it builds what is needed,
+Version 0.2, 25.11.2026. **Implemented 25.11.2026** (`scripts/surface-power-check`, `src/surface_power/tools/check.py`, `.github/ISSUE_TEMPLATE/device-report.yml`, `tests/test_check.py`); not yet run by a tester. Wish of the maintainer (25.11.2026): a tester runs one script with `sudo`; it builds what is needed,
 runs every check that is needed on the device, and the result goes into a device-specific issue of this repository, opened by the tester. Markers as in
 `blob-format.md`. Decisions open for the maintainer are in section 6.
 
@@ -35,10 +35,12 @@ the daemon's own. The tester sees the whole file before anything is shared.
   prints a link to the issue search and to "new issue" with the template and the title filled in; the tester pastes the file (a URL cannot carry the whole
   report, GitHub limits its length) [H for the exact limit].
 
-## 6. Decisions for the maintainer
-1. **Devices for step 4:** which devices may run the read-only module test now (`CLAUDE.md`: Pro 8, 9, 10 only on the maintainer's word; the SB3 test plan has passed).
-2. **Signing:** use an existing DKMS/MOK key of the distribution when one is found (Ubuntu `/var/lib/shim-signed/mok/`, Fedora `/var/lib/dkms/mok.key`), or skip
-   step 4 under Secure Boot without such a key (enrolling a new MOK is setup the principle of `plan.md` 1 avoids).
-3. **cdev:** load `surface_aggregator_cdev` for the run (root, unloaded afterwards), or only report that it is missing.
-4. **Dry-run length** in step 3 (2 min proposed) and whether thermald etc. are stopped for it (proposed: not stopped, only reported).
-5. **Issues:** one issue per model in this repository (proposed) or comments in `linux-surface#2383` as today.
+## 6. Decisions (maintainer, 25.11.2026)
+1. **Module test:** on every Intel device with a profile (the platform type per profile is in `check.PLATFORM`, from `research/15` 2; a test keeps the
+   table complete); not on AMD, not with 00:04.0 present. The tester is asked once more before the module is loaded.
+2. **Signing:** an existing DKMS key of the distribution (Ubuntu `/var/lib/shim-signed/mok/`, Fedora/Arch `/var/lib/dkms/mok.key`); without one under Secure
+   Boot the module test is skipped with a clear line, no new MOK is enrolled.
+3. **cdev:** loaded for the run when missing and unloaded at the end.
+4. **Dry-run:** 120 s; running writers are reported, not stopped [D, proposal taken].
+5. **Issues:** one issue per model in this repository ("Device report: <product>"); with `gh` logged in the script asks, then comments on the model's issue or
+   opens it as the tester; else it prints the search link and the new-issue link with the template. `--no-issue` skips the step.

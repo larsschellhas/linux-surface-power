@@ -1,0 +1,31 @@
+name: Device report
+description: The result of `sudo ./scripts/surface-power-check` for one Surface model (one issue per model; add a comment if it exists).
+title: "Device report: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing. Please search first whether an issue "Device report: <your model>" exists, and add a comment there instead.
+        Run `sudo ./scripts/surface-power-check` from a checkout of this repository; it writes nothing for good and creates a file
+        `surface-power-check-<model>-<date>.md`. Read it, then paste it below. It contains no serial numbers and no blob content.
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: As in "Settings → About" or `cat /sys/class/dmi/id/product_name`
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Result file
+      description: Paste the whole `surface-power-check-…md` file.
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: What you noticed (fan noise, temperatures, a detach, …), and whether you ran the daemon in control before.
