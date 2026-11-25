@@ -63,6 +63,7 @@ linux-surface installation.
   Laptop 7 Intel, Laptop 7 5G, Laptop Go 2, Laptop Go 3, Go 3 and Go 4 (with `sudo acpidump`), and the Book 3 13".
 - **Dry-runs and Windows comparisons** (HWiNFO PL1/PL2 per mode, on AC and battery) from any SMF Surface.
 - **The read-only module test** of the check on every Intel Surface (most wanted: Pro 8, Pro 9, Pro 10, whose firmware enables the MMIO copy), **sensor readings** from devices whose kernel registry has no temperature node (Pro 7+, Pro 8, Laptop 4 Intel 13", Laptop Go 2/3, Laptop 7, Laptop Studio 1), **Linux on a Snapdragon Surface**, and owners of a **Laptop 3/4 AMD**.
+- **Owners of a Laptop Studio 2:** the fan 2 profile test (`sudo python3 scripts/fan2-profile-test.py results`, about 10 minutes at idle), results in [linux-surface#2392](https://github.com/linux-surface/linux-surface/issues/2392).
 - **Review** of the kernel patches before they go to mainline.
 
 The full list, with what each item unblocks, is in [`docs/plan.md`](docs/plan.md) section 4.
