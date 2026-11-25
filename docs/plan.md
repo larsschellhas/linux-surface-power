@@ -1,6 +1,6 @@
 # Project plan: from the reference device to a rollout on every SMF Surface
 
-Version 1.32, 25.11.2026. This is the single plan of the project: target, work packages, their state, and what comes next. Read it
+Version 1.33, 25.11.2026. This is the single plan of the project: target, work packages, their state, and what comes next. Read it
 first; it is kept current with every change of state (section 7). Evidence markers as in `docs/README.md`: [C] driver code or ACPI
 table, [M] measured, [H] hypothesis, [D] design decision.
 
@@ -85,6 +85,7 @@ kernel interfaces it needs are in the released linux-surface kernel; fail-safe c
 | D9 | TMP sensor node for `MSHW0250` (Laptop 4 Intel, reported on a 15 inch) in `ssam_node_group_sl3_dptf`, which `MSHW0110` (Laptop 3/4 AMD) shares | ⬜ 🙋 | proof per device needed (mask, names, temperature); the group cannot be split by SKU; no `fan_speed` without proof |
 | D10 | Review of [kernel#198](https://github.com/linux-surface/kernel/pull/198) (Laptop Go sensors, fan, `tempX_offset`; neveltyc): not ready by the rules: group `slg1` is shared with Go 2 and Go 3 without proof, the offset frame contradicts the Windows client (H6), ±100 K bound against ±2 K in the corpus | ⏳ | read only, nothing commented; the maintainer decides what to say |
 | D11 | TMP sensor nodes for the other groups without one (Pro 7+ `sp7_dptf`, Pro 8 `sp8`, Laptop 7 `sl7`, Studio 1 `sls1`) | ⬜ 🙋 | no evidence yet that the EC of these devices answers the sensor requests; ask for a reading from one tester per device first |
+| D12 | **Regression report on the Pro 9 Intel after 7.3.5/7.3.6** ([surface-aggregator-module#29, comment 7163344274](https://github.com/linux-surface/surface-aggregator-module/issues/29#issuecomment-7163344274), is-alnilam, 25.11.2026): Type Cover often dead after resume, many cover re-attaches, `failed to query KIP connection state: -19` with a WARN because the KIP hub's update work runs while the SSAM controller is suspended; the tester suspects `has_dptf` (D2) | 🔄 ⏳ 🙋 | evaluated 25.11.2026 (raw note `sp9-kip-resume-sam29-2026-11-25.md`): on `MSHW0343` D2 changes only `has_dptf` [C]; the failing path is in `surface_aggregator_hub.c`, untouched by D2, which has no suspend handling and queues on `system_wq` [C]; without `has_dptf` the tester still sees 2 KIP failures in 3 suspends (0 in 26 on 7.3.4) [M, tester], so D2 is not the sole cause, an amplifying effect is [H]; the SP9 EC answers 0x53 and ARTG in 3–11 ms [M, tester]. Next: tester A/B (7.3.5-1 has D2 without the 7.3.6 PM/ACPI changes; more suspends without `has_dptf`; one traced cycle); hub (and battery) work on `system_freezable_wq` as a separate patch, to agree with qzed; D2 passive around suspend only if the A/B shows it amplifies; dropping `has_dptf` for `MSHW0343` not recommended. Reply draft exists, nothing posted |
 | **E** | **Mainline submission** | ⬜ | |
 | E1 | Submit what is merged in linux-surface: SB3 sensor and fan nodes (D1), DPTF battery data and adapter rating (D2) | ⬜ | cover letter draft exists; after some time in a released linux-surface kernel |
 | E2 | Battery EWMA level and max-charge attribute (after D4) | ⬜ | with or after E1 |
@@ -275,6 +276,7 @@ What contributors can do now (details for testers: README "Try it on your Surfac
 - **Pro 9:** the output of `rdmsr` for `0x17`, `0x611`, `0x615`, `dmesg | grep -i msr` (F10).
 - **Linux on Snapdragon Surfaces** (K) and owners of the AMD Laptops (J2).
 - **Laptop Studio 2, fan 2** (D7): run `sudo python3 scripts/fan2-profile-test.py results` (about 10 minutes at idle) and post the result in [linux-surface#2392](https://github.com/linux-surface/linux-surface/issues/2392).
+- **Pro 9 Intel owners with Type Cover problems after resume** (D12): runs on 7.3.5-1-surface and 7.3.6-1-surface with a count of suspends and cover re-attaches, and one traced cycle ([surface-aggregator-module#29](https://github.com/linux-surface/surface-aggregator-module/issues/29)).
 - **Kernel review** of the linux-surface patches before the mainline submission (E).
 
 ## 5. Rollout matrix per device
@@ -288,7 +290,7 @@ model (`scripts/simulate-sb3.py`) so far. Source: device pages (23.11.2026), pro
 | Book 3 13" | ✅ | 🔄 shared, DMI unconfirmed | 🔄 (G1) | ✅ 9/9 | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | C5 |
 | Pro 7+ | ✅ | 🔄 catalogue SKUs, 1960 confirmed | 🔄 no sensor node in the kernel (D11) | ✅ 12/12 | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | D11 |
 | Pro 8 | ✅ | ✅ | 🔄 debug device; no sensor node (D11) | ⬜ 13/14 (`/71`) | ⬜ MMIO caps at 30 W | ⬜ | 🔄 reads by tester | ⬜ | – | D4, D5, D11, H1 |
-| Pro 9 Intel | ✅ | 🔄 report SKU + catalogue consumer SKU | 🔄 debug device, proximity constant | ✅ | ⬜ MMIO 30/60 W enabled, caps Slider 5 at 30 W [H] | ⬜ | 🔄 control run, 59-h dry-run evaluated (CPU 0.98 % > 0.5 %), no Windows comparison | ⬜ | 🙋 | D4, D5, B8, F3, F10, G4 |
+| Pro 9 Intel | ✅ | 🔄 report SKU + catalogue consumer SKU | 🔄 debug device, proximity constant | ✅ | ⬜ MMIO 30/60 W enabled, caps Slider 5 at 30 W [H] | ⬜ | 🔄 control run, 59-h dry-run evaluated (CPU 0.98 % > 0.5 %), no Windows comparison | ⬜ | 🙋 | D12, D4, D5, B8, F3, F10, G4 |
 | Pro 9 5G | ✅ | ⬜ | ✅ | ⬜ (`9BBB8910/103`) | ➖ | ⬜ | ⬜ | ⬜ | 🙋 | H2, K |
 | Pro 10 | ✅ | ✅ | 🔄 debug device | ✅ | ⬜ MMIO caps at 28 W | ⬜ | 🔄 control run; MMIO series evaluated 23.11. | ⬜ | – | D4, D5, F2 |
 | Pro 10 5G | ✅ | 🔄 catalogue SKUs | 🔄 | ⬜ (`/103–105`) | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | H2 |
@@ -323,6 +325,7 @@ soak is extended to 25.11. (maintainer); the MMIO copy is enabled on a third dev
 the daemon itself (B8, B9, B10) come before the safety suite because they decide what a tester may be asked to run; the sensor nodes
 (D9–D11) and the offset frame (H6) are new and come after the F9 follow-ups.
 
+0. **D12 first (added 25.11.2026, 1.33):** a regression report in a released kernel that names our patch (D2) comes before everything else: get the tester's A/B, then the hub fix (freezable workqueue) with qzed, and D2 passive around suspend only if the A/B shows it amplifies.
 1. **B13, then C6/C4:** C3 ended 24.11.2026 without enough data for C4 (about 20 h awake, three controllers never active, `emergency`
    after a base detach). The MMIO path is checked on the SB3 (B12, 24.11.2026); the base-detach fix is checked (B13, 25.11.2026); the second soak (C6, 24 h on the MMIO path) runs since 25.11.2026 10:29 and the decision on
    `tested = true` (C4). CPU (B8) is accepted for now.
@@ -390,3 +393,4 @@ the daemon itself (B8, B9, B10) come before the safety suite because they decide
 | 25.11.2026 | 1.30: B9 ✅ (PL3 needs a readable 0x615; failing writes logged); report and tester kit probe the RAPL MSRs, the hypervisor flag and the kernel's msr/mce lines for F10. |
 | 25.11.2026 | 1.31: test script `scripts/fan2-profile-test.py` for the Laptop Studio 2 tester (D7, linux-surface#2392), tested on fakes only; `CdevTransport.read` accepts longer answers. |
 | 25.11.2026 | 1.32: test request for the Laptop Studio 2 posted in linux-surface#2392 (comment 7160736118); fan 2 test in help wanted (section 4, README). |
+| 25.11.2026 | 1.33: Pro 9 regression report (surface-aggregator-module#29, 25.11.) evaluated: new D12 (KIP hub work runs while the controller is suspended; `has_dptf` not the sole cause by the tester's own numbers, amplifier [H]); D12 first on the critical path; help wanted for Pro 9 owners. |
