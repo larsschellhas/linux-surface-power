@@ -58,11 +58,11 @@ linux-surface installation.
 
 ### Help wanted 🙋
 
-- **A report from your device** (see "Try it on your Surface" below), so its profile can be confirmed: most profiles are matched by
+- **A check of your device** (`sudo ./scripts/surface-power-check`, see "Try it on your Surface" below), so its profile can be confirmed: most profiles are matched by
   SKUs from a public catalogue and have not seen the device yet. Most wanted: Pro 7+, Pro 10 5G, Pro 11 Intel, Laptop 5, Laptop 6,
   Laptop 7 Intel, Laptop 7 5G, Laptop Go 2, Laptop Go 3, Go 3 and Go 4 (with `sudo acpidump`), and the Book 3 13".
 - **Dry-runs and Windows comparisons** (HWiNFO PL1/PL2 per mode, on AC and battery) from any SMF Surface.
-- **Tests of an MMIO write path** on a Pro 8, Pro 9 or Pro 10, **sensor readings** from devices whose kernel registry has no temperature node (Pro 7+, Pro 8, Laptop 4 Intel 13", Laptop Go 2/3, Laptop 7, Laptop Studio 1), **Linux on a Snapdragon Surface**, and owners of a **Laptop 3/4 AMD**.
+- **The read-only module test** of the check on every Intel Surface (most wanted: Pro 8, Pro 9, Pro 10, whose firmware enables the MMIO copy), **sensor readings** from devices whose kernel registry has no temperature node (Pro 7+, Pro 8, Laptop 4 Intel 13", Laptop Go 2/3, Laptop 7, Laptop Studio 1), **Linux on a Snapdragon Surface**, and owners of a **Laptop 3/4 AMD**.
 - **Review** of the kernel patches before they go to mainline.
 
 The full list, with what each item unblocks, is in [`docs/plan.md`](docs/plan.md) section 4.
@@ -159,31 +159,29 @@ Notes:
 
 ## Try it on your Surface
 
-For any Surface from the Book 3 / Pro 7+ (2020) to the Laptop 7 / Pro 11 generation (2024). The report reads, writes nothing and needs
-no root. It contains no blob content and no serial numbers. A SHA-256 hash tells blob versions apart.
+For any Surface from the Book 3 / Pro 7+ (2020) to the Laptop 7 / Pro 11 generation (2024). One command runs every check your device needs
+and writes nothing for good (spec [`docs/specs/tester-kit.md`](docs/specs/tester-kit.md)):
 
 ```bash
 git clone https://github.com/larsschellhas/linux-surface-power
 cd linux-surface-power
-PYTHONPATH=src python3 -m surface_power.tools.report
+sudo ./scripts/surface-power-check
 ```
 
-Python 3.11 or newer is needed. Nothing has to be installed. Please post the output in
-[linux-surface#2383](https://github.com/linux-surface/linux-surface/issues/2383) and add your Surface model.
+Python 3.11 or newer is needed; nothing is installed. The script says what it will do and asks before it starts:
+- the report as root, with the EC power data (it loads `surface_aggregator_cdev` for the run if it is missing and unloads it again);
+- a dry-run of the daemon for two minutes, in the sandbox of the packaged dry-run unit;
+- on Intel devices, after one more question, a **read-only** test of the kernel module `surface_rapl_mmio`: built for your running kernel
+  (it needs the kernel headers, `make` and `gcc`), loaded with `allow_write=0`, compared with the register, unloaded again. Under Secure Boot it
+  is signed with your distribution's DKMS key if there is one; otherwise this step is skipped. Loading it marks the kernel as tainted until the
+  next boot.
 
-The report shows:
-- whether the device has SMF and a blob, and which block types the blob uses;
-- whether the engine can run it (`usable for control`), and which blocks it does not support yet;
-- which inputs Linux provides (temperatures, slider, batteries, posture, EC power data) and which outputs it can write.
+It never writes a power limit, installs or enables a service, changes your Secure Boot keys, or sends anything anywhere. The result is one file
+`surface-power-check-<model>-<date>.md`, without serial numbers and without blob content. Please read it, then add it to the issue
+"Device report: &lt;your model&gt;" of this repository (create it from the template if it does not exist yet). With the GitHub CLI (`gh`) logged
+in, the script offers to do that for you.
 
-**Optional: a few minutes of dry-run.** This computes the limits the way Windows would and writes nothing:
-
-```bash
-PYTHONPATH=src python3 -m surface_power.daemon --dry-run --run-dir /tmp/sp-run --state-dir /tmp/sp-state
-```
-
-Stop it with Ctrl-C. `/tmp/sp-run/status.json` then shows the computed limits and the controller states. Without root, the EC power data
-stay invalid unless your kernel has kernel#195, so some limits show their fallback values.
+Without root, the report alone also works and writes nothing: `PYTHONPATH=src python3 -m surface_power.tools.report`.
 
 ## Confidentiality
 
