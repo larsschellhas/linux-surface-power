@@ -70,8 +70,8 @@ A device can be controlled only when every output of its blob is written: a blob
 | `2DD6960F/1` | I_SLIDER | power slider 1–10 | `platform_profile` × AC | provided | PL1, PL2, dGPU |
 | `2E8B14C2/505` | – | SAM sensor 5 | hwmon `surface_thermal` temp5 | provided | – |
 | `2E8B14C2/509` | – | SAM sensor 9 | hwmon `surface_thermal` temp9 | provided | PL1 |
-| `2E8B14C2/605` | – | KIP (base) sensor 5 | hwmon `surface_thermal` (base) temp5 | provided | – |
-| `2E8B14C2/609` | – | KIP (base) sensor 9 | hwmon `surface_thermal` (base) temp9 | provided | dGPU |
+| `2E8B14C2/605` | – | KIP (base) sensor 5 | hwmon `surface_thermal` (base) temp5; absent while the base is detached (no emergency, supervisor 4.1) | provided | – |
+| `2E8B14C2/609` | – | KIP (base) sensor 9 | hwmon `surface_thermal` (base) temp9; absent while the base is detached (no emergency, supervisor 4.1) | provided | dGPU |
 | `8060B17F/1` | I_POSTURE | posture 1–5 | `surface_dtx` + lid | provided | PL1, dGPU |
 
 ## Outputs

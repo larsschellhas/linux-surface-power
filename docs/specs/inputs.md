@@ -1,6 +1,6 @@
 # Spec: input adapters
 
-Version 0.2, 16.11.2026. Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC-I3. Markers as in `blob-format.md`.
+Version 0.3, 25.11.2026 (0.3: base sensors absent and looked up again, B13). Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC-I3. Markers as in `blob-format.md`.
 
 ## 1. Interface
 - **Adapter role:** each adapter owns one or more device input channels (`GUID/channel`). On `read(now_ms)` it returns `{channel: value | None}` in blob units. `None` means invalid.
@@ -13,7 +13,7 @@ Version 0.2, 16.11.2026. Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC
 | Interface | Channel | Meaning | Linux source | Conversion |
 |---|---|---|---|---|
 | `2E8B14C2` temperature | 501 – 599 | SAM sensor `iid = ch − 500` | hwmon `surface_thermal`, `temp<iid>_input` (on the SB3 `temp9` is labelled `I_VTS1` = channel 509 [M]) | `0.1 K = 2731 + m°C / 100` |
-| | 601 – 699 | KIP (base) sensor `iid = ch − 600` | hwmon `surface_thermal` whose SSAM device is `01:03:02:00:02` (target KIP, below the base hub). On the SB3 this needs the registry node and a `surface_temp` match entry for KIP (both not upstream yet, tested 15.11.2026 [M]); otherwise invalid | 0.1 K |
+| | 601 – 699 | KIP (base) sensor `iid = ch − 600` | hwmon `surface_thermal` whose SSAM device is `01:03:02:00:02` (target KIP, below the base hub). The nodes are in linux-surface since kernel#190 (merged 17.11.2026; built in from 7.3.6-1-surface [M]). They exist only while the base is attached; without the device the channel is **absent** (`supervisor.md` 4.1), and the device is looked up again (at most every 5 s, name `surface_thermal`, SSAM category 03, target 02), because its hwmon index can change after a re-attach [M] | 0.1 K |
 | | 101, 102 | GPU, CPU temperature | 102: hwmon `coretemp` "Package id 0"; 101: NVML on the Laptop Studio (section 8.10) | as above |
 | `2DD6960F` system state | 1 | slider state 1 – 10 | `platform_profile` × AC/battery (section 3) | integer |
 | `28B7BD85` power tracker | 1 / 101 | charge level of battery 1 / 2 in % | `power_supply` `BAT1` / `BAT2` `capacity` [M: BAT1 is the display part at 8.0 V, BAT2 the base at 12.6 V] | % |

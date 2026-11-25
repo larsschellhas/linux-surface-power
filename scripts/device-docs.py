@@ -170,7 +170,7 @@ def input_info(ref: ChannelRef):
         if 500 < c < 600:
             return ("", f"SAM sensor {c - 500}", f"hwmon `surface_thermal` temp{c - 500}", "sysfs")
         if 600 < c < 700:
-            return ("", f"KIP (base) sensor {c - 600}", f"hwmon `surface_thermal` (base) temp{c - 600}", "sysfs")
+            return ("", f"KIP (base) sensor {c - 600}", f"hwmon `surface_thermal` (base) temp{c - 600}; absent while the base is detached (no emergency, supervisor 4.1)", "sysfs")
         if c == 101:
             return ("", "dGPU temperature", "NVML", "nvml")
         if c == 102:

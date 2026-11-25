@@ -1,6 +1,6 @@
 # Spec: supervisor
 
-Version 0.1, 14.11.2026. Implements FR-D1 – FR-D3, FR-S1 – FR-S7, FR-M4, NFR-5. Tests: AC-S1 – AC-S8. Markers as in `blob-format.md`.
+Version 0.2, 25.11.2026 (0.2: absent inputs, 2.5 and 4.1, work package B13). Implements FR-D1 – FR-D3, FR-S1 – FR-S7, FR-M4, NFR-5. Tests: AC-S1 – AC-S8. Markers as in `blob-format.md`.
 It takes over the proven parts of the prototype service (`../research/06-prototype-and-related-work.md`).
 
 ## 1. States
@@ -37,7 +37,10 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
    - No SMF or no blob: idle, with a clear message (FR-D2).
 4. **Blob check:** the blob is loaded and checked (`blob-format.md`). Any error leads to idle with the error (G-4).
 5. **Missing inputs:** the daemon reports every input the blob reads but this system never provides. Each one is checked against the outputs it can reach, directly or through internal nodes:
-   - **It reaches only log-only outputs:** allowed. On the SB3 these are the base sensors 605/609, which reach only the dGPU limit and the thermal-policy outputs. Their controllers stay OFF.
+   - **It reaches only log-only outputs:** allowed. Their controllers stay OFF.
+   - **Absent inputs (4.1)** are classified the same way, with one difference: the thermal actions (`110DF2A4/1, /2`) do not count as written for them. On the SB3
+     the base sensors 605/609 reach only the dGPU limit and the thermal actions [C], so a start with the base detached is allowed; the dGPU stand-in waits for 609
+     and starts when it is back. (Before 25.11.2026 a missing base sensor was "unavailable" and the thermal actions forced dry-run, contrary to this text.)
    - **It reaches a limit that Linux writes:** control is not allowed, only dry-run, and the reason is logged. Otherwise the blob would run on a fallback that is meant for a lost sensor, not for normal operation.
    - **Documented deviation with a Windows fallback:** never blocks control. This is the case for the display brightness (DV-3).
    - **Gets a Linux target later:** once an output gets one (e.g. a dGPU stand-in), its inputs become required automatically.
@@ -83,10 +86,26 @@ These do not depend on the blob. They are generous, so that Windows-parity behav
 |---|---|---|
 | Skin hot | any SAM skin channel the blob uses as a controller input ≥ 60 °C for 10 s | below 55 °C for 60 s |
 | CPU hot | package temperature ≥ 105 °C for 10 s (TjMax is 100 °C on the SB3; the hardware already throttles there) | below 95 °C for 60 s |
-| Core inputs lost | a controller input or the slider stays invalid for 60 s. Inputs this system does not provide from the start (SB3: base sensors 605/609) are logged at start and do not count; their controllers stay OFF | valid again for 10 s |
+| Core inputs lost | a controller input or the slider stays invalid for 60 s while its source is present. Inputs this system does not provide from the start and absent inputs (4.1) do not count; their controllers stay OFF and the blob runs on its block defaults. An absent input that reaches a written limit counts as lost | valid again for 10 s, or the input becomes absent |
 
 In emergency, firmware values are written and the engine keeps running in dry-run. The skin channels are the process values of
 the blob's controllers that are temperatures; the CPU channel is the `coretemp` package temperature.
+
+### 4.1 Absent inputs (B13) [C Windows client lifetime, D Linux rule]
+Some inputs come from a part that can be taken off. On the Surface Book 3 the base sensors (`2E8B14C2/601-699`, SSAM target KIP `01:03:02:…`, hwmon `surface_thermal`
+below the base hub) exist only while the base is attached. Windows removes the base thermal client together with the base (`SurfaceHotPlug`), so its channels are
+offline and the blob runs on its block defaults; there is no device-wide fallback in the SMF core [C, raw note `b13-basis-sensoren-2026-11-24.md` 2, 12].
+- **Absent:** a base channel the blob reads whose source device is not present. It is invalid (block defaults: controller OFF with `U_off`, window comparator 1, min
+  over the remaining nodes) and does not count for "core inputs lost". The transition is logged once; `status.json` lists it as `inputs_absent`.
+- **Lost:** a channel whose source device is present but whose reads fail (e.g. `EIO`). It counts as before (60 s, then emergency).
+- **Look-up:** the input adapter looks a missing or vanished base source up again, at most every 5 s, and takes only a `surface_thermal` device with SSAM category `03`
+  and target `02`; the kernel may give the re-created device another hwmon index and the old index to another device (7.3.6-1-surface: `hwmon5` → `hwmon11`, `hwmon5`
+  then a fan [M, 24.11.2026]). A source that is back is read at once; the transition is logged once.
+- **Emergency:** a running emergency ends 10 s after its inputs are valid or absent (maintainer's decision B13-7, 24.11.2026).
+- **Reach:** an absent input that reaches a written limit (2.5, without the thermal actions) counts as lost; for the SB3 the base sensors reach no limit [C].
+- **Not used:** the posture (3 = no valid form factor) as a criterion: on 19.11.2026 it was 3 for one second while the sensors stayed missing [M].
+- Only the SB3 13" and 15" blobs of the corpus read base channels [C, 24.11.2026]. Tested on a fake sysfs (`tests/test_base_detach.py`); a real detach with the
+  daemon in control is open.
 
 ## 5. Foreign changes (FR-S5)
 - **Detection:** before each write cycle, the output stage compares each owned target with the last value it wrote or read back. A difference beyond the hardware rounding (PL1/PL2/psys: 0.2 W) is a foreign change. A changed PL1 time window is one too.

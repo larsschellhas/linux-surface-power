@@ -1,6 +1,6 @@
 # Deviations from Windows behaviour
 
-Version 0.3, 24.11.2026 (DV-8 after the module tests on the SB3, DS-5; 0.3: the MMIO path implemented). Implements G-3, NFR-10, AC-X3. Every known or possible difference between this implementation and Windows'
+Version 0.4, 25.11.2026 (DV-8 after the module tests on the SB3, DS-5; 0.3: the MMIO path implemented; 0.4: DV-2 and DV-12 for absent base sensors, B13). Implements G-3, NFR-10, AC-X3. Every known or possible difference between this implementation and Windows'
 SMF is listed here. Intended improvements are opt-in and off by default; none exists yet (ideas in `../requirements/ideas.md`).
 
 ## 1. Unavoidable (no Linux counterpart)
@@ -8,7 +8,7 @@ SMF is listed here. Intended improvements are opt-in and off by default; none ex
 | ID | Difference | Effect | Default |
 |---|---|---|---|
 | DV-1 | Temperatures are polled every second. Windows reads them only when the EC trip point (42 °C on the SB3) is exceeded, and holds the last value below it. | None for control: every controller is OFF far above 42 °C. Below the trip point, Linux sees current values where Windows holds an old one. | always |
-| DV-2 | KIP/base temperatures (600 + iid) are not available on the SB3 with current kernels. They need a registry node and a `surface_temp` match entry for KIP (prototype works, 15.11.2026). | Without them, the dGPU skin loop reads an invalid input. That output is log-only anyway. | until the kernel patches land |
+| DV-2 | KIP/base temperatures (600 + iid) exist only while the SB3 base is attached (kernel nodes since kernel#190, 17.11.2026). Without the base they are absent (`supervisor.md` 4.1): invalid, block defaults, no emergency; as on Windows, where the base thermal client is removed with the base [C]. | Controller 4 (dGPU) OFF, the base part of the thermal actions gives no request; the limits stay in control. The look-up after a re-attach takes up to 5 s. | while the base is detached |
 | DV-3 | Display brightness in nits is not available. | PL4 uses 3 W display power (the Windows fallback without a value). At most ~3 W difference in PL4. | channel invalid; optional profile value |
 | DV-4 | Slider states 8 – 10 (game mode, mixed reality, service flag) do not exist on Linux. Low-power on AC maps to Recommended. | Linux never selects these states. | fixed mapping (OD-4) |
 | DV-5 | The dGPU limit, WTMF and fan outputs have no Linux target. On the SB3 (GTX 1660 Ti, driver 595), `nvidia-smi -pl` is refused with or without persistence mode, and Dynamic Boost (`nvidia-powerd`) needs Ampere or newer; the driver reports it as not supported. | Computed and logged only. A clock-cap stand-in is a backup concept (I-4). | log-only |
@@ -18,6 +18,7 @@ SMF is listed here. Intended improvements are opt-in and off by default; none ex
 | DV-9 | PL3 (`0B7B5350/59`) is written only where a profile switches it on. Windows writes it on every Intel device with a CPU client. Verified devices without a matching profile log it only. | Peak platform power keeps the firmware value there (on the SB3 that would be 65 W instead of 100 W on AC). | per profile (`outputs.md` 4) |
 | DV-10 | The SAM temperature sensors (`2E8B14C2/505, 509`, …) have a Linux source only where the kernel registry instantiates the TMP sensor node `01:03:01:00:02` (`surface_temp`, hwmon `surface_thermal`). In linux-surface `v7.3-surface-devel` (read 23.11.2026) it is missing for the Pro 7+, Pro 8, Laptop 3/4 AMD, Laptop 4 Intel, Laptop 7, Laptop Go 1/2/3 and Laptop Studio 1 [C]. Reported on a Laptop 4 Intel 15" (tester, 20.11.2026, stock kernel; the registry is the same on linux-surface). | The input is invalid, so every controller that reads it falls back to its block default and the daemon refuses control where the input reaches a written output. No substitute exists (the requests work through the debug device on the reporting device [M, one tester], but the daemon does not read the sensors that way). | until kernel nodes exist (`plan.md` D9, D10) |
 | DV-11 | A SAM write (fan, charging, sensor offset, PROCHOT) is sent with flags 0: success means the request was sent and acknowledged on the link, not that the EC handled it. "Written" in the status and on the device pages therefore says "sent". The effect was measured for `FAN 0x0e`/`0x0f` (SB3), `FAN 0x0b` (Laptop Studio 2, tester) and for the offset `TMP 0x24` only with a different frame than ours (open, `outputs.md` 9.8). | No read-back; a request the EC ignores is not noticed. | always |
+| DV-12 | Windows keeps the last value when a sensor read fails or is out of range (the client sends no update) and takes a client's channels offline together on a client failure or removal [C, raw note `b13-basis-sensoren-2026-11-24.md` 2]. Linux marks a failing channel invalid at once. | Linux falls back to the block defaults earlier on read errors. Not reproduced: an old, cool value would stay valid for ever on a broken sensor [D]. | always |
 
 ## 2. Unknown details, chosen by us
 
@@ -27,7 +28,7 @@ SMF is listed here. Intended improvements are opt-in and off by default; none ex
 | DH-2 | When the timer starts and stops | after every run, it follows the `active` flag of that run; first timer run one period after the start | Windows ETW trace of the SMF core |
 | DH-3 | Timer run and input change in the same second | one timer run | as above |
 | DH-4 | Internal nodes shared between instances 0 and 1 | shared | no blob uses instance 0 |
-| DH-5 | Input readings outside the channel range | invalid | Windows client behaviour on range errors |
+| DH-5 | Input readings outside the channel range | invalid | Windows client behaviour on range errors: the value is dropped and the last one kept [C client, H core], DV-12 |
 | DH-6 | Cores 3.141 – 3.158 | `classic` variant | read such a core, if one turns up |
 | DH-7 | Charge rate while charging | 0 | read the power-tracker client |
 | DH-8 | Elapsed time of the first EWMA update (engine 5.5). Windows counts it from loading the blob. | counted from the first run, so the first update keeps the default | Windows ETW trace |
