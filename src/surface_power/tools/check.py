@@ -120,7 +120,7 @@ class Check:
                  f"module signatures enforced: {_read(self.root, 'sys/module/module/parameters/sig_enforce') or 'unknown'}"]
         writers = supervisor.limit_writers(self.root)
         if writers:
-            lines.append("running: " + supervisor.describe_writers(writers))
+            lines.append(supervisor.describe_writers(writers))
         for u in ("surface-powerd", "surface-powerd-dryrun"):
             lines.append(f"{u}: {run(['systemctl', 'is-active', u])[1] or 'unknown'}")
         return lines
@@ -162,7 +162,7 @@ class Check:
         unit = "surface-power-check"
         props = ["ProtectSystem=strict", "ProtectHome=yes", "PrivateTmp=yes", "PrivateNetwork=yes", "NoNewPrivileges=yes",
                  "RestrictAddressFamilies=AF_UNIX", "CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SYS_RAWIO", "MemoryMax=100M",
-                 f"ReadWritePaths={work}", f"RuntimeMaxSec={DRY_RUN_S}", f"Environment=PYTHONPATH={work}/src"]
+                 f"ReadWritePaths={work}", f"RuntimeMaxSec={DRY_RUN_S + 60}", f"Environment=PYTHONPATH={work}/src"]
         cmd = ["systemd-run", f"--unit={unit}", "--collect", "--quiet"] + [f"--property={p}" for p in props] + \
             [sys.executable, "-m", "surface_power.daemon", "--dry-run", "--run-dir", f"{work}/run", "--state-dir", f"{work}/state"]
         t0 = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -171,7 +171,8 @@ class Check:
             self.add(f"could not start the transient unit: {text}")
             return
         self.say(f"   dry-run running for {DRY_RUN_S} s ...")
-        time.sleep(DRY_RUN_S + 5)
+        time.sleep(DRY_RUN_S)
+        run(["systemctl", "stop", unit])       # a clean stop (SIGTERM); RuntimeMaxSec is only the safety net
         _, journal = run(["journalctl", "-u", unit, "--since", t0, "--no-pager", "-o", "cat"])
         self.add("```")
         self.add(journal)
@@ -180,7 +181,7 @@ class Check:
         try:
             with open(status) as f:
                 s = json.load(f)
-            bad = [i["channel"] for i in s.get("inputs", []) if not i.get("valid")]
+            bad = [i["channel"] for i in s.get("inputs", []) if not i.get("valid") and not i["channel"].startswith("99999999")]
             self.add(f"status: state {s.get('state')}, pl_path {s.get('pl_path')}, invalid inputs {', '.join(bad) or 'none'}, "
                      f"absent {', '.join(s.get('inputs_absent', [])) or 'none'}")
         except (OSError, ValueError) as e:

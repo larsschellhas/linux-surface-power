@@ -31,3 +31,6 @@ __pycache__/
 .vscode/
 build/
 *.egg-info/
+
+# Result files of scripts/surface-power-check (they go into an issue, not into the repository)
+surface-power-check-*.md
