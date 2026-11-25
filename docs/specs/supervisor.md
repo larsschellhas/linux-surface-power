@@ -39,7 +39,8 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
 5. **Missing inputs:** the daemon reports every input the blob reads but this system never provides. Each one is checked against the outputs it can reach, directly or through internal nodes:
    - **It reaches only log-only outputs:** allowed. Their controllers stay OFF.
    - **Absent inputs (4.1)** are classified the same way, with one difference: the thermal actions (`110DF2A4/1, /2`) do not count as written for them. On the SB3
-     the base sensors 605/609 reach only the dGPU limit and the thermal actions [C], so a start with the base detached is allowed; the dGPU stand-in waits for 609
+     the base sensors 605/609 reach only the dGPU limit and the thermal actions [C], so a start with the base detached is allowed (approved by the
+     maintainer 25.11.2026); the dGPU stand-in waits for 609
      and starts when it is back. (Before 25.11.2026 a missing base sensor was "unavailable" and the thermal actions forced dry-run, contrary to this text.)
    - **It reaches a limit that Linux writes:** control is not allowed, only dry-run, and the reason is logged. Otherwise the blob would run on a fallback that is meant for a lost sensor, not for normal operation.
    - **Documented deviation with a Windows fallback:** never blocks control. This is the case for the display brightness (DV-3).
@@ -104,8 +105,7 @@ offline and the blob runs on its block defaults; there is no device-wide fallbac
 - **Emergency:** a running emergency ends 10 s after its inputs are valid or absent (maintainer's decision B13-7, 24.11.2026).
 - **Reach:** an absent input that reaches a written limit (2.5, without the thermal actions) counts as lost; for the SB3 the base sensors reach no limit [C].
 - **Not used:** the posture (3 = no valid form factor) as a criterion: on 19.11.2026 it was 3 for one second while the sensors stayed missing [M].
-- Only the SB3 13" and 15" blobs of the corpus read base channels [C, 24.11.2026]. Tested on a fake sysfs (`tests/test_base_detach.py`); a real detach with the
-  daemon in control is open.
+- Only the SB3 13" and 15" blobs of the corpus read base channels [C, 24.11.2026]. Tested on a fake sysfs (`tests/test_base_detach.py`) and with a real detach on the SB3 15" 25.11.2026 (7.3.6-1-surface, daemon in control, raw `b13-messung-2026-11/results/b13-check-20261125-0959.txt`): 605/609 absent at 10:00:17, back at 10:00:41 under `hwmon8`, 90 of 90 samples in control, no emergency [M].
 
 ## 5. Foreign changes (FR-S5)
 - **Detection:** before each write cycle, the output stage compares each owned target with the last value it wrote or read back. A difference beyond the hardware rounding (PL1/PL2/psys: 0.2 W) is a foreign change. A changed PL1 time window is one too.

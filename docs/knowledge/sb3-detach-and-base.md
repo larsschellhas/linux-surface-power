@@ -46,11 +46,12 @@ Surface Book 3 15" (reference device, firmware and drivers as on this machine). 
   `Loading driver`) [M]. Whether the GPU is usable afterwards was not tested; whether removing the PCI device before the latch opens avoids the Xid was not tested (variant B, prepared in
   `raw/arbeitsordner/b13-messung-2026-11/`).
 
-## What the daemon does since B13 (25.11.2026, commit 22d4f62; tested on a fake sysfs, not yet by a real detach)
+## What the daemon does since B13 (25.11.2026, commit 22d4f62; tested on a fake sysfs and by a real detach)
 - The base channels 601-699 are looked up again when their device is gone (`ENOENT`, `ENODEV`, `ENXIO`, another device or name under the cached index) or missing, at most
   every 5 s; only a `surface_thermal` device with SSAM category `03` and target `02` is taken. A base channel without its device is **absent**: invalid (block defaults),
   not counted for the emergency rule; a running emergency ends 10 s later. A read error of a present device still counts as lost (`supervisor.md` 4.1).
 - The dGPU stand-in waits for an absent 609 at start and starts when it is back.
+- Real detach, 25.11.2026: (7.3.6-1-surface, daemon in control, raw `b13-messung-2026-11/results/b13-check-20261125-0959.txt`): 605/609 absent at 10:00:17, back at 10:00:41 under `hwmon8`, 90 of 90 samples in control, no emergency [M]. The detach again gave `Xid 79` and `Xid 154` for the dGPU (not part of B13).
 
 ## What the daemon did before B13
 - `HwmonTemperatures` resolves its paths once at start (`adapters/inputs.py`). After a detach 605/609 stay invalid, and after 60 s the supervisor's rule "controller inputs invalid for 60 s"
