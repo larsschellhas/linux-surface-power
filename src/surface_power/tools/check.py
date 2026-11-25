@@ -79,7 +79,8 @@ def issue_links(product: str) -> tuple[str, str]:
     """(search link, new-issue link with the template and the title); the body is pasted by the tester (a URL cannot carry the report)."""
     from urllib.parse import quote
     title = issue_title(product)
-    search = f"https://github.com/{REPO_SLUG}/issues?q={quote(f'is:issue in:title \"{title}\"')}"
+    query = 'is:issue in:title "' + title + '"'          # built outside the f-string: Python 3.11 has no backslash there (PEP 701)
+    search = f"https://github.com/{REPO_SLUG}/issues?q={quote(query)}"
     new = f"https://github.com/{REPO_SLUG}/issues/new?template=device-report.yml&title={quote(title)}"
     return search, new
 
