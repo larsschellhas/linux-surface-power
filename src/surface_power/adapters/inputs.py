@@ -410,7 +410,8 @@ class CdevTransport:
         """The node exists, but this user may not open it."""
         return os.path.exists(self.path) and not os.access(self.path, os.W_OK) and os.geteuid() != 0
 
-    def _call(self, tc: int, tid: int, cid: int, iid: int, payload: bytes, want_response: bool) -> bytes | None:
+    def _call(self, tc: int, tid: int, cid: int, iid: int, payload: bytes, want_response: bool,
+              capacity: int = 64) -> bytes | None:
         """One request. Returns the answer (b"" without one), or None on any error or a non-zero status."""
         import ctypes
         import fcntl
@@ -430,14 +431,14 @@ class CdevTransport:
         except OSError:
             return None
         try:
-            out = ctypes.create_string_buffer(64)
+            out = ctypes.create_string_buffer(capacity)
             data = ctypes.create_string_buffer(bytes(payload), max(1, len(payload)))
             r = Req(tc=tc, tid=tid, cid=cid, iid=iid, flags=1 if want_response else 0)   # flags 0: write, no response
             r.payload.data = ctypes.addressof(data)
             r.payload.length = len(payload)
             if want_response:
                 r.response.data = ctypes.addressof(out)
-                r.response.length = 64
+                r.response.length = capacity
             fcntl.ioctl(fd, ioctl_request, r)
             if r.status != 0:
                 return None
@@ -452,9 +453,9 @@ class CdevTransport:
         not show that the EC knows the command."""
         return self._call(tc, tid, cid, iid, payload, False) is not None
 
-    def read(self, tc: int, cid: int, iid: int = 1, tid: int = 1) -> bytes | None:
-        """A read request with a response, for any target category."""
-        return self._call(tc, tid, cid, iid, b"", True)
+    def read(self, tc: int, cid: int, iid: int = 1, tid: int = 1, capacity: int = 64) -> bytes | None:
+        """A read request with a response, for any target category. `capacity`: the longest answer that is accepted."""
+        return self._call(tc, tid, cid, iid, b"", True, capacity)
 
 
 class RequestGate:
