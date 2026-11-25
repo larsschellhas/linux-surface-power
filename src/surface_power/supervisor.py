@@ -78,6 +78,22 @@ def thermald_running(root: str = "/") -> bool:
 LIMIT_WRITERS = ("thermald", "tuned", "tlp", "power-profiles-")   # comm is cut at 15 characters: power-profiles-daemon
 
 
+# What each of them changes [M: strings of power-profiles-daemon 0.21 on the SB3, 25.11.2026: platform_profile, EPP, EPB, no powercap].
+WRITER_WHAT = {
+    "thermald": "it writes the power limits (RAPL) itself",
+    "tuned": "it changes CPU frequency and power settings",
+    "tlp": "it changes CPU frequency, the platform profile and power settings",
+    "power-profiles-daemon": "it sets the platform profile (the blob's slider input) and the CPU energy preference (EPP/EPB), "
+                             "not the power limits",
+}
+
+
+def describe_writers(writers: list[str]) -> str:
+    """One line for the log and the report: who runs and what it changes."""
+    return "; ".join(f"{w} running: {WRITER_WHAT.get(w, 'it changes power settings')}" for w in writers) + \
+        "; measured values then differ from what the blob computes for a fixed slider"
+
+
 def limit_writers(root: str = "/") -> list[str]:
     """Names of running processes that write power limits themselves (thermald, tuned, TLP, power-profiles-daemon)."""
     found = set()

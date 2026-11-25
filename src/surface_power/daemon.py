@@ -222,7 +222,13 @@ class Daemon:
         self.dgpu_observe = bool(p and p.dgpu_clock_cap_dry_run) and not (args.dgpu_clock_cap or (p and p.dgpu_clock_cap))
         if (args.dgpu_clock_cap or (p and (p.dgpu_clock_cap or p.dgpu_clock_cap_dry_run))) and DGPU in self.graph.outputs:
             self.dgpu = ClockCapStandIn(root, dry_run=(self.mode != "control") or self.dgpu_observe, probe=self.gpu_probe)
-            if not self.dgpu_observe:
+            if self.dgpu.pci is None:
+                # A model variant without an NVIDIA dGPU (e.g. a Surface Book 3 13" i5): the dGPU limit has nothing to act on. It
+                # counts as not needed instead of as a written output whose stand-in does nothing (found in the report review, 25.11.2026).
+                self.not_needed[DGPU] = "no NVIDIA dGPU in this machine: the dGPU limit has nothing to act on"
+                self.dgpu = None
+                written.add(DGPU)
+            elif not self.dgpu_observe:
                 written.add(DGPU)
 
         # Inputs this system never provides (spec supervisor 2). They are fine as long as they only reach log-only outputs
@@ -230,7 +236,9 @@ class Daemon:
         # fallback the designers did not intend for normal operation: then control is not allowed, only dry-run.
         self.mode_reason = ""
         lines = self.loaded.parsed.algorithms
-        blocking = {ref: [o for o in outputs_reached_by(ref, lines) if o in written]
+        # An output that Linux does not need (spec outputs 10) is covered, not written: a missing input that reaches only such an
+        # output does not block control (found in the report review, 25.11.2026: 110DF2A4/3 blocked the Laptop 7 and others).
+        blocking = {ref: [o for o in outputs_reached_by(ref, lines) if o in written and o not in self.not_needed]
                     for ref in self.reader.unavailable if ref not in ACCEPTED_ABSENT}
         blocking = {ref: outs for ref, outs in blocking.items() if outs}
         # A missing input of the dGPU limit only switches the stand-in off; the other limits are still controlled
@@ -258,7 +266,7 @@ class Daemon:
             self.dgpu_note = (f"dGPU stand-in waits for input {', '.join(map(str, sorted(self.dgpu_wait)))} "
                               "(absent: base detached?); it starts when the input is back")
         # Every output must have a Linux path before the blob may control (spec supervisor 2.6) [D].
-        if not self.dgpu and not self.dgpu_pending:
+        if not self.dgpu and not self.dgpu_pending and DGPU not in self.not_needed:
             written.discard(DGPU)
         self.unwritten = sorted(set(self.graph.outputs) - written)
         reasons = []
@@ -283,6 +291,9 @@ class Daemon:
                 reasons.append(f"PL4 needs valid EC inputs ({', '.join(str(r) for r in missing)}) within {p.pl4_ec_wait_s:g} s "
                                "after start and they are still invalid (profile option pl4_requires_ec; needs root and "
                                "surface_aggregator_cdev, or the kernel's dptf attributes)")
+        # What blocks control on this machine, whatever the mode (the report shows it, spec tools 3).
+        self.control_reasons = list(reasons)
+        self.blocking_inputs = dict(blocking)
         if reasons and self.mode == "control":
             self.mode_reason = "; ".join(reasons)
             self.mode = self.state = "dry-run"
@@ -377,9 +388,8 @@ class Daemon:
 
     def _warn_writers(self) -> None:
         if self.writers:
-            self.log("warning", f"{', '.join(self.writers)} running: it writes power limits itself, so the limits in "
-                                "sysfs differ from the computed ones" + (" (this run writes nothing)" if self.mode != "control"
-                                                                          else ""))
+            self.log("warning", supervisor.describe_writers(self.writers)
+                     + (" (this run writes nothing)" if self.mode != "control" else ""))
 
     def _check_mmio(self, now_ms: int) -> None:
         """Every 60 s: read the copies of PL1/PL2 (spec outputs 3.3, DV-8; kernel-mmio-daemon 8.3, 9). The MMIO copy comes from the

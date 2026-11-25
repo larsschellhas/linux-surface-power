@@ -115,6 +115,9 @@ class DaemonTest(unittest.TestCase):
         """A controller on a sensor this system never provides (SB3: base sensor 609) stays OFF; that is logged, not an emergency."""
         with open(self.blob, "w") as f:
             f.write(blob_text(absent_sensor=True))
+        from test_gpu import PCI
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/vendor", "0x10de")        # an SB3 15" with its dGPU
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/class", "0x030200")
         d = self.start("--control", "--allow-partial-outputs")     # the dGPU limit loses its stand-in here
         # Since B13 (24.11.2026) a missing base sensor is absent (its device may come back), not unavailable (spec supervisor 4.1).
         self.assertIn(daemon.ChannelRef(TEMP, 609), d.reader.absent)
@@ -137,6 +140,17 @@ class DaemonTest(unittest.TestCase):
         d.cycle(0)
         self.assertEqual(self.fs.read(PL1), "30000000")                     # nothing written
         self.assertIn("2E8B14C2/608", d.mode_reason)
+        d.stop()
+
+    def test_missing_input_reaching_only_a_not_needed_output_does_not_block(self):
+        """110DF2A4/3 is not needed on Linux (spec outputs 10): an input that reaches only it does not force dry-run (review 25.11.)."""
+        with open(self.blob, "w") as f:
+            f.write(blob_text(extra=["1,0,0,026CCFCC-A52A-4DB1-8B49-D2BAAFCAD329,41,1,1,2E8B14C2-26D6-4119-A62E-9D108C4DDC2A,550,"
+                                     "110DF2A4-5995-473C-92FD-3CAC40EE2E6C,3,1"]))
+        d = self.start("--control")
+        self.assertIn(daemon.ChannelRef(TEMP, 550), d.reader.unavailable)
+        self.assertEqual(d.mode, "control")
+        self.assertNotIn(daemon.ChannelRef(TEMP, 550), d.blocking_inputs)
         d.stop()
 
     def test_lost_controller_input_is_an_emergency(self):
@@ -452,7 +466,9 @@ class DaemonTest(unittest.TestCase):
                 "--no-ec", "--dry-run"]
         d = daemon.Daemon(daemon.parse_args(args), monitor.Journal(stream=out))
         d.cycle(0)
-        self.assertIn("power-profiles-daemon, thermald running", out.getvalue())
+        self.assertIn("power-profiles-daemon running: it sets the platform profile", out.getvalue())
+        self.assertIn("not the power limits", out.getvalue())                 # ppd 0.21 has no powercap path [M]
+        self.assertIn("thermald running: it writes the power limits (RAPL) itself", out.getvalue())
         self.assertEqual(self.status()["competing_writers"], ["power-profiles-daemon", "thermald"])
         d.stop()
 

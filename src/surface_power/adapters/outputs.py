@@ -238,8 +238,11 @@ class OutputStage:
                 if unit != 10:
                     del self.targets[wref]
                     self.mmio_refs.discard(wref)
-                    what = f"time unit {unit} in {src}" if unit is not None else src
-                    self.notes.append(f"pl1 time window: {what}, not 10 (1/1024 s) as the window steps assume, log-only")
+                    if unit is None:
+                        self.notes.append(f"pl1 time window: time unit not readable ({src}; needs root), log-only")
+                    else:
+                        self.notes.append(f"pl1 time window: time unit {unit} in {src}, not 10 (1/1024 s) as the window steps "
+                                          "assume, log-only")
             mzone = find_zone(root, "package-0")
             for label, cname in (("PL1", "long_term"), ("PL2", "short_term")):
                 path = find_constraint(mzone, cname) if mzone else None

@@ -5,6 +5,7 @@ versions apart.
 """
 import argparse
 import hashlib
+import io
 import os
 import platform
 import sys
@@ -82,9 +83,42 @@ def ec_power_lines(pp, ac) -> list[str]:
     return out
 
 
+def cpu_vendor(root: str) -> str | None:
+    try:
+        with open(os.path.join(root, "proc/cpuinfo")) as f:
+            for line in f:
+                if line.startswith("vendor_id"):
+                    return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return None
+
+
+def daemon_view(root: str, blob: str | None):
+    """The daemon's own start decision on this machine, in dry-run, writing nothing (spec tools 3): (daemon, None) or (None, why).
+    The report takes its verdict from here, so that it cannot say something other than what the daemon does (plan B10)."""
+    import tempfile
+
+    from .. import daemon, monitor
+    with tempfile.TemporaryDirectory() as state:
+        argv = ["--root", root, "--run-dir", os.path.join(root, "run/surface-power"), "--state-dir", state, "--dry-run"]
+        if blob:
+            argv += ["--blob", blob]
+        try:
+            d = daemon.Daemon(daemon.parse_args(argv), monitor.Journal(stream=io.StringIO()))
+        except daemon.Idle as e:
+            return None, str(e)
+        except Exception as e:  # a report must not crash on an odd system
+            return None, f"could not be checked ({e!r})"
+        d.series.close()
+        return d, None
+
+
 def rapl_lines(root: str, profile_mmio: bool | None = None) -> list[str]:
     """PL1/PL2 in the MMIO copy (what Windows writes) next to the MSR copy, and the PL path the daemon chooses (spec outputs 3.3,
     kernel-mmio-daemon 2, 9)."""
+    if cpu_vendor(root) == "AuthenticAMD":
+        return ["PL1/PL2 copies: not applicable (AMD CPU: no MCHBAR copy; what Windows writes on AMD is not analysed, plan J1)"]
     path = plpath.choose(root, os.path.join(root, "run/surface-power"), profile_mmio)
     lines = ["PL1/PL2 copies (Windows writes the MMIO copy; the lower enabled one is in force [H]):",
              f"  processor thermal device 00:04.0: {'present' if rapl_copies.has_proc_thermal(root) else 'absent'}; "
@@ -96,7 +130,7 @@ def rapl_lines(root: str, profile_mmio: bool | None = None) -> list[str]:
     mm, ms = copies["mmio"], copies["msr"]
     src = " [from the zone]" if copies.get("mmio_source") == "zone" else ""
     lines.append("  MMIO (MCHBAR + 0x59A0): " + (mm.describe() + src if mm else f"not readable ({copies['mmio_unreadable']})"))
-    lines.append("  MSR 0x610:              " + (ms.describe() if ms else "not readable"))
+    lines.append("  MSR 0x610:              " + (ms.describe() if ms else "not readable (needs root and the msr module)"))
     return lines
 
 
@@ -118,8 +152,7 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
     lines.append(f"platform profile: {profile or 'not found'}" + (f" ({profile_src})" if profile else ""))
     writers = supervisor.limit_writers(root)
     if writers:
-        lines.append(f"WARNING: {', '.join(writers)} running: it writes power limits itself; measured limits then differ "
-                     "from the computed ones (stop it for a test)")
+        lines.append("WARNING: " + supervisor.describe_writers(writers) + " (stop it for a measurement)")
     path = args.blob or os.path.join(root, EFIVAR.lstrip("/"))
     try:
         data, source, is_var = read_raw(path)
@@ -186,15 +219,32 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
             if got.get(r) is not None:
                 provided.add(r)
         via_cdev -= provided
+    d, idle = daemon_view(root, args.blob)
+    from ..daemon import ACCEPTED_ABSENT, OUTPUT_NAMES
+
+    def names(refs):
+        return ", ".join(OUTPUT_NAMES.get(r.channel, str(r)) if r.guid == dgpu_ref.guid else str(r) for r in refs)
+    dgpu_ref = inp.ChannelRef("0B7B5350-BB8C-4459-8D4A-A75C57073801", 201)
+    absent = d.reader.absent if d else set()
     ec_pos = len(lines)
     lines.append("inputs:")
     for ref in sorted(graph.inputs):
         if ref.guid == inp.PLACEHOLDER:
             continue
-        state = "provided" if ref in provided else "needs the debug device" if ref in via_cdev else "not available"
+        if ref in absent:
+            state = "absent (its source device is not present: base detached?); controllers on it stay OFF, no emergency"
+        else:
+            state = "provided" if ref in provided else "needs the debug device" if ref in via_cdev else "not available"
+        if state == "not available" and d is not None:
+            if ref in ACCEPTED_ABSENT:
+                state += " (accepted deviation DV-3: the blob uses its default value)"
+            elif ref in d.blocking_inputs:
+                state += f"; it reaches {names(d.blocking_inputs[ref])}, written on Linux: the daemon stays in dry-run"
+            else:
+                state += "; it reaches no output written on Linux"
         lines.append(f"  {ref}: {state}")
-    stage = OutputStage(root, graph.output_ranges, dry_run=True, pl3=prof.pl3 if prof else None,
-                        pl4=prof.pl4 if prof else None)
+    stage = d.preview if d is not None else OutputStage(root, graph.output_ranges, dry_run=True, pl3=prof.pl3 if prof else None,
+                                                        pl4=prof.pl4 if prof else None)
     throttle = ThrottleStage(root, [r for r in graph.outputs if r.guid == THROTTLE], dry_run=True)
     fan = FanStage(root, [r for r in graph.outputs if fan_handles(r)], graph.output_ranges, transport=fan_transport,
                    dry_run=True, thresholds=bool(prof and prof.fan_thresholds),
@@ -203,7 +253,6 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
     if args.with_ec and fan.chans:                          # the fan commands are asked only if the blob has fan outputs
         probe = fan_probe(fan.transport, want_spl=any(c.spec.tc == TC_FAN and c.spec.cid == 0x13 for c in fan.chans.values()))
         lines[:] = lines[:ec_pos] + probe + lines[ec_pos:]
-    dgpu_ref = inp.ChannelRef("0B7B5350-BB8C-4459-8D4A-A75C57073801", 201)
     stand_in = gpu.find_nvidia_gpu(root) is not None          # the stand-in needs an NVIDIA dGPU
     lines.append("outputs:")
     missing = []
@@ -211,9 +260,14 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
     for ref in sorted(graph.outputs):
         t = stage.targets.get(ref)
         if t is not None:
-            kind = "writable (MSR, needs root)" if t.name == "pl3" else "writable (powercap)"
+            if t.name == "pl3":
+                kind = "writable (MSR 0x615, needs root)"
+            else:
+                zone = os.path.basename(os.path.dirname(t.path))
+                kind = f"writable ({'MMIO zone' if 'mmio' in zone else 'powercap'} {zone})"
         elif ref.channel == 59 and ref.guid == dgpu_ref.guid and os.geteuid() != 0 and os.path.exists(
-                os.path.join(root, "dev/cpu/0/msr")) and not (prof and prof.pl3 is False):
+                os.path.join(root, "dev/cpu/0/msr")) and prof is not None and prof.pl3 is True:
+            # PL3 is written only where the profile switches it on (DV-9); as root the daemon then has the target.
             kind = "writable as root (MSR 0x615)"
         elif ref in ThermalActions.channels:
             kind = "thermal action (hibernate / power off)"
@@ -234,10 +288,14 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
                 missing.append(ref)
                 if fan.needs_cdev(ref):
                     cdev_wait.append(ref)
+        elif d is not None and ref in d.not_needed:
+            kind = "not needed on Linux: " + d.not_needed[ref]
         elif notneeded.reason(ref, root):
             kind = "not needed on Linux: " + notneeded.reason(ref, root)
         elif ref == dgpu_ref and stand_in:
             kind = "clock-cap stand-in (DO-1)" + ("" if prof and prof.dgpu_clock_cap else ", off in this profile")
+            if d is not None and d.dgpu_pending:
+                kind += ", waits for input " + ", ".join(map(str, sorted(d.dgpu_wait))) + " (absent)"
             if not (prof and prof.dgpu_clock_cap):
                 missing.append(ref)
         else:
@@ -252,14 +310,21 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
         hint = inp.cdev_hint(outs, len(via_cdev & set(graph.inputs)))
         if hint:
             lines.append(hint)
-    rest = len(missing) - len(cdev_wait)
-    if not missing:
-        lines.append("ready for control: yes")
+    # The verdict is the daemon's own (B10): same inputs, same outputs, same rules.
+    if prof is None:
+        lines.append("default mode: dry-run (no profile for this device; `surface-powerd --control` would control)")
+    elif prof.tested:
+        lines.append("default mode: control (tested profile)")
     else:
-        parts = ([f"{len(cdev_wait)} need root and surface_aggregator_cdev"] if cdev_wait else []) + \
-                ([f"{rest} have no Linux path"] if rest else [])
-        lines.append(f"ready for control: no, not ready in this run: {len(missing)} of {len(graph.outputs)} outputs "
-                     f"({', '.join(parts)})")
+        lines.append("default mode: dry-run (untested profile: control only with `surface-powerd --control`, as the "
+                     "control unit surface-powerd.service starts it)")
+    who = "" if os.geteuid() == 0 else " (as this user; run the report as root for the daemon's answer under its unit)"
+    if d is None:
+        lines.append(f"ready for control: no, the daemon would stay idle: {idle}")
+    elif not d.control_reasons:
+        lines.append(f"ready for control{who}: yes")
+    else:
+        lines.append(f"ready for control{who}: no: " + "; ".join(d.control_reasons))
     print("\n".join(lines))
     return 0
 

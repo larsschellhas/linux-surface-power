@@ -42,7 +42,8 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
      the base sensors 605/609 reach only the dGPU limit and the thermal actions [C], so a start with the base detached is allowed (approved by the
      maintainer 25.11.2026); the dGPU stand-in waits for 609
      and starts when it is back. (Before 25.11.2026 a missing base sensor was "unavailable" and the thermal actions forced dry-run, contrary to this text.)
-   - **It reaches a limit that Linux writes:** control is not allowed, only dry-run, and the reason is logged. Otherwise the blob would run on a fallback that is meant for a lost sensor, not for normal operation.
+   - **It reaches a limit that Linux writes:** control is not allowed, only dry-run, and the reason is logged. An output classified as not needed
+     (`outputs.md` 10) is not written and does not count (corrected 25.11.2026; before, `110DF2A4/3` blocked several devices). Otherwise the blob would run on a fallback that is meant for a lost sensor, not for normal operation.
    - **Documented deviation with a Windows fallback:** never blocks control. This is the case for the display brightness (DV-3).
    - **Gets a Linux target later:** once an output gets one (e.g. a dGPU stand-in), its inputs become required automatically.
 6. **Outputs without a Linux path (2.6) [D]:** control is allowed only when every output of the blob is written: a powercap or MSR

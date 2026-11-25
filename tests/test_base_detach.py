@@ -166,6 +166,9 @@ class BaseDetachTest(unittest.TestCase):
 
     # --- B13-8: start without the base ---
     def test_b13_8_start_without_base_then_attach(self):
+        from test_gpu import PCI
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/vendor", "0x10de")        # an SB3 15" with its dGPU
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/class", "0x030200")
         d = self.start()                                               # no --allow-partial-outputs: the stand-in waits, 201 has a path
         self.assertEqual(d.mode, "control")
         self.assertEqual(d.reader.absent, {B609})
@@ -193,6 +196,14 @@ class BaseDetachTest(unittest.TestCase):
         d = self.start()
         self.assertEqual(d.mode, "dry-run")
         self.assertIn("2E8B14C2/550", d.mode_reason)
+        d.stop()
+
+    def test_no_dgpu_means_the_dgpu_limit_is_not_needed(self):
+        """A model without an NVIDIA dGPU (SB3 13" i5): the dGPU limit counts as not needed, no waiting stand-in (report review 25.11.)."""
+        d = self.start()
+        self.assertIsNone(d.dgpu_pending)
+        self.assertIn(daemon.DGPU, d.not_needed)
+        self.assertEqual(d.mode, "control")
         d.stop()
 
     # --- B13-9: absent input that reaches a written limit ---

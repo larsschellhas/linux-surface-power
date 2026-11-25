@@ -65,8 +65,9 @@ class ReportSourcesTest(unittest.TestCase):
         text = self.run_report()
         self.assertIn("EC power data: debug device only", text)
         self.assertIn("28B7BD85/8: needs the debug device", text)
-        self.assertIn("0B7B5350/201: no Linux path", text)     # no NVIDIA GPU in this fake system
-        self.assertIn("ready for control: no", text)
+        # No NVIDIA GPU in this fake system: the dGPU limit has nothing to act on (the daemon and the report agree, B10).
+        self.assertIn("0B7B5350/201: not needed on Linux: no NVIDIA dGPU in this machine", text)
+        self.assertIn("ready for control (as this user; run the report as root for the daemon's answer under its unit): yes", text)
 
     def test_hint_when_root_and_cdev_would_help(self):
         text = self.run_report()

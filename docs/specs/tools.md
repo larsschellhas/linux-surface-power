@@ -37,8 +37,14 @@ surface-power-report [--with-ec]
 Prints a short text that contains no blob content and no serial numbers:
 - the device (DMI product name and SKU), the kernel version, linux-surface modules present;
 - the blob: found yes/no, form, size, a SHA-256 of the decoded text (to tell versions apart), the block types used, unknown GUIDs, the outputs and the instances used;
-- the inputs: for each input channel the blob reads, whether a Linux source exists and its current validity;
-- the outputs: for each output, its target and whether it is writable;
+- the inputs: for each input channel the blob reads, whether a Linux source exists; an absent one (base detached, `supervisor.md` 4.1); for a missing one
+  whether it is an accepted deviation (DV-3), reaches an output written on Linux (then the daemon stays in dry-run) or reaches none;
+- the outputs: for each output, its target as the daemon sees it at its start (powercap zone or MMIO zone, MSR, stand-in, thermal action, fan path,
+  not needed with the reason);
+- the default mode (control only with a tested profile, else dry-run unless `--control`) and **the daemon's own verdict** whether control is possible on
+  this machine, with its reasons (25.11.2026, plan B10: the report builds the daemon in dry-run, writing nothing, and takes the verdict from it, so that
+  both cannot disagree); as a normal user it says that the answer under the unit needs root;
 - with `--with-ec` (root): whether the `0x53` and DPTF requests answer. Only yes/no is reported, not the values;
 - the PL1/PL2 copies: presence of 00:04.0 and of `intel-rapl-mmio`, the PL path the daemon would choose at its start with the reason (`kernel-mmio-daemon.md` 2),
-  the MMIO copy (register as root, else the zone, else why it is not readable) and the MSR copy.
+  the MMIO copy (register as root, else the zone, else why it is not readable) and the MSR copy; on an AMD CPU only "not applicable";
+- running writers (thermald, tuned, TLP, power-profiles-daemon) with what each of them changes (ppd: platform profile and EPP/EPB, not the power limits [M]).
