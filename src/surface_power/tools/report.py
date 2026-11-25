@@ -83,6 +83,11 @@ def ec_power_lines(pp, ac) -> list[str]:
     return out
 
 
+def report_msr_probe(root: str, reg: int):
+    from ..adapters import msr
+    return msr.probe(root, reg)
+
+
 def cpu_vendor(root: str) -> str | None:
     try:
         with open(os.path.join(root, "proc/cpuinfo")) as f:
@@ -92,6 +97,30 @@ def cpu_vendor(root: str) -> str | None:
     except OSError:
         pass
     return None
+
+
+MSR_PROBE = ((0x17, "platform ID"), (0x606, "RAPL units"), (0x610, "PL1/PL2"), (0x611, "package energy"),
+             (0x614, "package power info"), (0x615, "PL3"))
+
+
+def msr_lines(root: str) -> list[str]:
+    """Read-only probe of the RAPL MSRs on CPU 0 and the hypervisor flag (plan F10: the Pro 9 answers 0x17, 0x611, 0x614, 0x615 with EIO)."""
+    from ..adapters import msr
+    if not os.access(msr.path(root), os.R_OK):
+        return ["MSRs: not readable (needs root and the msr module)"]
+    parts = []
+    for reg, name in MSR_PROBE:
+        v, why = msr.probe(root, reg)
+        parts.append(f"{reg:#x} {name} {'ok' if v is not None else why}")
+    lines = ["MSRs on CPU 0 (read only): " + "; ".join(parts)]
+    try:
+        with open(os.path.join(root, "proc/cpuinfo")) as f:
+            flags = next((ln.split(":", 1)[1].split() for ln in f if ln.startswith("flags")), None)
+    except OSError:
+        flags = None
+    if flags is not None:
+        lines.append("CPU flag hypervisor: " + ("yes (Linux runs in a virtual machine)" if "hypervisor" in flags else "no"))
+    return lines
 
 
 def daemon_view(root: str, blob: str | None):
@@ -265,6 +294,11 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
             else:
                 zone = os.path.basename(os.path.dirname(t.path))
                 kind = f"writable ({'MMIO zone' if 'mmio' in zone else 'powercap'} {zone})"
+        elif ref.channel == 59 and ref.guid == dgpu_ref.guid and prof is not None and prof.pl3 is True and os.path.exists(
+                os.path.join(root, "dev/cpu/0/msr")) and os.access(os.path.join(root, "dev/cpu/0/msr"), os.R_OK) and \
+                report_msr_probe(root, 0x615)[0] is None:
+            kind = f"no Linux path: MSR 0x615 not readable ({report_msr_probe(root, 0x615)[1]}) although the profile switches PL3 on (plan B9)"
+            missing.append(ref)
         elif ref.channel == 59 and ref.guid == dgpu_ref.guid and os.geteuid() != 0 and os.path.exists(
                 os.path.join(root, "dev/cpu/0/msr")) and prof is not None and prof.pl3 is True:
             # PL3 is written only where the profile switches it on (DV-9); as root the daemon then has the target.
@@ -305,6 +339,7 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
     for note in stage.notes + throttle.notes + fan.notes + prochot.notes + list(prof.notes if prof else ()):
         lines.append(f"  note: {note}")
     lines += rapl_lines(root, prof.mmio if prof else None)
+    lines += msr_lines(root)
     if not fan.transport.can_write():
         outs = sum(1 for r in graph.outputs if fan.needs_cdev(r) or prochot.needs_cdev(r))
         hint = inp.cdev_hint(outs, len(via_cdev & set(graph.inputs)))

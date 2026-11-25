@@ -3,6 +3,7 @@
 The register is read and written as 8 bytes at the offset of its number. In tests the device file is a regular file in a fake
 root, which supports the same positioned reads and writes.
 """
+import errno
 import os
 import struct
 
@@ -70,6 +71,24 @@ def read_dev(dev: str, reg: int) -> int | None:
         return None
     finally:
         os.close(fd)
+
+
+def probe(root: str, reg: int, cpu: int = 0) -> tuple[int | None, str | None]:
+    """Read once and say why it failed: (value, None) or (None, "EIO" / "ENOENT" / "short read" / ...). The kernel answers a read of an
+    MSR the CPU (or a hypervisor) does not grant with EIO (Pro 9 on 0x17, 0x611, 0x614, 0x615 [M, tester], plan F10)."""
+    try:
+        fd = os.open(path(root, cpu), os.O_RDONLY)
+    except OSError as e:
+        return None, errno.errorcode.get(e.errno, str(e))
+    try:
+        data = os.pread(fd, 8, reg)
+    except OSError as e:
+        return None, errno.errorcode.get(e.errno, str(e))
+    finally:
+        os.close(fd)
+    if len(data) != 8:
+        return None, "short read"
+    return struct.unpack("<Q", data)[0], None
 
 
 def write_dev(dev: str, reg: int, value: int) -> bool:

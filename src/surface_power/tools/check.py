@@ -155,6 +155,15 @@ class Check:
         self.add(buf.getvalue().rstrip())
         self.add("```")
 
+    def step_kernel_messages(self) -> None:
+        """Kernel lines about MSRs and machine checks (plan F10: why the Pro 9 answers 0x615 with EIO)."""
+        _, text = run(["dmesg"])
+        lines = [ln for ln in text.splitlines() if re.search(r"\bmsr\b|\bmce\b|machine check", ln, re.IGNORECASE)][-20:]
+        self.add("## Kernel messages about MSRs and machine checks (last 20)")
+        self.add("```")
+        self.add("\n".join(lines) or "none")
+        self.add("```")
+
     def step_dry_run(self) -> None:
         self.add(f"## Dry-run ({DRY_RUN_S} s, transient unit with the dry-run sandbox)")
         work = "/run/surface-power-check"
@@ -357,6 +366,7 @@ def main(argv=None) -> int:
     c.cdev()
     c.say("1. report ...")
     c.step_report()
+    c.step_kernel_messages()
     if not args.no_dry_run:
         c.say("2. dry-run ...")
         c.step_dry_run()

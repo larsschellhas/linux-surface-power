@@ -47,4 +47,7 @@ Prints a short text that contains no blob content and no serial numbers:
 - with `--with-ec` (root): whether the `0x53` and DPTF requests answer. Only yes/no is reported, not the values;
 - the PL1/PL2 copies: presence of 00:04.0 and of `intel-rapl-mmio`, the PL path the daemon would choose at its start with the reason (`kernel-mmio-daemon.md` 2),
   the MMIO copy (register as root, else the zone, else why it is not readable) and the MSR copy; on an AMD CPU only "not applicable";
-- running writers (thermald, tuned, TLP, power-profiles-daemon) with what each of them changes (ppd: platform profile and EPP/EPB, not the power limits [M]).
+- running writers (thermald, tuned, TLP, power-profiles-daemon) with what each of them changes (ppd: platform profile and EPP/EPB, not the power limits [M]);
+- as root, a read-only probe of the RAPL MSRs on CPU 0 (`0x17`, `0x606`, `0x610`, `0x611`, `0x614`, `0x615`, each "ok" or the error, e.g. `EIO`) and the CPU's
+  `hypervisor` flag (plan F10); PL3 shows "no Linux path: MSR 0x615 not readable" where the profile switches it on but the register does not read.
+The tester kit (`tester-kit.md`) adds the kernel's messages about MSRs and machine checks.

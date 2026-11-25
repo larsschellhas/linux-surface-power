@@ -47,6 +47,16 @@ class CheckTest(unittest.TestCase):
         self.fs.write("sys/class/dmi/id/product_sku", "Surface_Something_1")
         self.assertFalse(check.Check(self.fs.root).module_allowed()[0])
 
+    def test_kernel_messages_keep_only_msr_and_mce_lines(self):
+        dmesg = "[1.0] usb 3-2: new device\n[2.0] msr: Write to unrecognized MSR 0x615 by x\n[3.0] mce: CPU0: Machine Check\n"
+        with mock.patch.object(check, "run", lambda cmd, timeout=120, **kw: (0, dmesg)):
+            c = check.Check(self.fs.root, out=io.StringIO())
+            c.step_kernel_messages()
+        text = "\n".join(c.result)
+        self.assertIn("msr: Write to unrecognized MSR 0x615", text)
+        self.assertIn("mce: CPU0", text)
+        self.assertNotIn("usb 3-2", text)
+
     def test_issue_title_and_links(self):
         self.assertEqual(check.issue_title("Surface Pro 9"), "Device report: Surface Pro 9")
         search, new = check.issue_links("Surface Pro 9")

@@ -261,8 +261,13 @@ class OutputStage:
             self.notes.append("pl3: MSR not available (no /dev/cpu/0/msr, no root, or kernel lockdown), log-only")
         else:
             unit = msr.power_unit_w(root)
+            v615, why = msr.probe(root, msr.PL3_CONTROL)
             if unit is None:
                 self.notes.append("pl3: MSR 0x606 not readable, log-only")
+            elif v615 is None:
+                # Plan B9: the Pro 9 reads 0x606 but answers 0x615 with EIO [M, tester]; without this check the target was created
+                # and its first write failed.
+                self.notes.append(f"pl3: MSR 0x615 not readable ({why}) although 0x606 is, log-only (plan B9, F10)")
             else:
                 self.targets[ChannelRef(LIMITS, PL3_CHANNEL)] = MsrTarget("pl3", "", *bounds("pl3"), root=root, unit_w=unit)
 
@@ -411,6 +416,10 @@ class OutputStage:
                         gone = not os.path.isdir(self.mmio_zone)
                         raise PathFailure(f"{t.name}: write to {t.path} failed ({e.strerror or e})", marker=not gone) from e
                     self.notes.append(f"{t.name}: write failed ({e}), log-only from now on")
+                    # At run time the notes are not logged any more: an event reaches the journal (plan B9). The output keeps the value
+                    # it had; the restore at stop writes the snapshot back.
+                    self.events.append(("warning", f"{t.name}: write failed ({e}), log-only from now on; it keeps its current "
+                                                   "value until the daemon stops and restores the snapshot"))
                     del self.targets[ref]
                     out[ref] = Result(ref, "log-only", mw, None, False)
                     continue
