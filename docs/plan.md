@@ -1,6 +1,6 @@
 # Project plan: from the reference device to a rollout on every SMF Surface
 
-Version 1.22, 25.11.2026. This is the single plan of the project: target, work packages, their state, and what comes next. Read it
+Version 1.23, 25.11.2026. This is the single plan of the project: target, work packages, their state, and what comes next. Read it
 first; it is kept current with every change of state (section 7). Evidence markers as in `docs/README.md`: [C] driver code or ACPI
 table, [M] measured, [H] hypothesis, [D] design decision.
 
@@ -72,7 +72,7 @@ kernel interfaces it needs are in the released linux-surface kernel; fail-safe c
 | C3 | Soak test (AC-L4): first dry-run failed, replaced by a control run since 17.11.2026; watchdog incident 18.11.2026 fixed (1a7520a, 829f24e) | ✅ | ended by the maintainer 24.11.2026 15:43 and evaluated (raw note `c3-abschlussauswertung-2026-11-24.md`, separate session; numbers not re-checked in the main session): no daemon crash after the fix, memory ≤ 31 MB, skin controller 1 active 8 times (≤ 49.05 °C at a 48 °C set point); CPU 0.56 % (accepted for now, B8); **not sufficient for C4:** about 20 h awake against 3 days, controllers 2–4 never active, 39 min `emergency` after the base was detached (B13) → C6 |
 | C4 | `tested = true` in the SB3 profile | ⬜ | after C6 (not recommended on the C3 data), maintainer's decision |
 | C5 | Surface Book 3 13" (shares the profile) | ⏳ 🙋 | tester report with DMI values |
-| C6 | **Second soak (control) on the SB3** after B12 (MMIO path finished, new version installed) and B13: three awake days of normal use, with dGPU load so that controller 4 can act, `constraint_2_power_limit_uw` read after every resume (L8); criteria as C3, CPU per B8 | ⬜ | after B12 and B13 |
+| C6 | **Second soak (control) on the SB3, 24 h, on the MMIO path** (maintainer's decision 25.11.2026: 24 h are enough for now; the module `surface_rapl_mmio` loads at every boot on this machine with `allow_write=1`, through `/etc/modules-load.d` and `/etc/modprobe.d`, signed with the machine's DKMS key; local configuration on the reference device only, no alias, no other device). Criteria as C3 (no crash, no unexplained invalid input, memory < 50 MB; CPU per B8), plus: the path stays `mmio` after reboots and resumes, PL4 after every resume (L8), a base detach in normal use (B13) | 🔄 | **running since 25.11.2026 10:29** (raw `raw/arbeitsordner/c6-2026-11/`; undo `scripts/c6-remove.sh`; a kernel update needs a rebuild of the module); evaluation after 26.11.2026 10:30 |
 | **D** | **Kernel interfaces in linux-surface** | 🔄 | |
 | D1 | SB3 sensors and fans, main and base ([kernel#190](https://github.com/linux-surface/kernel/pull/190)) | ✅ | merged 17.11.2026 (`v7.3-surface-devel`) |
 | D2 | DPTF battery data `0x53` and adapter rating ([kernel#195](https://github.com/linux-surface/kernel/pull/195)) | ✅ | merged 17.11.2026 (`v7.3-surface-devel`) |
@@ -322,7 +322,7 @@ the daemon itself (B8, B9, B10) come before the safety suite because they decide
 (D9–D11) and the offset frame (H6) are new and come after the F9 follow-ups.
 
 1. **B13, then C6/C4:** C3 ended 24.11.2026 without enough data for C4 (about 20 h awake, three controllers never active, `emergency`
-   after a base detach). The MMIO path is checked on the SB3 (B12, 24.11.2026); the base-detach fix is checked (B13, 25.11.2026); next the second soak (C6) and the decision on
+   after a base detach). The MMIO path is checked on the SB3 (B12, 24.11.2026); the base-detach fix is checked (B13, 25.11.2026); the second soak (C6, 24 h on the MMIO path) runs since 25.11.2026 10:29 and the decision on
    `tested = true` (C4). CPU (B8) is accepted for now.
 2. **F2/D5:** the prototype module is built and tested on the SB3 (23.–24.11.2026, `specs/kernel-mmio-rapl.md` 8), the daemon side KM-9 and B11 is
    implemented and checked on the SB3 (`specs/kernel-mmio-daemon.md` 0.3, B12, 24.11.2026). Next: a read-only test of the module on a device with an enabled copy (KM-A9,
@@ -378,3 +378,4 @@ the daemon itself (B8, B9, B10) come before the safety suite because they decide
 | 24.11.2026 | 1.20: B12 step 8.8d: the module rebuilt for 7.3.6-1-surface; a warm restart after the DS-5 state brings the firmware value back, PL1 clamp included (one cycle) [M]; DS-5 settled on the SB3. |
 | 25.11.2026 | 1.21: B13 implemented and tested on a fake sysfs (base sensors absent instead of lost, hwmon look-up again, a running emergency ends, the dGPU stand-in waits for 609; thermal actions do not count for absent inputs); specs `supervisor.md` 0.2, `inputs.md` 0.3, `deviations.md` 0.4 (DV-2, DV-12), knowledge `sb3-detach-and-base.md`, SB3 device pages. Open: a real detach with the daemon in control. |
 | 25.11.2026 | 1.22: B13 ✅: a real detach and re-attach of the SB3 base with the daemon in control gave no emergency, the base sensors were absent for 24 s and found again under another index [M]; the thermal-action rule for absent inputs approved by the maintainer. Next C6. |
+| 25.11.2026 | 1.23: C6 started 10:29 on the SB3: 24 h, MMIO path, module loaded at boot (maintainer's decision; local configuration of the reference device). |
