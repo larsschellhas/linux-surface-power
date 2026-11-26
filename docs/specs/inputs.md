@@ -1,6 +1,6 @@
 # Spec: input adapters
 
-Version 0.3, 25.11.2026 (0.3: base sensors absent and looked up again, B13). Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC-I3. Markers as in `blob-format.md`.
+Version 0.5, 26.11.2026 (0.3: base sensors absent and looked up again, B13; 0.4: section 5 checked in the SB3 display client, G1; 0.5: measured under Windows, no nits estimate). Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC-I3. Markers as in `blob-format.md`.
 
 ## 1. Interface
 - **Adapter role:** each adapter owns one or more device input channels (`GUID/channel`). On `read(now_ms)` it returns `{channel: value | None}` in blob units. `None` means invalid.
@@ -86,7 +86,27 @@ The SB3 15" blob reads only posture 1, through the PL1 and dGPU posture tables. 
 ## 5. Display brightness (FR-I7)
 - **Use:** channel 41 enters PL4 only, through the estimated display power. Linux has no nits value.
 - **Default:** the channel stays invalid. The engine then uses the block default (3 W display power), exactly like Windows without a brightness value.
-- **Optional:** a device profile may give `panel_max_nits`. Then `millinits = brightness / max_brightness · panel_max_nits · 1000`. This changes PL4 by at most about 3 W.
+- **Windows source [C, `SurfaceSmfDisplayClient.sys` 8.30.137.0, same file as in the SB3 package, 25.11.2026]:** a timer with the
+  period of the blob (1000 ms) sends IOCTL `0x230c08` to the monitor device interface and takes the u32 at byte 4 of the 12-byte
+  answer, without looking at the version field. A value is sent only when it changed and lies in the blob range (0 … 600000).
+- **Measured under Windows [M, SB3 15", 25.11.2026, one 42 s trace of the driver's own messages; the running driver has the same
+  build ID as the analysed file]:** the timer runs every 1000 ms and every time takes the branch "monitor target not open", so the
+  request is **not sent** (40 of 40 ticks, brightness stepped from 0 to 100 %). The power-setting callback sends nothing either, because
+  the SB3 blob does not read channel 42. A user process that sends the same request gets "access denied", which says nothing about the
+  driver.
+- **Consequence:** the timer is the only path that sends a value for channel 41, so in the measured state the core gets none and uses the
+  block default (3 W), as this daemon does. Open [H]: whether the target was never open since the driver started (the trace starts
+  later); that the core does not read the status message the client sends at start (channel online, 0) as a value (the core's own
+  diagnostic texts tell status from data, the receiving code was not traced); why the target is not open. If the core did read that 0,
+  Windows would subtract 5 mW and Linux's PL4 would be 3 W lower than Windows.
+- **The block default (all SMF blobs with a brightness input in the local corpus, 26.11.2026):** in the blobs that take percent
+  (channel 42, 24 files) the default is above the curve's value at 100 % in 19 files, equal to it within 1 mW in 3 (3100 mW) and
+  below it in 2 (Surface Pro 7+) [C, parameters]. That the default is meant as the largest display power fits most of them [H]. On the
+  SB3 3000 mW is the curve's value at 304 000 millinits (15") and 362 000 (13"); the panels' real power is not measured [H].
+- **No nits estimate (decided 26.11.2026, plan G1):** the channel stays invalid. A live estimate would differ from the constant 3 W
+  that Windows uses if the core got no value. If the core read the start status as 0 (5 mW), an estimate below 3 W would be closer to
+  Windows than the default and one above 3 W farther from it. Neither the panel's luminance nor its power is measured. The profile key
+  `inputs.panel_max_nits` is read by the loader and used by no adapter; it stays unused on the SB3.
 
 ## 6. EC requests for platform power data (FR-I4, NFR-11)
 The same payload also arrives as an EC event on some devices (surface-aggregator-module#29, values there fit the field names below).

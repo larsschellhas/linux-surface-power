@@ -1,6 +1,6 @@
 # Project plan: from the reference device to a rollout on every SMF Surface
 
-Version 1.34, 25.11.2026. This is the single plan of the project: target, work packages, their state, and what comes next. Read it
+Version 1.37, 26.11.2026. This is the single plan of the project: target, work packages, their state, and what comes next. Read it
 first; it is kept current with every change of state (section 7). Evidence markers as in `docs/README.md`: [C] driver code or ACPI
 table, [M] measured, [H] hypothesis, [D] design decision.
 
@@ -72,7 +72,7 @@ kernel interfaces it needs are in the released linux-surface kernel; fail-safe c
 | C3 | Soak test (AC-L4): first dry-run failed, replaced by a control run since 17.11.2026; watchdog incident 18.11.2026 fixed (1a7520a, 829f24e) | ✅ | ended by the maintainer 24.11.2026 15:43 and evaluated (raw note `c3-abschlussauswertung-2026-11-24.md`, separate session; numbers not re-checked in the main session): no daemon crash after the fix, memory ≤ 31 MB, skin controller 1 active 8 times (≤ 49.05 °C at a 48 °C set point); CPU 0.56 % (accepted for now, B8); **not sufficient for C4:** about 20 h awake against 3 days, controllers 2–4 never active, 39 min `emergency` after the base was detached (B13) → C6 |
 | C4 | `tested = true` in the SB3 profile | ⬜ | after C6 (not recommended on the C3 data), maintainer's decision |
 | C5 | Surface Book 3 13" (shares the profile) | ⏳ 🙋 | tester report with DMI values |
-| C6 | **Second soak (control) on the SB3, 24 h, on the MMIO path** (maintainer's decision 25.11.2026: 24 h are enough for now; the module `surface_rapl_mmio` loads at every boot on this machine with `allow_write=1`, through `/etc/modules-load.d` and `/etc/modprobe.d`, signed with the machine's DKMS key; local configuration on the reference device only, no alias, no other device). Criteria as C3 (no crash, no unexplained invalid input, memory < 50 MB; CPU per B8), plus: the path stays `mmio` after reboots and resumes, PL4 after every resume (L8), a base detach in normal use (B13) | 🔄 | **running since 25.11.2026 10:29** (raw `raw/arbeitsordner/c6-2026-11/`; undo `scripts/c6-remove.sh`; a kernel update needs a rebuild of the module); evaluation after 26.11.2026 10:30 |
+| C6 | **Second soak (control) on the SB3, 24 h, on the MMIO path** (maintainer's decision 25.11.2026: 24 h are enough for now; the module `surface_rapl_mmio` loads at every boot on this machine with `allow_write=1`, through `/etc/modules-load.d` and `/etc/modprobe.d`, signed with the machine's DKMS key; local configuration on the reference device only, no alias, no other device). Criteria as C3 (no crash, no unexplained invalid input, memory < 50 MB; CPU per B8), plus: the path stays `mmio` after reboots and resumes, PL4 after every resume (L8), a base detach in normal use (B13) | 🔄 | **running since 25.11.2026 10:29** (raw `raw/arbeitsordner/c6-2026-11/`; undo `scripts/c6-remove.sh`; a kernel update needs a rebuild of the module); evaluation after 26.11.2026 10:30; a short shutdown on 25.11. for the G1 measurement in Windows is accepted (maintainer, 25.11.2026). Interrupted 25.11. 17:51 – 26.11. 09:59 (shutdown); after the boot `control` on the `mmio` path, 0 restarts [M 26.11. 10:39]; about 8 h of wall time with the daemon running by then, so the 24 h are not reached yet |
 | **D** | **Kernel interfaces in linux-surface** | 🔄 | |
 | D1 | SB3 sensors and fans, main and base ([kernel#190](https://github.com/linux-surface/kernel/pull/190)) | ✅ | merged 17.11.2026 (`v7.3-surface-devel`) |
 | D2 | DPTF battery data `0x53` and adapter rating ([kernel#195](https://github.com/linux-surface/kernel/pull/195)) | ✅ | merged 17.11.2026 (`v7.3-surface-devel`) |
@@ -105,7 +105,7 @@ kernel interfaces it needs are in the released linux-surface kernel; fail-safe c
 | F10 | Pro 9: MSR reads of `0x17`, `0x611`, `0x614`, `0x615` fail with EIO, also after a clean reboot and before the daemon starts [M, tester]; cause unknown | ⏳ 🙋 | the tester kit collects the answers (MSR probe, hypervisor flag, kernel messages, since 25.11.2026); waiting for a Pro 9 run of it; B9 ✅ |
 | F11 | **Tester kit:** one `sudo` script that runs every check a device needs (report with EC, short dry-run, read-only module test where allowed) and prepares a device-specific issue in this repository (maintainer's wish, 25.11.2026) | 🔄 | built 25.11.2026 (`scripts/surface-power-check`, spec `tester-kit.md` 0.2 with the maintainer's decisions: module test on every Intel device with a profile, existing DKMS key only, cdev loaded for the run, one issue per model here); first run on the SB3 25.11.2026: preflight, report as root, 120 s dry-run under the sandbox passed; the module step was skipped there (the module is loaded for C6), so the read-only module test is untested on hardware; tester package out 25.11.2026: pushed, request posted in linux-surface#2383 (comment 7159697920; detailed discussion moves to the device issues of this repository); waiting for reports ⏳ 🙋 |
 | **G** | **Inputs to settle** | 🔄 | |
-| G1 | Display brightness in millinits (`1FB53D4C/41`, SB3 13"/15"): no source, block default 3 W display power (DV-3); reaches PL4 | ⬜ | where Windows takes the value from (display client), and whether Linux can give nits |
+| G1 | Display brightness in millinits (`1FB53D4C/41`, SB3 13"/15"): no source, block default 3 W display power (DV-3); reaches PL4 | ✅ | closed by the maintainer 26.11.2026, no code change: DV-3 stays. Measured in Windows on the SB3 15" 25.11.2026 [M]: the display client (same build) skips the request on all 40 timer ticks because its monitor target is not open (`specs/inputs.md` 5). Not shown and left open: target never open since driver start [H]; the core does not read the client's start status as value 0 [H]; the display's real power on the SB3 is not measured (whether 3 W covers it [H]); the 13" is not measured |
 | G2 | Battery EWMA level and max-charge flag (`28B7BD85/13, 16`): debug device only | 🔄 | D4 |
 | G3 | EC power data `0x53` and adapter rating: kernel attributes (D2), debug device as fallback | ✅ | in linux-surface; mainline E1 |
 | G4 | Constants by design: standby phase (`DEF1AB69/100` = 4, reaches PL1/PL2 on 11 devices), proximity (`87008365/113` = 0, Pro 9 Intel) | 🔄 | Windows behaviour in `specs/inputs.md` 8.5, 8.8; confirm in a Windows comparison on one of these devices |
@@ -286,8 +286,8 @@ model (`scripts/simulate-sb3.py`) so far. Source: device pages (23.11.2026), pro
 
 | Device | R1 Blob | R2 Profile | R3 Inputs | R4 Outputs | R5 Secure Boot | R6 Safety sim | R7 Validation | R8 | 🙋 | Blocking WPs |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Book 3 15" | ✅ | ✅ | 🔄 brightness fallback (G1) | ✅ 9/9 | 🔄 PL3 needs lockdown `none` | 🔄 closed-loop model only | ✅ field tests, soak C3 not sufficient, C6 ⬜ | ⬜ | – | C6, C4, B13, D6, G1, B8, L8 |
-| Book 3 13" | ✅ | 🔄 shared, DMI unconfirmed | 🔄 (G1) | ✅ 9/9 | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | C5 |
+| Book 3 15" | ✅ | ✅ | ✅ kernel attributes (D2) on 7.3.6-1-surface [M]; brightness DV-3 | ✅ 9/9 | 🔄 PL3 needs lockdown `none` | 🔄 closed-loop model only | ✅ field tests, soak C3 not sufficient, C6 ⬜ | ⬜ | – | C6, C4, B13, D6, B8, L8 |
+| Book 3 13" | ✅ | 🔄 shared, DMI unconfirmed | 🔄 no report from the device; brightness DV-3, not measured there | ✅ 9/9 | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | C5 |
 | Pro 7+ | ✅ | 🔄 catalogue SKUs, 1960 confirmed | 🔄 no sensor node in the kernel (D11) | ✅ 12/12 | 🔄 | ⬜ | ⬜ | ⬜ | 🙋 | D11 |
 | Pro 8 | ✅ | ✅ | 🔄 debug device; no sensor node (D11) | ⬜ 13/14 (`/71`) | ⬜ MMIO caps at 30 W | ⬜ | 🔄 reads by tester | ⬜ | – | D4, D5, D11, H1 |
 | Pro 9 Intel | ✅ | 🔄 report SKU + catalogue consumer SKU | 🔄 debug device, proximity constant | ✅ | ⬜ MMIO 30/60 W enabled, caps Slider 5 at 30 W [H] | ⬜ | 🔄 control run, 59-h dry-run evaluated (CPU 0.98 % > 0.5 %), no Windows comparison | ⬜ | 🙋 | D12, D4, D5, B8, F3, F10, G4 |
@@ -341,7 +341,7 @@ the daemon itself (B8, B9, B10) come before the safety suite because they decide
    profiles (🙋).
 6. **D9–D11, D10:** sensor nodes with proof per device; tell the author of kernel#198 what the rules need (maintainer decides).
 7. **D4, E1:** battery EWMA attribute in linux-surface; submit the merged patches to mainline.
-8. **H6, G1, H1–H3, H7:** offset frame, brightness in nits, classify the remaining outputs.
+8. **H6, H1–H3, H7:** offset frame, classify the remaining outputs.
 9. **D6/E5, D7/E3, D8:** PL3 with lockdown, EC requests without the debug device, `DPHT` on Go 3/4.
 10. **J, K:** AMD and Snapdragon paths (driver analysis first).
 11. **L1 → L2, L5–L8:** Python reference complete, then Rust or C, packages, linux-surface integration, release.
@@ -395,3 +395,6 @@ the daemon itself (B8, B9, B10) come before the safety suite because they decide
 | 25.11.2026 | 1.32: test request for the Laptop Studio 2 posted in linux-surface#2392 (comment 7160736118); fan 2 test in help wanted (section 4, README). |
 | 25.11.2026 | 1.33: Pro 9 regression report (surface-aggregator-module#29, 25.11.) evaluated: new D12 (KIP hub work runs while the controller is suspended; `has_dptf` not the sole cause by the tester's own numbers, amplifier [H]); D12 first on the critical path; help wanted for Pro 9 owners. |
 | 25.11.2026 | 1.34: D12 reply posted in surface-aggregator-module#29 (A/B request, trace commands checked on the SB3, question to qzed on the freezable workqueue); waiting for the tester. |
+| 25.11.2026 | 1.35: G1 🔄: brightness source read again in the SB3 display client; the unit Windows delivers on this panel is open [H], to be measured in Windows before any estimate (maintainer); a short shutdown during C6 is accepted; `specs/inputs.md` 0.4. |
+| 26.11.2026 | 1.36: G1 measured in Windows: the SB3 display client does not send the brightness request in the measured state; DV-3 and `specs/inputs.md` 0.5 updated, no nits estimate; C6 interruption recorded. |
+| 26.11.2026 | 1.37: G1 ✅, closed by the maintainer without a code change (DV-3 stays, open points named in the G1 row); SB3 15" gate R3 ✅. |

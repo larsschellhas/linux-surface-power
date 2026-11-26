@@ -47,7 +47,7 @@ updated in the same commit as every change of state, together with this section 
 | D Kernel interfaces in linux-surface | 🔄 sensors/fans, DPTF data and the suspend fix merged; a Pro 9 report of Type Cover problems after resume on 7.3.6 names the DPTF patch, evaluated 25.11. (the failing path is the KIP hub, not the DPTF code; A/B requested from the tester, D12); battery EWMA attribute, MMIO write path ⚠️ (decided 23.11.: preferred PL1/PL2 path via a separate module, prototype first; the prototype passed its tests on the Surface Book 3 15" on 23.–24.11.; MMIO copy enabled on Pro 8, 9 and 10), PL3 under lockdown ⚠️, temperature sensor nodes for several devices open |
 | E Mainline submission | ⬜ merged linux-surface patches first; MMIO and PL3 paths ⚠️ |
 | F Device validation and profiles | 🔄 Pro 9 and Pro 10 control runs, Pro 8 readings; every x64 SMF device has a profile since 23.11.2026, reports to confirm them 🙋; reports of 18.–21.11. evaluated on 23.11., follow-ups open |
-| G Inputs to settle (brightness in nits, battery EWMA level, constants and estimates) | 🔄 |
+| G Inputs to settle (battery EWMA level, constants and estimates) | 🔄 |
 | H Outputs to classify (`/71`, modem and arm64 throttle channels, Laptop Studio dGPU) | ⬜ |
 | I Go 3 / Go 4 (ACPI EC) | 🔄 PL3 target settled 19.11.2026; PROCHOT release ⬜ |
 | J AMD, K Snapdragon | ⬜ 🙋 |

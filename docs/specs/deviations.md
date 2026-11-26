@@ -1,6 +1,6 @@
 # Deviations from Windows behaviour
 
-Version 0.4, 25.11.2026 (DV-8 after the module tests on the SB3, DS-5; 0.3: the MMIO path implemented; 0.4: DV-2 and DV-12 for absent base sensors, B13). Implements G-3, NFR-10, AC-X3. Every known or possible difference between this implementation and Windows'
+Version 0.5, 26.11.2026 (0.5: DV-3 after the Windows trace; DV-8 after the module tests on the SB3, DS-5; 0.3: the MMIO path implemented; 0.4: DV-2 and DV-12 for absent base sensors, B13). Implements G-3, NFR-10, AC-X3. Every known or possible difference between this implementation and Windows'
 SMF is listed here. Intended improvements are opt-in and off by default; none exists yet (ideas in `../requirements/ideas.md`).
 
 ## 1. Unavoidable (no Linux counterpart)
@@ -9,7 +9,7 @@ SMF is listed here. Intended improvements are opt-in and off by default; none ex
 |---|---|---|---|
 | DV-1 | Temperatures are polled every second. Windows reads them only when the EC trip point (42 °C on the SB3) is exceeded, and holds the last value below it. | None for control: every controller is OFF far above 42 °C. Below the trip point, Linux sees current values where Windows holds an old one. | always |
 | DV-2 | KIP/base temperatures (600 + iid) exist only while the SB3 base is attached (kernel nodes since kernel#190, 17.11.2026). Without the base they are absent (`supervisor.md` 4.1): invalid, block defaults, no emergency; as on Windows, where the base thermal client is removed with the base [C]. | Controller 4 (dGPU) OFF, the base part of the thermal actions gives no request; the limits stay in control. The look-up after a re-attach takes up to 5 s. | while the base is detached |
-| DV-3 | Display brightness in nits is not available. | PL4 uses 3 W display power (the Windows fallback without a value). At most ~3 W difference in PL4. | channel invalid; optional profile value |
+| DV-3 | Display brightness in nits is not provided. On the SB3 15" the Windows client did not query it either in the measured state (`inputs.md` 5). | PL4 uses 3 W display power (the block default without a value). On the SB3 15" the same as Windows, or PL4 3 W lower if the core read the client's start status as 0 [H]. Other devices with channel 41: not measured. Accepted by the maintainer 26.11.2026 (plan G1). | channel invalid |
 | DV-4 | Slider states 8 – 10 (game mode, mixed reality, service flag) do not exist on Linux. Low-power on AC maps to Recommended. | Linux never selects these states. | fixed mapping (OD-4) |
 | DV-5 | The dGPU limit, WTMF and fan outputs have no Linux target. On the SB3 (GTX 1660 Ti, driver 595), `nvidia-smi -pl` is refused with or without persistence mode, and Dynamic Boost (`nvidia-powerd`) needs Ampere or newer; the driver reports it as not supported. | Computed and logged only. A clock-cap stand-in is a backup concept (I-4). | log-only |
 | DV-6 | `0x53` data comes from requests instead of EC events. | Values are fresher than on Windows (where events sometimes did not arrive). | always |
