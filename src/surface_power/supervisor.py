@@ -178,7 +178,8 @@ def load_profiles(directory: str = PROFILE_DIR) -> list[Profile]:
 
 
 def find_profile(device: Device, directory: str = PROFILE_DIR) -> Profile | None:
-    for p in load_profiles(directory):
+    # A match by SKU is the more specific one: it wins over a match by product name alone, whatever the file names.
+    for p in sorted(load_profiles(directory), key=lambda p: p.sku is None):
         if (p.product is None or p.product == device.product) and (p.sku is None or device.sku in p.sku):
             return p
     return None

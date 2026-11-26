@@ -59,9 +59,9 @@ class DetectTest(unittest.TestCase):
 
     def test_shipped_profiles_load(self):
         names = {p.file for p in supervisor.load_profiles()}
-        self.assertLessEqual({"surface-book-3.toml", "surface-pro-8.toml", "surface-go-3.toml", "surface-laptop-go.toml",
+        self.assertLessEqual({"surface-book-3.toml", "surface-book-3-15.toml", "surface-pro-8.toml", "surface-go-3.toml", "surface-laptop-go.toml",
                               "surface-laptop-studio.toml", "surface-laptop-3-amd.toml", "surface-laptop-4-amd.toml"}, names)
-        classic = {"surface-book-3.toml", "surface-pro-8.toml", "surface-go-3.toml", "surface-laptop-go.toml",
+        classic = {"surface-book-3.toml", "surface-book-3-15.toml", "surface-pro-8.toml", "surface-go-3.toml", "surface-laptop-go.toml",
                    "surface-laptop-studio.toml", "surface-laptop-3-amd.toml", "surface-laptop-4-amd.toml"}
         self.assertTrue(all((p.variant == "classic") == (p.file in classic) for p in supervisor.load_profiles()))
         self.assertFalse(any(p.tested for p in supervisor.load_profiles()))
@@ -76,7 +76,7 @@ class DetectTest(unittest.TestCase):
         # PL3 only where Windows' write of MSR 0x615 is verified in the device's driver (docs/research/10-outputs.md 4.1)
         # (Go 3/Go 4: platform type from the ACPI _DSM of the public DSDT dumps)
         self.assertEqual({p.file for p in supervisor.load_profiles() if p.pl3 is True},
-                         {"surface-book-3.toml", "surface-pro-8.toml", "surface-pro-9.toml", "surface-pro-10.toml",
+                         {"surface-book-3.toml", "surface-book-3-15.toml", "surface-pro-8.toml", "surface-pro-9.toml", "surface-pro-10.toml",
                           "surface-laptop-go.toml", "surface-laptop-studio.toml", "surface-laptop-studio-2.toml",
                           "surface-pro-7-plus.toml", "surface-pro-10-5g.toml", "surface-pro-11-intel.toml",
                           "surface-laptop-4-intel.toml", "surface-laptop-5.toml", "surface-laptop-6.toml",
@@ -86,12 +86,57 @@ class DetectTest(unittest.TestCase):
         self.assertFalse(any(p.pl4_requires_ec or p.notes for p in supervisor.load_profiles() if p.file != "surface-pro-10.toml"))
 
 
+class SurfaceBook3SplitTest(unittest.TestCase):
+    """Plan C4/C5: the 15" has a profile of its own, matched by its SKU, so that `tested` can never reach the 13" or any
+    other variant. SKUs: Microsoft's SKU reference; the 15" value is the one measured on the reference device."""
+
+    def setUp(self):
+        self.fs = FakeSys()
+
+    def tearDown(self):
+        self.fs.cleanup()
+
+    def profile(self, sku, directory=None):
+        self.fs.write("sys/class/dmi/id/product_sku", sku)
+        args = () if directory is None else (directory,)
+        return supervisor.find_profile(supervisor.detect(self.fs.root), *args)
+
+    def test_only_the_15_inch_sku_gets_the_15_inch_profile(self):
+        self.assertEqual(self.profile("Surface_Book_3_1899").file, "surface-book-3-15.toml")
+        for sku in ("Surface_Book_3_1900", "Surface_Book_3_1908", "Surface_Book_3_for_Business_1899", ""):
+            p = self.profile(sku)
+            self.assertEqual((p.file, p.tested), ("surface-book-3.toml", False), sku)
+
+    def test_the_two_profiles_differ_only_in_the_match_and_tested(self):
+        import tomllib
+        def load(name):
+            with open(os.path.join(supervisor.PROFILE_DIR, name), "rb") as f:
+                d = tomllib.load(f)
+            return d.pop("match"), d.pop("tested"), d
+        match15, _, rest15 = load("surface-book-3-15.toml")
+        match, tested, rest = load("surface-book-3.toml")
+        self.assertEqual(rest15, rest)                              # a change of an option has to reach both
+        self.assertEqual(match, {"product_name": "Surface Book 3"})
+        self.assertEqual(match15, {"product_name": "Surface Book 3", "sku": ["Surface_Book_3_1899"]})
+        self.assertFalse(tested)                                    # never tested: it covers the 13" and unknown variants
+
+    def test_a_sku_match_wins_over_a_name_match_whatever_the_file_names(self):
+        with tempfile.TemporaryDirectory() as td:
+            with open(os.path.join(td, "a-name-only.toml"), "w") as f:
+                f.write('[match]\nproduct_name = "Surface Book 3"\n')
+            with open(os.path.join(td, "z-by-sku.toml"), "w") as f:
+                f.write('tested = true\n[match]\nproduct_name = "Surface Book 3"\nsku = "Surface_Book_3_1899"\n')
+            self.assertEqual(self.profile("Surface_Book_3_1899", td).file, "z-by-sku.toml")
+            self.assertEqual(self.profile("Surface_Book_3_1900", td).file, "a-name-only.toml")
+
+
 class DgpuProfileOptionTest(unittest.TestCase):
     """dGPU stand-in options (spec outputs 6.2): the Laptop Studio profiles ship with both off; the SB3 has it on."""
 
     def test_shipped_profiles(self):
         by = {p.file: p for p in supervisor.load_profiles()}
         self.assertTrue(by["surface-book-3.toml"].dgpu_clock_cap)
+        self.assertTrue(by["surface-book-3-15.toml"].dgpu_clock_cap)
         for name in ("surface-laptop-studio.toml", "surface-laptop-studio-2.toml"):
             self.assertFalse(by[name].dgpu_clock_cap, name)
             self.assertFalse(by[name].dgpu_clock_cap_dry_run, name)

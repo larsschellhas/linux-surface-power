@@ -34,7 +34,7 @@ DKMS_KEYS = (("var/lib/shim-signed/mok/MOK.priv", "var/lib/shim-signed/mok/MOK.d
 # Platform type per profile for the read-only module test (`kernel-mmio-rapl.md` 6.1 item 2; types from `research/15` 2, device-to-type mapping from the
 # earlier driver notes, not re-verified there [H]). A wrong type only makes the module refuse: its MCHBAR check compares the config with the constant.
 PLATFORM = {
-    "surface-book-3.toml": "icelake", "surface-laptop-go.toml": "icelake", "surface-go-3.toml": "icelake",
+    "surface-book-3.toml": "icelake", "surface-book-3-15.toml": "icelake", "surface-laptop-go.toml": "icelake", "surface-go-3.toml": "icelake",
     "surface-pro-7-plus.toml": "tigerlake", "surface-pro-8.toml": "tigerlake", "surface-laptop-4-intel.toml": "tigerlake",
     "surface-laptop-go-2.toml": "tigerlake", "surface-laptop-studio.toml": "tigerlake",
     "surface-pro-9.toml": "alderlake", "surface-laptop-5.toml": "alderlake", "surface-laptop-go-3.toml": "alderlake",

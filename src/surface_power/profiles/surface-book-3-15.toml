@@ -1,0 +1,25 @@
+# Device profile: Surface Book 3 15" (the reference device). Spec supervisor 6. Holds no limit values (G-2): those come from the
+# device's blob. Its own profile, matched by SKU, so that `tested` can never reach the 13" or another variant (plan C4, C5).
+# SKU: Microsoft's SKU reference (learn.microsoft.com, surface-system-sku-reference, read 26.11.2026: 15" 1899, 13" 1900),
+# measured on the reference device. The options must stay the same as in surface-book-3.toml (a test checks it).
+tested = false          # the maintainer's decision (plan C4)
+
+[match]
+product_name = "Surface Book 3"
+sku = ["Surface_Book_3_1899"]
+
+[blob]
+source = "efivar"
+
+[engine]
+variant = "classic"     # the SB3 driver package ships SMF core 3.140
+
+[outputs]
+# PL3 (MSR 0x615) and PL4 measured on the SB3 15" on 16.11.2026 (docs/research/10-outputs.md 4): both can be written, bind,
+# and restore exactly. Windows writes PL3 to MSR 0x615 on this device: its CPU client build (Ice Lake type) maps channel 59 to it
+# (docs/research/10-outputs.md 4). peak_power reads 0 here (no PL4 set by the firmware), so PL4 must be switched on explicitly.
+pl3 = true
+pl4 = true
+# dGPU stand-in (DO-1): restores the Windows dGPU limit (50 W on the Surface PSU) through a clock cap.
+# On by default for parity (G-1); without it the Linux driver lets the dGPU draw 65 W.
+dgpu_clock_cap = true

@@ -1,5 +1,6 @@
-# Device profile: Surface Book 3 (13" and 15"). Spec supervisor 6. Holds no limit values (G-2): those come from the device's blob.
-tested = false          # set to true once validated against Windows (NFR-1, AC-L1 - AC-L3)
+# Device profile: every other Surface Book 3: the 13" and variants whose SKU is not the 15" one (surface-book-3-15.toml).
+# Spec supervisor 6. Holds no limit values (G-2): those come from the device's blob. The options were measured on the 15" only.
+tested = false          # stays false until a device of this group is validated
 
 [match]
 product_name = "Surface Book 3"

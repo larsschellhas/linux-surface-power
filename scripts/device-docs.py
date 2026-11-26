@@ -470,7 +470,8 @@ def main() -> int:
         if key == "sb3":
             for tag, (page, title) in SB3.items():
                 sel = [f for f in files if tag in os.path.basename(f)]
-                pages[page] = (title, "surface-book-3.toml", "classic", sel, "intel")
+                profile = "surface-book-3-15.toml" if tag == "15in" else "surface-book-3.toml"
+                pages[page] = (title, profile, "classic", sel, "intel")
         else:
             page, title, profile, variant = spec
             pages[page] = (title, profile, variant, files, PLATFORM.get(key, "intel"))

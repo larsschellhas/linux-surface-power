@@ -117,7 +117,10 @@ offline and the blob runs on its block defaults; there is no device-wide fallbac
 ## 6. Device profiles (FR-D3)
 A profile is a small TOML file in `profiles/`. It holds no limit values (G-2). Fields:
 - **Match:**
-  - `match.product_name` and/or `match.sku` (one SKU or a list; the device's DMI `product_sku` must be one of them). At least one is needed;
+  - `match.product_name` and/or `match.sku` (one SKU or a list; the device's DMI `product_sku` must be one of them). At least one is needed.
+    A profile that matches by SKU wins over one that matches by the product name alone. The Surface Book 3 has both: the 15" by its SKU
+    (`surface-book-3-15.toml`), every other variant, the 13" included, by name (`surface-book-3.toml`, `tested` stays false there); the two
+    differ only in the match and in `tested` (checked by a test);
   - `blob.source`: `efivar` or a file path (form C devices).
 - **Engine and I/O:**
   - `engine.variant`: `classic` or `direct`;
