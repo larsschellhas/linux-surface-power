@@ -507,6 +507,9 @@ class PlatformPower(Source):
     event, so they are read on every call; the rating costs an EC request per read and is read on source changes and
     every 60 s. Without these attributes, the values are requested through the SSAM debug
     device (interim, NFR-11): at start, on AC changes and every 60 s. The two paths can be mixed per battery.
+
+    The base battery (`BAT2`) exists only while the base is attached. Without its power supply it is not asked and its
+    channels are invalid; when it is back it is asked at the next read (spec inputs 6).
     """
 
     REFRESH_MS = 60000
@@ -518,6 +521,7 @@ class PlatformPower(Source):
               (17, "<I", "rest_of_platform_power_mw", 6), (13, "<I", "available_input_power_mw", 8))
     BATTERIES = ((1, "BAT1", 0), (2, "BAT2", 100))      # (SSAM target, power_supply name, channel base)
     ARTG = ChannelRef(POWER, 7)
+    BASE_BATTERY = (2, "BAT2", 100)      # leaves with the detachable base (Surface Book)
     BATTERY_GROUPS = ("dptf", "dptf_battery")       # new kernel name first; the old one is on installed systems
     ADAPTER_GROUPS = ("dptf", "dptf_power")
 
@@ -536,6 +540,7 @@ class PlatformPower(Source):
         self.next_ms: int | None = None
         self.artg_next_ms: int | None = None
         self.ac: bool | None = None
+        self.base_attached = True
         self.ok = False
 
     def restrict(self, wanted: set[ChannelRef]) -> None:
@@ -551,6 +556,13 @@ class PlatformPower(Source):
 
     def _psy(self, *parts: str) -> str:
         return os.path.join(self.root, "sys/class/power_supply", *parts)
+
+    def _attached(self, name: str) -> bool:
+        return name != self.BASE_BATTERY[1] or os.path.isdir(self._psy(name))
+
+    def _present_batteries(self):
+        """The batteries the blob reads that are there now: a detached base battery is never asked."""
+        return [b for b in self._batteries() if self._attached(b[1])]
 
     def _sysfs_battery(self, name: str) -> str | None:
         for group in self.BATTERY_GROUPS:
@@ -570,11 +582,11 @@ class PlatformPower(Source):
     def needs_cdev(self) -> bool:
         """True if any value still has to come through the SSAM debug device."""
         return ((self._want_artg() and self._sysfs_artg() is None)
-                or any(self._sysfs_battery(n) is None for _, n, _ in self._batteries()))
+                or any(self._sysfs_battery(n) is None for _, n, _ in self._present_batteries()))
 
     def cdev_channels(self) -> set[ChannelRef]:
         """The channels that come only through the debug device (no kernel attribute for them)."""
-        out = {ChannelRef(POWER, base + f[3]) for _, n, base in self._batteries() if self._sysfs_battery(n) is None
+        out = {ChannelRef(POWER, base + f[3]) for _, n, base in self._present_batteries() if self._sysfs_battery(n) is None
                for f in self.FIELDS}
         if self._want_artg() and self._sysfs_artg() is None:
             out.add(self.ARTG)
@@ -615,7 +627,7 @@ class PlatformPower(Source):
     def refresh(self, ac: bool | None = None) -> None:
         """Requests through the debug device for everything the kernel does not provide and the blob reads."""
         self.retry_soon = False
-        for tid, name, base in self._batteries():
+        for tid, name, base in self._present_batteries():
             if self._sysfs_battery(name):
                 continue
             data = ask(self.transport, self.gate, f"0x53/{tid}", f"EC request 0x53 (battery target {tid})", self.log,
@@ -637,10 +649,25 @@ class PlatformPower(Source):
         self.zero_tries = 0
         self.gate.reset()
 
+    def _follow_base(self) -> None:
+        """Drop the values of a detached base battery; ask it again at once when it is back. Requests that failed while it
+        went away do not count against it."""
+        tid, name, base = self.BASE_BATTERY
+        attached = self._attached(name)
+        if not attached:
+            for *_, ch in self.FIELDS:
+                self.values[ChannelRef(POWER, base + ch)] = None
+            self.answers.pop(tid, None)
+        elif not self.base_attached:
+            self.gate.fails.pop(f"0x53/{tid}", None)
+            self.next_ms = None
+        self.base_attached = attached
+
     def read(self, now_ms):
         ac = _ac_online(self.root)
         if ac != self.ac:
             self.zero_tries = 0
+        self._follow_base()
         if self.needs_cdev and (self.next_ms is None or now_ms >= self.next_ms or ac != self.ac):
             self.refresh(ac)
             self.next_ms = now_ms + (self.ADAPTER_RETRY_MS if self.retry_soon else self.REFRESH_MS)
@@ -891,33 +918,31 @@ class XboxController(Source):
 
 class DgpuSensors(Source):
     """dGPU power `1FB53D4C/3` (mW) and temperature `2E8B14C2/101` (0.1 K) of the Laptop Studio (spec inputs 8.10).
-    Windows gets both from the NVIDIA driver. Here NVML is only asked while another process keeps the GPU awake,
-    at most every 2 s; a runtime-suspended GPU reads as 0 W with an invalid temperature."""
+    Windows gets both from the NVIDIA driver. Here they come from NVML through the idle gate (spec dgpu-standin-service 4):
+    a runtime-suspended GPU reads as 0 W with an invalid temperature, a pause keeps the last sample, a missing GPU is
+    invalid."""
 
-    SAMPLE_MS = 2000
-
-    def __init__(self, root: str = "/", nvml_factory=None, probe=None):
+    def __init__(self, root: str = "/", nvml_factory=None, gate=None):
         from . import gpu
-        self.gpu = gpu
-        self.root = root
-        self.factory = nvml_factory or gpu.Nvml
         self.pci = gpu.find_nvidia_gpu(root)
-        self.probe = probe or gpu.ClientProbe(root, self.pci)
+        self.gate = gate or gpu.GpuGate(root, self.pci, nvml_factory or gpu.Nvml)
         self.power, self.temp = ChannelRef(STATE, 3), ChannelRef(TEMP, 101)
         self.channels = {self.power, self.temp} if self.pci else set()
         self.values: dict[ChannelRef, float | None] = {self.power: None, self.temp: None}
-        self.next_ms = 0
+        self.gate.want_temp = True
+
+    def restrict(self, wanted: set[ChannelRef]) -> None:
+        self.gate.want_temp = self.temp in wanted
 
     def read(self, now_ms):
-        if self.gpu.runtime_status(self.root, self.pci) == "suspended":
+        state = self.gate.poll(now_ms)
+        if state == "asleep":
             self.values = {self.power: 0, self.temp: None}
-        elif now_ms >= self.next_ms and self.probe.has_client(now_ms):
-            self.next_ms = now_ms + self.SAMPLE_MS
-            try:
-                with self.factory(self.pci) as nv:
-                    self.values = {self.power: nv.read().power_w * 1000, self.temp: ZERO_C + 10 * nv.temperature_c()}
-            except self.gpu.NvmlError:
-                self.values = {self.power: None, self.temp: None}
+        elif state == "gone" or (state == "sampling" and self.gate.sample is None):
+            self.values = {self.power: None, self.temp: None}
+        elif state == "sampling":
+            t = self.gate.temp_c
+            self.values = {self.power: self.gate.sample.power_w * 1000, self.temp: None if t is None else ZERO_C + 10 * t}
         return dict(self.values)
 
 

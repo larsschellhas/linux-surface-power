@@ -14,6 +14,7 @@ import argparse
 import datetime as dt
 import faulthandler
 import os
+import select
 import signal
 import socket
 import sys
@@ -28,6 +29,7 @@ from .adapters.prochot import BATT_MODE, ProchotStage
 from .adapters.fan import FanStage, NullTransport, handles as fan_handles
 from .adapters import gpu
 from .adapters.gpu import ClockCapStandIn
+from .adapters.gpuclock import ClockHelper
 from .adapters import plpath, rapl_copies
 from .adapters import outputs as outputs_mod
 from .adapters.outputs import OutputStage, PathFailure
@@ -67,6 +69,8 @@ def parse_args(argv=None):
     ap.add_argument("--root", default="/", help=argparse.SUPPRESS)          # fake sysfs root for tests
     ap.add_argument("--run-dir", default="/run/surface-power")
     ap.add_argument("--state-dir", default="/var/lib/surface-power")
+    ap.add_argument("--gpu-clock-socket", help="socket of the clock helper surface-gpu-clockd "
+                                              "(default /run/surface-gpu-clock/sock)")
     ap.add_argument("--dgpu-clock-cap", action="store_true",
                     help="enable the dGPU clock-cap stand-in (deviation DO-1) even if the profile does not")
     ap.add_argument("--allow-partial-outputs", action="store_true",
@@ -156,12 +160,12 @@ class Daemon:
         self.battery_ec = inp.BatteryEcState(root, transport=transport)
         if not args.no_ec:
             self.platform.log = self.battery_ec.log = self.log
-        self.gpu_probe = gpu.ClientProbe(root, gpu.find_nvidia_gpu(root))   # shared: one /proc scan per 10 s at most
+        self.gpu_gate = gpu.GpuGate(root, gpu.find_nvidia_gpu(root))      # one idle gate for every NVML user
         sources = [inp.HwmonTemperatures(root), inp.SliderState(root), inp.Batteries(root), inp.Posture(root, dtx),
                    self.platform, inp.DisplayBrightness(root), inp.PlatformEvents(root), inp.BatteryCurrent(root),
                    self.battery_ec, inp.StandbyPhase(root), inp.UsbSourcePower(root),
                    inp.DgpuOnBattery(root), inp.ProximitySensor(root), inp.XboxController(root),
-                   inp.DgpuSensors(root, probe=self.gpu_probe), inp.CpuTempAverage(root)]
+                   inp.DgpuSensors(root, gate=self.gpu_gate), inp.CpuTempAverage(root)]
         self.cpu_ref = ChannelRef(inp.TEMP, 102)
         # Skin channels that controllers regulate on; the emergency rules watch them (spec supervisor 4).
         self.skin_refs = sorted({c.line.inputs[0] for c in self.graph.controllers if c.line.inputs[0].guid == inp.TEMP})
@@ -221,7 +225,10 @@ class Daemon:
         # set, in control mode too, and the dGPU limit stays a log-only output (it does not count as written).
         self.dgpu_observe = bool(p and p.dgpu_clock_cap_dry_run) and not (args.dgpu_clock_cap or (p and p.dgpu_clock_cap))
         if (args.dgpu_clock_cap or (p and (p.dgpu_clock_cap or p.dgpu_clock_cap_dry_run))) and DGPU in self.graph.outputs:
-            self.dgpu = ClockCapStandIn(root, dry_run=(self.mode != "control") or self.dgpu_observe, probe=self.gpu_probe)
+            self.dgpu = ClockCapStandIn(root, dry_run=(self.mode != "control") or self.dgpu_observe, gate=self.gpu_gate,
+                                        setter=ClockHelper(args.gpu_clock_socket or
+                                                           os.path.join(root, "run/surface-gpu-clock/sock")),
+                                        marker=os.path.join(args.run_dir, "gpu-cap"))
             if self.dgpu.pci is None:
                 # A model variant without an NVIDIA dGPU (e.g. a Surface Book 3 13" i5): the dGPU limit has nothing to act on. It
                 # counts as not needed instead of as a written output whose stand-in does nothing (found in the report review, 25.11.2026).
@@ -304,6 +311,14 @@ class Daemon:
             for g in (self.dgpu, self.dgpu_pending):
                 if g:
                     g.dry_run = True
+        # Without the clock helper only the stand-in is off (spec dgpu-standin-service 6, decision O3): it stays the output's
+        # path, says why it does not act, and the other limits are controlled.
+        for g in (self.dgpu, self.dgpu_pending):
+            if g and self.mode == "control" and not g.dry_run:
+                os.makedirs(args.run_dir, exist_ok=True)
+                g.check_helper()
+                for prio, text in g.drain_events():
+                    self.log(prio, text)
         self.snapshot = None
         if self.mode == "control":
             keys = [k for k in self.outputs.snapshot_keys() + self.throttle.snapshot_keys()
@@ -488,6 +503,8 @@ class Daemon:
         for c in self.graph.controllers:
             cols += [f"ctl{c.line.id}.state", f"ctl{c.line.id}.set", f"ctl{c.line.id}.u"]
         cols += [str(r) for r in sorted(self.graph.outputs)]
+        if self.dgpu or self.dgpu_pending:             # whether the dGPU limit acts (spec dgpu-standin-service 7)
+            cols += ["dgpu.gate", "dgpu.cap_mhz", "dgpu.power_w"]
         return cols
 
     def _core_invalid(self) -> bool:
@@ -623,6 +640,7 @@ class Daemon:
                 self.dgpu.step(now_ms, rounded[DGPU] / 1000 if DGPU in rounded else None)
             else:
                 self.dgpu.release()                 # emergency, yielded: firmware state = no cap
+            self._log_dgpu()
 
         self._log_changes()
         for r in runs:
@@ -637,6 +655,12 @@ class Daemon:
             row += [STATE_NAMES.get(c.state), c.cur, round(c.u, 3)]
         rounded = self.engine.rounded_outputs()
         row += [rounded.get(r, "") for r in sorted(self.graph.outputs)]
+        if "dgpu.gate" in self.series.columns:
+            st = self.dgpu.status() if self.dgpu else None
+            # Power only from a live sample: the pause and the sleep have no reading.
+            live = st is not None and st["gate"] == "sampling"
+            row += ["" if st is None else st["gate"], "" if st is None or st["cap_mhz"] is None else st["cap_mhz"],
+                    st["power_w"] if live and st["power_w"] is not None else ""]
         self.series.write(row)
 
     def _write_status(self) -> None:
@@ -646,6 +670,8 @@ class Daemon:
             if ref in self.actions.channels:
                 return "thermal action" if self.mode == "control" else "thermal action (not armed)"
             if ref == DGPU and self.dgpu:
+                if not self.dgpu.enabled:
+                    return f"clock-cap stand-in, off: {self.dgpu.error}"
                 if self.dgpu_observe:
                     return "clock-cap stand-in (observe only)"
                 return "clock-cap stand-in" if self.state == "control" else "clock-cap stand-in (dry-run)"
@@ -747,17 +773,36 @@ class Daemon:
         return entry
 
     # --- sleep, stop ---
-    def before_sleep(self) -> None:
+    def _log_dgpu(self) -> None:
+        for prio, text in self.dgpu.drain_events():
+            self.log(prio, text)
+
+    def _release_dgpu(self) -> None:
+        """Release the clock cap and log what went wrong (a cap may stay set)."""
         if self.dgpu:
             self.dgpu.release()
-        self.before_pause = self.state
+            self._log_dgpu()
+
+    def before_sleep(self, signalled: float | None = None) -> None:
+        # The GPU is left alone: this runs after nvidia-suspend.service, where an NVML call hangs until the resume and would
+        # hold up the restore of every other output (spec dgpu-standin-service 6) [M, SB3].
+        if self.state != "paused":                   # a second signal must not make "paused" the state to return to
+            self.before_pause = self.state
         self._enter("paused", "system goes to sleep")
+        # The sleep hook waits for this: the status says "paused" only after the restore (spec supervisor 7).
+        self._write_status()
+        if signalled is not None:
+            self.log("notice", f"paused: firmware values restored, {(time.monotonic() - signalled) * 1000:.0f} ms "
+                               "after the sleep signal")
 
     def after_resume(self, now_ms: int) -> None:
         if self.state != "paused":
             self.before_pause = self.state
         self.log("notice", "resume: engine reset")
         self.sched.reset(now_ms)
+        self.gpu_gate.reset()
+        if self.dgpu:
+            self.dgpu.after_sleep()
         self.platform.request_refresh()
         self.battery_ec.request_refresh()
         self.state = self.before_pause or self.mode
@@ -770,8 +815,7 @@ class Daemon:
             self.throttle.forget()
 
     def stop(self) -> None:
-        if self.dgpu:
-            self.dgpu.release()
+        self._release_dgpu()
         if self.snapshot:
             if self.snapshot.fan_unrestorable:
                 self.log("warning", "fan or charging thresholds were sent that have no neutral value: "
@@ -786,6 +830,35 @@ class Daemon:
         self.log("notice", "stopped; firmware values restored" if self.snapshot else "stopped")
 
 
+class Wakeup:
+    """The wait between two cycles, ended at once by a signal. time.sleep() goes on after a signal handler, so the sleep
+    signal waited for the next tick while the sleep hook let the system suspend (plan B16)."""
+
+    def __init__(self):
+        self.read_fd, self.write_fd = os.pipe()
+        os.set_blocking(self.read_fd, False)
+        os.set_blocking(self.write_fd, False)
+        self.previous = None
+
+    def install(self) -> None:
+        self.previous = signal.set_wakeup_fd(self.write_fd, warn_on_full_buffer=False)
+
+    def wait(self, seconds: float) -> None:
+        if select.select([self.read_fd], [], [], max(0.0, seconds))[0]:
+            try:
+                while os.read(self.read_fd, 512):
+                    pass
+            except BlockingIOError:
+                pass
+
+    def close(self) -> None:
+        if self.previous is not None:
+            signal.set_wakeup_fd(self.previous)
+            self.previous = None
+        os.close(self.read_fd)
+        os.close(self.write_fd)
+
+
 def run(argv=None) -> int:
     faulthandler.enable()          # a hang killed by the watchdog (SIGABRT) leaves the Python stacks in the journal
     args = parse_args(argv)
@@ -796,26 +869,29 @@ def run(argv=None) -> int:
         journal.log("notice", f"idle: {e}")
         return 0
     stop = {"flag": False}
-    pending = {"sleep": False, "resume": False}
+    pending = {"sleep": None, "resume": False}
     signal.signal(signal.SIGTERM, lambda *_: stop.update(flag=True))
     signal.signal(signal.SIGINT, lambda *_: stop.update(flag=True))
-    signal.signal(signal.SIGUSR2, lambda *_: pending.update(sleep=True))
+    signal.signal(signal.SIGUSR2, lambda *_: pending.update(sleep=time.monotonic()))
     signal.signal(signal.SIGUSR1, lambda *_: pending.update(resume=True))
+    wake = Wakeup()
+    wake.install()
     _sd_notify("READY=1")
     offset = time.clock_gettime(time.CLOCK_BOOTTIME) - time.monotonic()
     try:
         while not stop["flag"]:
             now = int(time.monotonic() * 1000)
             new_offset = time.clock_gettime(time.CLOCK_BOOTTIME) - time.monotonic()
-            if pending["sleep"]:
-                pending["sleep"] = False
-                d.before_sleep()
+            if pending["sleep"] is not None:
+                signalled, pending["sleep"] = pending["sleep"], None
+                d.before_sleep(signalled)
             if pending["resume"] or new_offset - offset > 5:
                 pending["resume"] = False
                 d.after_resume(now)
             offset = new_offset
             d.cycle(now)
-            time.sleep(1 - (time.monotonic() % 1))
+            if pending["sleep"] is None:                  # a signal during the cycle is handled at once
+                wake.wait(1 - (time.monotonic() % 1))
     except PathFailure:     # logged by the daemon; restore and exit with an error, systemd restarts (spec kernel-mmio-daemon 4.1)
         d.stop()
         return 1

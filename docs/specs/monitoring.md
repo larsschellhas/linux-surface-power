@@ -1,6 +1,6 @@
 # Spec: monitoring
 
-Version 0.1, 14.11.2026. Implements FR-M1 – FR-M5. Tests: AC-L5. Markers as in `blob-format.md`.
+Version 0.2, 26.11.2026 (0.2: dGPU columns in the time series, a new file for another column set). Implements FR-M1 – FR-M5. Tests: AC-L5. Markers as in `blob-format.md`.
 
 ## 1. Journal (FR-M1)
 Messages go to stderr; systemd stores them in the journal. Each line starts with a syslog priority prefix (`<3>` error, `<4>` warning, `<5>` notice, `<6>` info, `<7>` debug).
@@ -46,7 +46,10 @@ Temperatures are logged in °C, power in W. Blob units are converted for logging
     cannot be read, else null), `mmio_below_computed` (msr path) or `msr_below_computed` (mmio path) while the other copy is enabled below the computed value.
 
 ## 3. Time series (FR-M3)
-- **Location:** `/var/lib/surface-power/series-YYYYMMDD.csv`, one row per engine run.
+- **Location:** `/var/lib/surface-power/series-YYYYMMDD.csv`, one row per engine run. If the day's file has another header (an update,
+  another blob), the daemon starts `series-YYYYMMDD-2.csv` (then `-3` …) and never appends under a foreign header.
+- **dGPU columns** (only with the stand-in): `dgpu.gate`, `dgpu.cap_mhz` (the cap that is set), `dgpu.power_w` (only from a live
+  sample). The computed limit alone did not show that no cap was ever set (B15).
 - **Columns:** time, run kind (`async`/`timer`), slider, every input channel the blob reads, every controller (state, set, U), every output (engine value, written value).
 - **Retention:** files older than 7 days or beyond 50 MiB in total are deleted, oldest first [D].
 - **Format:** the same as the replay input format (`tools.md` 2), so a recorded series can be replayed directly.

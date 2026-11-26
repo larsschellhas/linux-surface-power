@@ -1,6 +1,6 @@
 # Spec: input adapters
 
-Version 0.5, 26.11.2026 (0.3: base sensors absent and looked up again, B13; 0.4: section 5 checked in the SB3 display client, G1; 0.5: measured under Windows, no nits estimate). Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC-I3. Markers as in `blob-format.md`.
+Version 0.6, 26.11.2026 (0.6: a detached base battery is not asked, B14; posture 2 measured; 0.3: base sensors absent and looked up again, B13; 0.4: section 5 checked in the SB3 display client, G1; 0.5: measured under Windows, no nits estimate). Implements FR-I1 – FR-I8, NFR-11. Tests: AC-I1 – AC-I3. Markers as in `blob-format.md`.
 
 ## 1. Interface
 - **Adapter role:** each adapter owns one or more device input channels (`GUID/channel`). On `read(now_ms)` it returns `{channel: value | None}` in blob units. `None` means invalid.
@@ -79,7 +79,7 @@ and shows that the EC answers the sensor requests through the debug device (mask
 **Measured on the SB3 15" (15.11.2026, lid open):** the device mode follows the base as expected. Attached gives mode 1 (posture 1),
 detached gives mode 0 with base state 0 (posture 3), and the display attached the other way round gives mode 2 (posture 5).
 - During detaching, mode 0 appears up to 2 s before the base state changes. During attaching, mode 1 can show for under a second before mode 2.
-- The Linux side of the mapping is confirmed. Whether Windows also reports 3 for a detached display stays [H]. Closing the lid in studio mode changed nothing: `/proc/acpi/button/lid` stayed open, so posture 4 is not seen on Linux this way. Laptop with the lid closed (2) was not tested.
+- The Linux side of the mapping is confirmed. Whether Windows also reports 3 for a detached display stays [H]. Closing the lid in studio mode changed nothing: `/proc/acpi/button/lid` stayed open, so posture 4 is not seen on Linux this way. Laptop with the lid closed (2): measured 26.11.2026 (posture 2 from 11:29:50 to 11:31:48, daemon time series, no suspend): the computed PL1 went from 30 to 15 W and the dGPU limit from 50 to 25 W [M].
 
 The SB3 15" blob reads only posture 1, through the PL1 and dGPU posture tables. Laptop, the normal case, gives 30 W, which does not limit.
 
@@ -137,6 +137,7 @@ The same payload also arrives as an EC event on some devices (surface-aggregator
   - otherwise every 60 s [D].
 - **Validity:** a failed request makes its channels invalid. They are never 0. A 0 in an answer is a value, with one exception below.
 - **Only what the blob reads:** a command the EC does not know times out (kernel#195 review). The daemon sends `0x53` per battery only if the blob reads a channel of that battery, `0x0f` only for `28B7BD85/7`, `0x1A` only for `/13` and `0x69` only for `/16`. The Pro 9 blob reads `/13` but not `/16`, so it never gets `0x69`; it has no base battery (KIP), so it never gets the second `0x53`.
+- **Detached base battery (B14, 26.11.2026) [D]:** the base battery exists only while the base is attached. Without the power supply `BAT2` the daemon sends no `0x53` to KIP, and the channels `28B7BD85/102 – 108` are invalid at once, also where they came from the kernel attributes. When `BAT2` is back it is asked at the next read; failures counted while the base went away are dropped. BAT1 (SAM) is not gated. As Windows, where the base's battery client is removed with the base [C, `knowledge/sb3-detach-and-base.md`]. Only the SB3 13" and 15" blobs of the corpus read one of these channels (`/103`, dGPU limit only) [C, 26.11.2026]. Before this, a missing attribute made the daemon ask the detached base, three times without an answer, and log "not sent again until the next resume" [M, SB3, 26.11.2026]. Tested on a fake sysfs. Two real detaches with this code on 26.11.2026 showed no EC warning, but the base was off for only about 11 s each, too short to tell (the old code warned after 27 s and 2 min) [M]; a longer detach is open.
 - **No retry forever:** a request that gets no answer three times in a row is not sent again until the next resume (one more try then). The input stays invalid and one warning says which command it was. A missing debug device is not counted (it is reported once at start).
 - **Adapter rating 0 on AC [H]:** the Pro 9 report tool read 0 mW with the charger connected, the daemon 38745 mW (a 39 W supply). On battery 0 is valid: the blob reads exactly 0 as "no adapter" (psys PL1 100 W, battery mode 1). On AC it cannot be true, so the daemon counts it as unknown (invalid), asks again after 5 s up to three times, then every 60 s. Cause of the first 0 not shown; the report tool had just sent a `0x69` that timed out (which it no longer sends there) [H]. `0x80000000` ("not present") stays invalid.
 - **Zero fields on the Pro 9 [H]:** the `0x53` answer is complete (21 bytes), but available input power (`/8`) and rest of platform (`/6`) read 0 on AC. The daemon uses them as 0. In the Pro 9 blob they reach only PL4: with a peak power of 142 W the clamp (130 W) hides them; with a low peak power (e.g. 40 W) a 0 in `/8` lowers PL4 a lot (peak 40 W: PL4 34 W with `/8` 0, 93 W with 45.7 W). Whether Windows takes these two fields from the `0x53` EVENT instead of the request is not shown (the event has the same layout on the SP7/Laptop 3, surface-aggregator-module#29). The daemon does not listen to events through the debug device (it needs the event ioctls, not used elsewhere): open point, to be decided with a Pro 9 `0x53` event log.
@@ -214,6 +215,7 @@ missing source keeps the device in dry-run (`supervisor.md` 2.5). None of these 
 
 ### 8.10 dGPU power and temperature (`1FB53D4C/3`, `2E8B14C2/101`)
 - Windows: the Surface GPU power controller gets both from the NVIDIA driver.
-- Linux: NVML (`nvmlDeviceGetPowerUsage`, `nvmlDeviceGetTemperature`), at most every 2 s and only while another process has an
-  NVIDIA device open, as for the clock-cap stand-in (`outputs.md` 6). A runtime-suspended GPU gives 0 mW and an invalid temperature.
+- Linux: NVML (`nvmlDeviceGetPowerUsage`, `nvmlDeviceGetTemperature`), at most every 2 s, through the idle gate shared with the
+  clock-cap stand-in (`dgpu-standin-service.md` 4): a runtime-suspended GPU gives 0 mW and an invalid temperature without a query, the
+  pause after idle samples keeps the last values, a missing GPU is invalid.
   Provided where an NVIDIA display controller exists.

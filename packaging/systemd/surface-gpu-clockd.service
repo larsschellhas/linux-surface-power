@@ -1,0 +1,42 @@
+# The clock helper of the dGPU stand-in (spec dgpu-standin-service 5): the only unit with CAP_SYS_ADMIN, which the NVIDIA driver
+# asks for the locked clocks. Started by its socket. The block below is the unit measured as a whole on the Surface Book 3
+# (spec 5.3, M3, driver 595.99.02); it runs as root because DynamicUser with the ambient capability is refused [M].
+[Unit]
+Description=Surface dGPU clock cap helper
+Documentation=https://github.com/larsschellhas/linux-surface-power
+Requires=surface-gpu-clockd.socket
+After=surface-gpu-clockd.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/surface-gpu-clockd
+Restart=on-failure
+RestartSec=5
+CapabilityBoundingSet=CAP_SYS_ADMIN
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@mount @module @reboot @swap @debug @raw-io @obsolete
+DevicePolicy=closed
+DeviceAllow=/dev/nvidia0 rw
+DeviceAllow=/dev/nvidiactl rw
+InaccessiblePaths=-/sys/firmware/efi/efivars -/dev/surface
+MemoryMax=64M

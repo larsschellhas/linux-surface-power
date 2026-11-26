@@ -1,6 +1,6 @@
 # Deviations from Windows behaviour
 
-Version 0.5, 26.11.2026 (0.5: DV-3 after the Windows trace; DV-8 after the module tests on the SB3, DS-5; 0.3: the MMIO path implemented; 0.4: DV-2 and DV-12 for absent base sensors, B13). Implements G-3, NFR-10, AC-X3. Every known or possible difference between this implementation and Windows'
+Version 0.6, 26.11.2026 (0.6: DO-1 does not act under the unit, B15; 0.5: DV-3 after the Windows trace; DV-8 after the module tests on the SB3, DS-5; 0.3: the MMIO path implemented; 0.4: DV-2 and DV-12 for absent base sensors, B13). Implements G-3, NFR-10, AC-X3. Every known or possible difference between this implementation and Windows'
 SMF is listed here. Intended improvements are opt-in and off by default; none exists yet (ideas in `../requirements/ideas.md`).
 
 ## 1. Unavoidable (no Linux counterpart)
@@ -49,4 +49,4 @@ SMF is listed here. Intended improvements are opt-in and off by default; none ex
 
 | ID | Stand-in | For | Default |
 |---|---|---|---|
-| DO-1 | dGPU clock cap regulated to the measured dGPU power (`outputs.md` 6) | output 201, which has no Linux power-limit target (DV-5) | per profile option `dgpu_clock_cap`; on for the SB3 (parity: 50 W instead of the driver's 65 W) |
+| DO-1 | dGPU clock cap regulated to the measured dGPU power (`outputs.md` 6) | output 201, which has no Linux power-limit target (DV-5) | per profile option `dgpu_clock_cap`; on for the SB3 (parity: 50 W instead of the driver's 65 W). **In the installed version 551631c it does not act under the daemon's unit** [M, 26.11.2026, plan B15]: the computed limit reaches no output and the GPU keeps the driver's limit. Fixed (`dgpu-standin-service.md`: idle gate, clock helper) and tested under the installed units on 26.11.2026: 49.1 W against 50.0 W [M, 13.1] |

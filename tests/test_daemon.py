@@ -60,10 +60,19 @@ class DaemonTest(unittest.TestCase):
         self.run.cleanup()
         self.state.cleanup()
 
-    def start(self, *extra):
+    def start(self, *extra, stream=None):
         args = ["--root", self.fs.root, "--blob", self.blob, "--run-dir", self.run.name, "--state-dir", self.state.name,
                 "--no-ec", *extra]
-        return daemon.Daemon(daemon.parse_args(args), monitor.Journal(stream=io.StringIO()))
+        return daemon.Daemon(daemon.parse_args(args), monitor.Journal(stream=stream or io.StringIO()))
+
+    def helper(self, nvml):
+        """The clock helper at the daemon's default socket below the fake root; it sets the cap on `nvml`."""
+        from fakehelper import HelperThread
+        path = self.fs.path("run/surface-gpu-clock/sock")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        thread = HelperThread(path, self.fs.root, nvml)
+        self.addCleanup(thread.stop)
+        return thread
 
     def status(self):
         with open(os.path.join(self.run.name, "status.json")) as f:
@@ -383,8 +392,9 @@ class DaemonTest(unittest.TestCase):
             f.write(blob_text(extra=b.algorithms))                       # dGPU limit 201 = 50 W in every slider state
         self.fs.write(f"sys/bus/pci/devices/{PCI}/vendor", "0x10de")
         self.fs.write(f"sys/bus/pci/devices/{PCI}/class", "0x030200")
-        self.fs.link_raw("proc/4242/fd/7", "/dev/nvidia0")             # another client keeps the GPU awake
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "active")
         nvml = FakeNvml()
+        self.helper(nvml)
         d = self.start("--control", "--dgpu-clock-cap")
         d.dgpu.factory = lambda pci: nvml
         d.cycle(0)
@@ -412,7 +422,7 @@ class DaemonTest(unittest.TestCase):
             f.write(blob_text(extra=b.algorithms))
         self.fs.write(f"sys/bus/pci/devices/{PCI}/vendor", "0x10de")
         self.fs.write(f"sys/bus/pci/devices/{PCI}/class", "0x030200")
-        self.fs.link_raw("proc/4242/fd/7", "/dev/nvidia0")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "active")
         nvml = FakeNvml()
         prof = supervisor.Profile("x.toml", None, None, "classic", True, dgpu_clock_cap_dry_run=True)
         with mock.patch.object(supervisor, "find_profile", return_value=prof):
@@ -428,6 +438,123 @@ class DaemonTest(unittest.TestCase):
         self.assertIn(daemon.DGPU, d.unwritten)                               # a blob with 201 still counts it as not written
         d.stop()
         self.assertIsNone(nvml.cap)
+
+    def test_dgpu_stand_in_that_cannot_act_says_so(self):
+        """B15: the cap call is refused (as under the installed unit): status, output list, log and series show it."""
+        from surface_power.adapters import gpu
+        from test_gpu import PCI, FakeNvml
+        b = BlobBuilder()
+        b.line(G["lookup_table"], 20, [(SYSTEM, 1)], [(LIMITS, 201)], [6, 50000, 50000, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6,
+                                                                     50000, 50000, 50000, 50000, 50000, 50000])
+        with open(self.blob, "w") as f:
+            f.write(blob_text(extra=b.algorithms))
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/vendor", "0x10de")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/class", "0x030200")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "active")
+        nvml = FakeNvml()
+        self.helper(nvml)
+        nvml.set_error = gpu.NvmlError("nvmlDeviceSetGpuLockedClocks returned 4", 4)
+        buf = io.StringIO()
+        d = self.start("--control", "--dgpu-clock-cap", stream=buf)
+        d.dgpu.factory = lambda pci: nvml
+        d.cycle(0)
+        d.cycle(1000)
+        st = self.status()
+        self.assertEqual((d.state, st["dgpu"]["acting"]), ("control", False))    # the other limits stay controlled
+        out = {o["channel"]: o for o in st["outputs"]}
+        self.assertTrue(out["0B7B5350/201"]["target"].startswith("clock-cap stand-in, off: "))
+        self.assertEqual(buf.getvalue().count("dGPU stand-in off for this run"), 1)
+        d.stop()
+
+    def test_without_a_clock_helper_only_the_stand_in_is_off(self):
+        """Decision O3: the CPU and psys limits stay controlled; log, status and the output list name the reason."""
+        from test_gpu import PCI
+        b = BlobBuilder()
+        b.line(G["lookup_table"], 20, [(SYSTEM, 1)], [(LIMITS, 201)], [6, 50000, 50000, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6,
+                                                                     50000, 50000, 50000, 50000, 50000, 50000])
+        with open(self.blob, "w") as f:
+            f.write(blob_text(extra=b.algorithms))
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/vendor", "0x10de")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/class", "0x030200")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "active")
+        buf = io.StringIO()
+        d = self.start("--control", "--dgpu-clock-cap", stream=buf)
+        d.cycle(0)
+        st = self.status()
+        self.assertEqual((d.mode, d.state), ("control", "control"))
+        self.assertEqual((st["dgpu"]["acting"], st["dgpu"]["helper"].startswith("unreachable")), (False, True))
+        out = {o["channel"]: o for o in st["outputs"]}
+        self.assertIn("clock helper", out["0B7B5350/201"]["target"])
+        self.assertEqual(buf.getvalue().count("dGPU stand-in off for this run"), 1)
+        d.stop()
+
+    def test_dgpu_is_not_touched_around_a_system_sleep(self):
+        """The daemon hears of the sleep after nvidia-suspend.service [M, SB3]: an NVML call or a helper request then hangs
+        until the resume and holds up the restore of every other output."""
+        from test_gpu import PCI, FakeNvml
+        b = BlobBuilder()
+        b.line(G["lookup_table"], 20, [(SYSTEM, 1)], [(LIMITS, 201)], [6, 50000, 50000, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6,
+                                                                     50000, 50000, 50000, 50000, 50000, 50000])
+        with open(self.blob, "w") as f:
+            f.write(blob_text(extra=b.algorithms))
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/vendor", "0x10de")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/class", "0x030200")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "active")
+        nvml = FakeNvml()
+        self.helper(nvml)
+        d = self.start("--control", "--dgpu-clock-cap")
+        d.dgpu.factory = lambda pci: nvml
+        d.cycle(0)
+        self.assertEqual(nvml.cap, 1260)
+        before = (nvml.sessions, nvml.closed, nvml.reads)
+        d.before_sleep()
+        d.cycle(1000)                                                    # paused
+        self.assertEqual(((nvml.sessions, nvml.closed, nvml.reads), nvml.cap), (before, 1260))
+        nvml.cap = None
+        nvml.power, nvml.clock = 50.2, 1260
+        d.after_resume(2000)
+        d.cycle(2000)
+        self.assertEqual((nvml.cap, self.status()["dgpu"]["acting"]), (1260, True))
+        d.stop()
+        self.assertIsNone(nvml.cap)
+
+    def test_series_records_gate_cap_and_power(self):
+        import csv, glob
+        from test_gpu import PCI, FakeNvml
+        b = BlobBuilder()
+        b.line(G["lookup_table"], 20, [(SYSTEM, 1)], [(LIMITS, 201)], [6, 50000, 50000, 1, 2, 3, 4, 5, 6, 1, 2, 3, 4, 5, 6,
+                                                                     50000, 50000, 50000, 50000, 50000, 50000])
+        with open(self.blob, "w") as f:
+            f.write(blob_text(extra=b.algorithms))
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/vendor", "0x10de")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/class", "0x030200")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "active")
+        nvml = FakeNvml()
+        self.helper(nvml)
+        d = self.start("--control", "--dgpu-clock-cap")
+        d.dgpu.factory = lambda pci: nvml
+        for t in range(0, 12000, 1000):
+            d.cycle(t)
+        d.stop()
+        path = glob.glob(os.path.join(d.args.state_dir, "series-*.csv"))[0]
+        with open(path) as f:
+            rows = list(csv.DictReader(f))
+        self.assertIn("dgpu.gate", rows[0])
+        self.assertEqual((rows[-1]["dgpu.gate"], rows[-1]["dgpu.cap_mhz"], rows[-1]["dgpu.power_w"]), ("sampling", "1260", "62.0"))
+
+    def test_series_with_other_columns_starts_a_new_file(self):
+        """A restart with another column set must not append to the day's file under the old header."""
+        import glob
+        from surface_power import monitor
+        directory = self.fs.path("series-test")
+        for columns, row in (([ "a", "b"], [1, 2]), (["a", "b"], [3, 4]), (["a", "b", "c"], [5, 6, 7])):
+            series = monitor.Series(directory, columns)
+            series.write(row)
+            series.close()
+        files = sorted(glob.glob(os.path.join(directory, "series-*.csv")), key=len)
+        self.assertEqual(len(files), 2)
+        self.assertEqual(open(files[0]).read(), "a,b\n1,2\n3,4\n")
+        self.assertEqual(open(files[1]).read(), "a,b,c\n5,6,7\n")
 
     def test_no_dgpu_stand_in_without_a_dgpu_output(self):
         d = self.start("--control")

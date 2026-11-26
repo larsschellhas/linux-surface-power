@@ -1,8 +1,28 @@
 #!/bin/sh
 # systemd sleep hook (install to /usr/lib/systemd/system-sleep/). Spec supervisor 7:
 # before sleep the daemon restores the firmware values and pauses; after resume it resets the engine and continues.
-case "$1" in
-    pre)  for u in surface-powerd.service surface-powerd-dryrun.service; do systemctl kill --signal=SIGUSR2 "$u" 2>/dev/null; done; sleep 1 ;;
-    post) for u in surface-powerd.service surface-powerd-dryrun.service; do systemctl kill --signal=SIGUSR1 "$u" 2>/dev/null; done ;;
-esac
+# The hook returns before the sleep only when the daemon has confirmed the pause in its status file (written after the
+# restore), at most WAIT_TENTHS / 10 seconds later: a hanging daemon never blocks a sleep (plan B16).
+STATUS="${SURFACE_POWER_RUN_DIR:-/run/surface-power}/status.json"
+WAIT_TENTHS=50
+for u in surface-powerd.service surface-powerd-dryrun.service; do
+    case "$1" in
+        pre)
+            systemctl is-active --quiet "$u" 2>/dev/null || continue
+            systemctl kill --signal=SIGUSR2 "$u" 2>/dev/null
+            n=0
+            until grep -Eq '"state": ?"paused"' "$STATUS" 2>/dev/null; do
+                if [ "$n" -ge "$WAIT_TENTHS" ]; then
+                    echo "surface-power: $u did not confirm the pause within $((WAIT_TENTHS / 10)) s; its values may not be restored"
+                    pid=$(systemctl show -p MainPID --value "$u" 2>/dev/null)
+                    echo "surface-power: $u state: $(grep '^State' "/proc/$pid/status" 2>/dev/null) wchan $(cat "/proc/$pid/wchan" 2>/dev/null)"
+                    head -n 8 "/proc/$pid/stack" 2>/dev/null | sed 's/^/surface-power:   /'
+                    break
+                fi
+                n=$((n + 1))
+                sleep 0.1
+            done ;;
+        post) systemctl kill --signal=SIGUSR1 "$u" 2>/dev/null ;;
+    esac
+done
 exit 0

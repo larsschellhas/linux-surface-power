@@ -10,6 +10,7 @@ Derived from `../requirements/`. Version 0.1 of all specs, 14.11.2026. Each spec
 | [`inputs.md`](inputs.md) | channel → Linux source, units, slider and posture mapping, EC requests | FR-I1 – I8, NFR-11 |
 | [`outputs.md`](outputs.md) | the single clamped write path, hard limits, channel → powercap/MSR, log-only outputs | FR-O1 – O7, NFR-2, FR-S7 |
 | [`supervisor.md`](supervisor.md) | detection, snapshot/restore, emergency rules, foreign changes, profiles, suspend, watchdog, main loop | FR-D, FR-S, FR-M4, NFR-5 |
+| [`dgpu-standin-service.md`](dgpu-standin-service.md) | the dGPU stand-in under the unit: idle gate instead of the client search, helper that sets the clock cap, measurements, tests (0.6, implemented and tested under the units on the SB3) | plan B15 |
 | [`monitoring.md`](monitoring.md) | journal, `status.json`, time series, notifier | FR-M1 – M5 |
 | [`tools.md`](tools.md) | `blob`, `replay` (input format), `report` | FR-B9, FR-M6, FR-M7 |
 | [`tester-kit.md`](tester-kit.md) | one `sudo` command for a device check, result into a device issue (draft 0.1) | F11 |

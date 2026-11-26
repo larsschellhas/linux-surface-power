@@ -1,6 +1,6 @@
 # Spec: supervisor
 
-Version 0.2, 25.11.2026 (0.2: absent inputs, 2.5 and 4.1, work package B13). Implements FR-D1 – FR-D3, FR-S1 – FR-S7, FR-M4, NFR-5. Tests: AC-S1 – AC-S8. Markers as in `blob-format.md`.
+Version 0.3, 26.11.2026 (0.3: section 7, the restore before sleep is waited for, B16; 0.2: absent inputs, 2.5 and 4.1, work package B13). Implements FR-D1 – FR-D3, FR-S1 – FR-S7, FR-M4, NFR-5. Tests: AC-S1 – AC-S8. Markers as in `blob-format.md`.
 It takes over the proven parts of the prototype service (`../research/06-prototype-and-related-work.md`).
 
 ## 1. States
@@ -79,7 +79,7 @@ start ─► detect ─► (unsupported) ─► idle (no writes, exit 0)
   Order: time window before PL1. Only values that differ are written. The fan frames are always sent (nothing can be compared),
   once, and then dropped from the snapshot; the daemon sends everything again on the first cycle after a resume or after the emergency ends.
 - **After restore on exit:** the snapshot is deleted.
-- **Reset tool:** `surface-power-reset` (`ExecStopPost`) restores from the file if it still exists, then deletes it. It does not import the engine.
+- **Reset tool:** `surface-power-reset` (`ExecStopPost`) restores from the file if it still exists, then deletes it. If the marker `gpu-cap` is left, it first asks the clock helper to remove the GPU clock cap (`dgpu-standin-service.md` 6). It does not import the engine.
 
 ## 4. Emergency rules (FR-S4) [D]
 These do not depend on the blob. They are generous, so that Windows-parity behaviour never triggers them.
@@ -138,12 +138,37 @@ The SB3 15" profile is the only tested one in phase 4.
 ## 7. Suspend and resume (FR-E5, NFR-5)
 The reference implementation uses only the Python standard library, so it does not listen on D-Bus. A systemd sleep hook
 (`packaging/system-sleep/surface-power`) sends `SIGUSR2` before sleep and `SIGUSR1` after resume [D].
-- **Before sleep:** `SIGUSR2` (logind `PrepareForSleep(true)` in a later version) → restore the firmware values, pause the loop.
+- **Before sleep:** `SIGUSR2` (logind `PrepareForSleep(true)` in a later version) → restore the firmware values, pause the loop, confirm it in the status file.
 - **After resume:** `SIGUSR1` →
   1. `engine.reset()`;
   2. request EC data (`inputs.md` 6);
   3. a fresh energy reference for power readings;
   4. continue.
+- **The dGPU is not touched before sleep (26.11.2026):** the sleep hook runs after `nvidia-suspend.service`, where a call to the NVIDIA
+  driver hangs until the resume. On the SB3 the release of the clock cap there held up the whole restore: the daemon logged `paused` only
+  after the resume [M]. The cap stays; after the resume it is sent again (`dgpu-standin-service.md` 6).
+- **The pause comes before `nvidia-suspend.service` (B16, second part, 26.11.2026):** with the idle gate the daemon talks to the GPU, and
+  `nvidia-suspend.service` wakes it before suspending the driver. In the first series test (wheel with the first part, 26.11.2026 17:20) the
+  signal was sent right after that service, the daemon did not take it for the whole 5 s the hook waited, in three of three cycles read, and
+  logged `paused` only after the resume [M]. Most likely it was stuck in an NVML call made when it saw the GPU awake [H, the daemon's state
+  during the wait was not recorded; the hook records it now]. The unit `surface-power-sleep.service` (`Before=sleep.target`,
+  `Before=nvidia-suspend.service` …, `StopWhenUnneeded=yes`) runs the hook's `pre` first and its `post` when the sleep is over or given up. A
+  second sleep or resume signal changes nothing.
+  **On the SB3 (wheel `8852f9a4…`, 26.11.2026 17:56) [M]:** three s2idle cycles with the GPU idle: `paused` and the restore 1 ms after the signal,
+  both before `Starting nvidia-suspend`; the hook's second signal changed nothing; control and the stand-in back after each resume. This fits the
+  explanation above but does not show where the daemon was stuck before. Two further cycles right after a GPU load (cap set until the load ended, GPU awake, 18:01) passed the same way: restore 4 ms and 1 ms after
+  the signal, before `nvidia-suspend`. The second resume signal
+  (the unit's stop) comes after `surface-rapl.service`; in two of the three cycles the daemon logged the unit's PL4 write as a foreign change
+  and wrote PL4 again (plan L8: such lines count towards the three within 60 s that make the daemon yield).
+- **The restore before sleep is waited for (B16, 26.11.2026):**
+  - The daemon's wait between two cycles ends at once on a signal (`signal.set_wakeup_fd`). Before, `time.sleep` went on after the signal
+    handler [C] while the hook waited 1 s and returned: signal to `paused` took 0.1 – 0.9 s in twelve cycles, and in two cycles of 26.11.2026
+    the line came only after the resume, so nothing was restored before sleep [M; one explained by the GPU release, the other not [H]].
+  - After the restore the daemon writes its status with `state: paused` and logs the time since the signal.
+  - The hook signals only an active unit and returns when the status says `paused`, after 5 s at the latest; then it says in the journal that
+    the values may not be restored. A hanging daemon never blocks a sleep.
+  - Tests `tests/test_sleep.py` (signal wake-up, confirmation, the real loop in its own process: below 0.4 s; with the old wait up to 0.74 s),
+    the hook with a fake `systemctl`. Not yet tested on the device.
 - **MMIO path:** the restore before sleep includes the MMIO copy; after the resume the first cycle writes it again (`kernel-mmio-daemon.md` 7).
 - **Fallback:** without the hook, a `CLOCK_BOOTTIME − CLOCK_MONOTONIC` jump of more than 5 s counts as a resume [D]. In that case
   the firmware values are not restored before sleep.

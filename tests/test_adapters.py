@@ -1,5 +1,6 @@
 """Tests for the input and output adapters on a fake sysfs (spec inputs, outputs; AC-I4, AC-O1, AC-S7)."""
 import os
+import shutil
 import struct
 import unittest
 from unittest import mock
@@ -182,6 +183,61 @@ class InputsTest(unittest.TestCase):
         self.assertIsNone(v[ref(POWER, 7)])
         self.assertEqual(v[ref(POWER, 8)], 45720)
         self.assertEqual(v[ref(POWER, 108)], 119200)                     # BAT2 has no attributes here: cdev
+
+    def test_platform_power_detached_base_is_not_asked(self):
+        """B14: without the base battery (BAT2) no 0x53 is sent to the base (spec inputs 6); its channels are invalid at once;
+        after the re-attach it is asked at the next read."""
+        tr = FakeTransport()
+        pp = inputs.PlatformPower(self.fs.root, transport=tr)
+        self.assertEqual(pp.read(0)[ref(POWER, 103)], 35600)
+        shutil.rmtree(self.fs.path("sys/class/power_supply/BAT2"))
+        tr.sent.clear()
+        v = pp.read(1000)                                          # long before the next 60 s refresh
+        self.assertIsNone(v[ref(POWER, 103)])
+        self.assertEqual(v[ref(POWER, 3)], 35600)                  # the display battery is untouched
+        for now in (61000, 121000, 181000):
+            self.assertIsNone(pp.read(now)[ref(POWER, 103)])
+        self.assertNotIn((2, 0x53), tr.sent)
+        self.assertIn((1, 0x53), tr.sent)
+        self.fs.write("sys/class/power_supply/BAT2/type", "Battery")
+        self.assertEqual(pp.read(182000)[ref(POWER, 103)], 35600)
+        self.assertIn((2, 0x53), tr.sent)
+
+    def test_platform_power_base_asked_again_after_its_requests_stopped(self):
+        """Requests that failed while the base went away must not keep the command stopped until the next resume."""
+
+        class BaseSilent(FakeTransport):
+            base_answers = False
+
+            def request(self, tid, cid, iid=1):
+                data = super().request(tid, cid, iid)
+                return None if tid == 2 and not self.base_answers else data
+
+        tr, logged = BaseSilent(), []
+        pp = inputs.PlatformPower(self.fs.root, transport=tr)
+        pp.log = lambda prio, text: logged.append(text)
+        for now in (0, 60000, 120000, 180000):
+            pp.read(now)
+        self.assertEqual(tr.sent.count((2, 0x53)), inputs.RequestGate.FAIL_LIMIT)
+        shutil.rmtree(self.fs.path("sys/class/power_supply/BAT2"))
+        pp.read(181000)
+        tr.base_answers = True
+        self.fs.write("sys/class/power_supply/BAT2/type", "Battery")
+        self.assertEqual(pp.read(182000)[ref(POWER, 103)], 35600)
+
+    def test_platform_power_detached_base_with_kernel_attributes(self):
+        """With the kernel attributes the values of a detached base must not stay at their last reading."""
+        for bat, ipl in (("BAT1", 73113), ("BAT2", 119250)):
+            self.fs.write(f"sys/class/power_supply/{bat}/dptf/available_input_power_mw", ipl)
+        self.fs.write("sys/class/power_supply/ADP1/dptf/adapter_rating_mw", 120000)
+        tr = FakeTransport()
+        pp = inputs.PlatformPower(self.fs.root, transport=tr)
+        self.assertEqual(pp.read(0)[ref(POWER, 108)], 119250)
+        shutil.rmtree(self.fs.path("sys/class/power_supply/BAT2"))
+        self.assertIsNone(pp.read(1000)[ref(POWER, 108)])
+        self.assertFalse(pp.needs_cdev)                            # no "load surface_aggregator_cdev" for an absent battery
+        self.assertEqual(pp.cdev_channels(), set())
+        self.assertEqual(tr.calls, 0)
 
     def test_platform_power_without_transport_is_invalid(self):
         pp = inputs.PlatformPower(self.fs.root, transport=FakeTransport(fail=True))

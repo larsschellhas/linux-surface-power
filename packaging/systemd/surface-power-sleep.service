@@ -1,0 +1,20 @@
+# Pauses surface-powerd before the system sleeps, early enough: nvidia-suspend.service wakes the GPU and suspends the driver,
+# and an NVML call made then hangs until the resume. The systemd sleep hook runs only after it [M, SB3, 26.11.2026], so it
+# cannot do this; it stays as a second signal. Spec supervisor 7, plan B16.
+[Unit]
+Description=Pause Surface power management before sleep
+Documentation=https://github.com/larsschellhas/linux-surface-power
+Before=sleep.target
+Before=nvidia-suspend.service nvidia-hibernate.service nvidia-suspend-then-hibernate.service
+# Stops when sleep.target goes away: after the resume, and also when a sleep is given up before it happened.
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/systemd/system-sleep/surface-power pre
+ExecStop=/usr/lib/systemd/system-sleep/surface-power post
+TimeoutStartSec=15
+
+[Install]
+WantedBy=sleep.target

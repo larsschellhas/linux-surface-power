@@ -55,7 +55,15 @@ class Series:
             self.file.close()
         os.makedirs(self.dir, exist_ok=True)
         path = os.path.join(self.dir, f"series-{today}.csv")
-        new = not os.path.exists(path)
+        header, part = ",".join(self.columns), 1
+        while os.path.exists(path):
+            with open(path, newline="") as f:
+                first = f.readline().rstrip("\r\n")
+            if first in ("", header):
+                break
+            part += 1                  # another column set (an update, another blob): never append under a foreign header
+            path = os.path.join(self.dir, f"series-{today}-{part}.csv")
+        new = not os.path.exists(path) or os.path.getsize(path) == 0
         self.file = open(path, "a", newline="")
         self.writer = csv.writer(self.file, lineterminator="\n")
         if new:

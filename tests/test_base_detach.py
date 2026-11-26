@@ -251,19 +251,23 @@ class BaseDetachTest(unittest.TestCase):
             f.write(blob_text(absent_sensor=True, extra=b.algorithms))
         self.fs.write(f"sys/bus/pci/devices/{PCI}/vendor", "0x10de")
         self.fs.write(f"sys/bus/pci/devices/{PCI}/class", "0x030200")
-        self.fs.link_raw("proc/4242/fd/7", "/dev/nvidia0")
+        self.fs.write(f"sys/bus/pci/devices/{PCI}/power/runtime_status", "active")
         self.fs.add_base_sensors()
-        d = self.start("--dgpu-clock-cap")
         nvml = FakeNvml()
+        from fakehelper import HelperThread
+        sock = self.fs.path("run/surface-gpu-clock/sock")
+        os.makedirs(os.path.dirname(sock), exist_ok=True)
+        self.addCleanup(HelperThread(sock, self.fs.root, nvml).stop)
+        d = self.start("--dgpu-clock-cap")
         d.dgpu.factory = lambda pci: nvml
         self.cycles(d, 0, 4000, 2000)
         self.fs.remove_base_sensors()
         nvml.fail = True                                               # Xid 79: the GPU has fallen off the bus
-        d.dgpu.close()
+        os.remove(self.fs.path(f"sys/bus/pci/devices/{PCI}/power/runtime_status"))
         self.cycles(d, 4000, 80000, 2000)
         self.assertEqual(d.state, "control")
-        self.assertFalse(d.dgpu.enabled)
-        self.assertIn("no library", self.status()["dgpu"]["error"])
+        self.assertTrue(d.dgpu.enabled)                                # gone is no failure: it works again after the re-attach
+        self.assertEqual((self.status()["dgpu"]["gate"], self.status()["dgpu"]["cap_mhz"]), ("gone", None))
         d.stop()
 
 

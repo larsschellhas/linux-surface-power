@@ -24,6 +24,7 @@ surface-power-replay = "surface_power.tools.replay:main"
 surface-power-report = "surface_power.tools.report:main"
 surface-power-reset = "surface_power.tools.reset:main"
 surface-power-notify = "surface_power.tools.notify:main"
+surface-gpu-clockd = "surface_power.gpuclockd:main"
 
 [tool.setuptools]
 license-files = ["LICENSE", "LICENSE-APACHE"]

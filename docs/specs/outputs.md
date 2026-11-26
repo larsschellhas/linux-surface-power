@@ -1,6 +1,6 @@
 # Spec: output adapters
 
-Version 0.1, 14.11.2026. Implements FR-O1 – FR-O7, NFR-2, FR-S7. Tests: AC-I4, AC-O1, AC-O2, AC-S7. Markers as in `blob-format.md`.
+Version 0.2, 26.11.2026 (0.2: section 6, the dGPU stand-in samples through the idle gate and reports when it cannot act). Implements FR-O1 – FR-O7, NFR-2, FR-S7. Tests: AC-I4, AC-O1, AC-O2, AC-S7. Markers as in `blob-format.md`.
 
 ## 1. Single write path (NFR-2)
 All limit writes go through one function, `OutputStage.apply(values)`, where `values` maps a channel to its rounded engine value (`engine.md` 6). For each channel it does:
@@ -137,24 +137,20 @@ Log-only outputs are computed, published in the status file and the time series,
 
 ## 6. dGPU stand-in through a clock cap (opt-in, DO-1, idea I-4)
 Windows limits the dGPU power. On Linux, the SB3's NVIDIA driver refuses a power limit, and Dynamic Boost is not
-supported (`08-field-tests-sb3.md`). A cap on the graphics clock (`nvidia-smi -lgc`, NVML `SetGpuLockedClocks`) works.
+supported (`08-field-tests-sb3.md`). Until 26.11.2026 it did not act under the daemon's unit (plan B15); since then it reads through an idle gate and
+sets the cap through a helper (`dgpu-standin-service.md`; tested under the units on the SB3, 13.1). A cap on the graphics clock (`nvidia-smi -lgc`, NVML `SetGpuLockedClocks`) works.
 This stand-in uses that cap to regulate the **measured** dGPU power to the blob's output 201. It restores the Windows
 *behaviour* (G-1) with a different *mechanism*, so it is a named deviation (DO-1). It is enabled per device profile
 (`[outputs] dgpu_clock_cap = true`). It is on in the SB3 profile: without it the Linux driver lets the dGPU draw 65 W,
 while no Windows state in the SB3 blob allows more than 50 W.
 
-- **Never wake the GPU.** Every NVML session opens the GPU and restarts its idle timer.
-  - The stand-in therefore only opens NVML while another process already has an NVIDIA device node open (`/proc/<pid>/fd` → `/dev/nvidia*`). That process keeps the GPU awake anyway.
-  - **Cost of that check:** a scan of `/proc/*/fd` costs about 25 ms CPU [M, AC-L4 run 16.11.2026]. It is skipped while the GPU's
-    `power/runtime_status` is `suspended`. When the GPU wakes up (usually because a client opened it) it runs at once,
-    otherwise at most every 10 s; the stand-in and the dGPU sensors (`inputs.md` 8.10) share the result. Regulation comes first: a
-    client that opens an already awake GPU is seen within 10 s, and after the last client exits the stand-in may keep its NVML
-    session, and so the GPU, awake for up to 10 s [D]. The NVML session stays open between samples while a client is there (init costs ~20 ms CPU [M]).
-  - If only the daemon itself has it open, that does not count.
-  - `power/runtime_usage` turned out not to be a reliable indicator [M]: it read 2 with a CUDA client once and 1 another time.
-  - Monitoring tools that hold the device open (e.g. GNOME Resources) count as clients. The GPU does not sleep while they run, with or without the stand-in.
-- **Cap persistence:** a cap set while the GPU is awake stays in force across D3cold [M]. While no client runs, the stand-in does nothing and keeps its last cap.
-- **Control law [D], once per sample (every 2 s, while a client runs).** The blob gives only the target. On Windows, the NVIDIA driver enforces the limit with its own internal loop, so there is no Windows model for these parameters. They were chosen from the SB3 clock-cap measurement:
+- **When NVML is asked (idle gate, since 26.11.2026, B15):** every NVML query restarts the GPU's idle timer [M]. All of them, also the
+  dGPU sensors' (`inputs.md` 8.10), go through one idle gate (`dgpu-standin-service.md` 4): none while the GPU is runtime-suspended,
+  a sample every 2 s while it is awake, and a pause of 35 s after 5 idle samples, with the session closed before it. The daemon no
+  longer looks for other processes holding `/dev/nvidia*`: under its unit it cannot see them [M].
+  - Monitoring tools that hold the device open (e.g. GNOME Resources) may keep the GPU awake by themselves.
+- **Cap persistence:** a cap set while the GPU is awake stays in force across D3cold [M]. While the GPU sleeps or in the pause, the stand-in does nothing and keeps its last cap. If the device is gone (base detached), it forgets the cap [H].
+- **Control law [D], once per sample (every 2 s, while the gate samples).** The blob gives only the target. On Windows, the NVIDIA driver enforces the limit with its own internal loop, so there is no Windows model for these parameters. They were chosen from the SB3 clock-cap measurement:
   - Inputs: the measured power `P` (NVML power usage, W) and the target `T` (output 201, W).
   - If `P > T + 0.5 W`: lower the cap by `k · (P − T)`, at least one step.
   - If `P < T − 2 W` and the GPU runs at the cap (clock ≥ cap − 30 MHz): raise the cap by one step of 15 MHz.
@@ -164,15 +160,18 @@ while no Windows state in the SB3 blob allows more than 50 W.
   - If `T` is at least the GPU's own default power limit, the cap is released.
 - **Release:** the cap is removed when:
   - the daemon stops;
-  - it enters emergency, yields or pauses for sleep;
+  - it enters emergency or yields (not before a system sleep, `supervisor.md` 7);
   - the profile option is off;
   - the target is invalid.
   The original state (no cap) is the firmware value.
 - **Missing inputs:** with the stand-in on, the dGPU limit counts as a written output, so its inputs are required (`supervisor.md` 2.5).
   - If one is missing, only the stand-in is switched off, with a warning. The other limits are still controlled.
   - Example: the SB3 without the base sensor nodes, as with current kernels.
-- **Dry-run:** computes and logs the cap it would set, sets nothing, and still only samples under the rule above.
-- **Failures:** an NVML error disables the stand-in for the rest of the run and is logged once. Examples: no library, no permission, unsupported call.
+- **Dry-run:** computes the cap it would set, sets nothing, and samples through the same gate.
+- **Failures:** no library, no permission and an unsupported call switch the stand-in off for the rest of the run at once; other NVML
+  errors after 5 in a row. It is logged once with its reason; the status (`dgpu.acting`, `dgpu.reason`) and the output's target text say
+  so. A cap without effect (power above target + 5 W for 30 s) is warned about once (`dgpu-standin-service.md` 7). The daemon
+  does not set the cap itself: it sends it to the clock helper `surface-gpu-clockd` (`dgpu-standin-service.md` 5).
 
 ### 6.1 Other devices (Laptop Studio 1 and 2) [C for the blob and the Windows driver, H for the rest]
 The stand-in is generic (first NVIDIA display controller, NVML limits), but everything measured about it is from the SB3's GTX 1660 Ti.
