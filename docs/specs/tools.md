@@ -52,4 +52,12 @@ Prints a short text that contains no blob content and no serial numbers:
 - running writers (thermald, tuned, TLP, power-profiles-daemon) with what each of them changes (ppd: platform profile and EPP/EPB, not the power limits [M]);
 - as root, a read-only probe of the RAPL MSRs on CPU 0 (`0x17`, `0x606`, `0x610`, `0x611`, `0x614`, `0x615`, each "ok" or the error, e.g. `EIO`) and the CPU's
   `hypervisor` flag (plan F10); PL3 shows "no Linux path: MSR 0x615 not readable" where the profile switches it on but the register does not read.
-The tester kit (`tester-kit.md`) adds the kernel's messages about MSRs and machine checks.
+The tester kit (`tester-kit.md`) runs this report as one part of its snapshot.
+
+## Tester kit and its evaluation
+- `scripts/surface-power-check` (`tools/check.py`, `tools/kit/`): the staged device check, spec `tester-kit.md`. Not read only: it pauses services,
+  loads a test module and, in its last stage, lowers the MMIO PL1 for a few minutes, as the spec says.
+- `scripts/check-eval.py FILE | --issue N` (`tools/check_eval.py`, no root): from a result of the kit (JSON block, treated as data) the skeleton of the
+  evaluation along the procedure of `CLAUDE.md`: stages, profile, the blob found by its hash in the local corpus (else it stops there), firmware state,
+  changes seen, the tester's computed limits against our replay, the blob's limits per slider state, the module comparison recomputed from the raw
+  registers, the kernel registry changes the controller's answers give evidence for (D9–D11), proposed `kit-evidence.toml` entries, and the manual steps that remain.

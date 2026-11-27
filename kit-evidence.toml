@@ -1,0 +1,45 @@
+# What the tester kit knows about each stage per model, and what it blocks (spec docs/specs/tester-kit.md 6.2, 6.3).
+# The kit only reads this file; a change reaches testers with `git pull`. scripts/check-eval.py proposes entries.
+#
+# [[passed]]   stage ("S1".."S5"), sku, model, platform, issue (in this repository), note (optional)
+# [[blocked]]  stage, reason, and optionally sku or platform; without both, the stage is blocked for everyone
+
+[[passed]]
+stage = "S3"
+sku = "Surface_Pro_10_for_Business_2079"
+model = "Surface Pro 10 for Business"
+platform = "meteorlake"
+issue = 3
+note = "Made with the kit of 25.11.2026, which did not yet compare the time window or read the energy counter"
+
+[[passed]]
+stage = "S1"
+sku = "Surface_Book_3_1899"
+model = "Surface Book 3"
+platform = "icelake"
+
+[[passed]]
+stage = "S2"
+sku = "Surface_Book_3_1899"
+model = "Surface Book 3"
+platform = "icelake"
+
+[[passed]]
+stage = "S3"
+sku = "Surface_Book_3_1899"
+model = "Surface Book 3"
+platform = "icelake"
+
+[[passed]]
+stage = "S4"
+sku = "Surface_Book_3_1899"
+model = "Surface Book 3"
+platform = "icelake"
+note = "The maintainer's reference device, 27.11.2026; its firmware leaves the MMIO copy switched off"
+
+[[passed]]
+stage = "S5"
+sku = "Surface_Book_3_1899"
+model = "Surface Book 3"
+platform = "icelake"
+note = "The maintainer's reference device, 27.11.2026; its firmware leaves the MMIO copy switched off"

@@ -7,8 +7,8 @@ body:
     attributes:
       value: |
         Thank you for testing. Please search first whether an issue "Device report: <your model>" exists, and add a comment there instead.
-        Run `sudo ./scripts/surface-power-check` from a checkout of this repository; it writes nothing for good and creates a file
-        `surface-power-check-<model>-<date>.md`. Read it, then paste it below. It contains no serial numbers and no blob content.
+        Run `sudo ./scripts/surface-power-check` from a checkout of this repository (read its notice first); it undoes what it changes and creates a file
+        `surface-power-check-<model>-<date>.md`. Read it, then paste it below. It contains no serial numbers, no user or host names and no blob content.
   - type: input
     id: model
     attributes:

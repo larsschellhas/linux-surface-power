@@ -161,8 +161,8 @@ Notes:
 
 ## Try it on your Surface
 
-For any Surface from the Book 3 / Pro 7+ (2020) to the Laptop 7 / Pro 11 generation (2024). One command runs every check your device needs
-and writes nothing for good (spec [`docs/specs/tester-kit.md`](docs/specs/tester-kit.md)):
+For any Surface from the Book 3 / Pro 7+ (2020) to the Laptop 7 / Pro 11 generation (2024). One command runs the checks your device can take
+(spec [`docs/specs/tester-kit.md`](docs/specs/tester-kit.md)):
 
 ```bash
 git clone https://github.com/larsschellhas/linux-surface-power
@@ -171,21 +171,28 @@ sudo ./scripts/surface-power-check
 ```
 
 **Please use the current [linux-surface kernel](https://github.com/linux-surface/linux-surface/wiki/Installation-and-Setup).** Our sensor, fan and
-battery-data changes are in 7.3.5-1 and newer. The check looks at your kernel first: with an older one it says what an update adds on your device and
-asks you to update before it runs.
+battery-data changes are in 7.3.5-1 and newer. The check looks at your kernel first and asks you to update an older one.
 
-Python 3.11 or newer is needed; nothing is installed. The script says what it will do and asks before it starts:
-- the report as root, with the EC power data (it loads `surface_aggregator_cdev` for the run if it is missing and unloads it again);
-- a dry-run of the daemon for two minutes, in the sandbox of the packaged dry-run unit;
-- on Intel devices, after one more question, a **read-only** test of the kernel module `surface_rapl_mmio`: built for your running kernel
-  (it needs the kernel headers, `make` and `gcc`), loaded with `allow_write=0`, compared with the register, unloaded again. Under Secure Boot it
-  is signed with your distribution's DKMS key if there is one; otherwise this step is skipped. Loading it marks the kernel as tainted until the
-  next boot.
+**Read the notice it shows first.** This is experimental software. The tests are built to be as safe as we can make them, but we cannot guarantee
+it: the machine may freeze or restart, and you run it at your own risk. Save your work, close other programs, connect the charger.
 
-It never writes a power limit, installs or enables a service, changes your Secure Boot keys, or sends anything anywhere. The result is one file
-`surface-power-check-<model>-<date>.md`, without serial numbers and without blob content. Please read it, then add it to the issue
-"Device report: &lt;your model&gt;" of this repository (create it from the template if it does not exist yet). With the GitHub CLI (`gh`) logged
-in, the script offers to do that for you.
+Python 3.11 or newer is needed; nothing is installed. Before it collects anything, the check lists what it collects and what it does not. All questions come at the start, then it runs by itself (about 10 minutes with every step on a
+Surface Book 3). Each step is only unlocked by the one before:
+1. **Collect** (reads only): the report with the EC power data, every power limit, sensors, kernel and signing state. Where your kernel has no
+   temperature sensors your device needs, it asks the Surface's controller for them and shows what answers: that is what we need to add them to
+   the kernel.
+2. **Load test** (~5 minutes, gets warm): which power limit really holds your machine, next to a dry-run of the daemon. Services that manage
+   power (thermald, tuned, power-profiles-daemon, our daemon) are paused meanwhile and started again.
+3. **Kernel module, read only** (Intel; needs the kernel headers and build tools): builds `surface_rapl_mmio`, compares it with the register.
+4. **Kernel module with write permission,** writing nothing.
+5. **First write:** only if you type `write`. Lowers one power limit below what your machine allows now, measures, restores it.
+
+If a step finds something unexpected, the later ones do not run. For many models you are one of the first; the check tells you what is already known
+for yours. Everything it changes is undone, also if you press Ctrl+C or close the terminal. It never raises a power limit, installs a service,
+changes your Secure Boot keys, or sends anything on its own. With Secure Boot, the module steps need a signing key your system already trusts;
+without one they are skipped. The result is one file `surface-power-check-<model>-<date>.md`, without serial numbers, user or host names and blob
+content. Please read it, then add it to the issue "Device report: &lt;your model&gt;" of this repository (create it from the template if it does not
+exist yet). With the GitHub CLI (`gh`) logged in, the script offers to do that for you.
 
 Without root, the report alone also works and writes nothing: `PYTHONPATH=src python3 -m surface_power.tools.report`.
 
