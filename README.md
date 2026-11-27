@@ -187,12 +187,15 @@ Surface Book 3). Each step is only unlocked by the one before:
 4. **Kernel module with write permission,** writing nothing.
 5. **First write:** only if you type `write`. Lowers one power limit below what your machine allows now, measures, restores it.
 
-If a step finds something unexpected, the later ones do not run. For many models you are one of the first; the check tells you what is already known
-for yours. Everything it changes is undone, also if you press Ctrl+C or close the terminal. It never raises a power limit, installs a service,
-changes your Secure Boot keys, or sends anything on its own. With Secure Boot, the module steps need a signing key your system already trusts;
-without one they are skipped. The result is one file `surface-power-check-<model>-<date>.md`, without serial numbers, user or host names and blob
-content. Please read it, then add it to the issue "Device report: &lt;your model&gt;" of this repository (create it from the template if it does not
-exist yet). With the GitHub CLI (`gh`) logged in, the script offers to do that for you.
+If a step finds something unexpected, the later ones do not run. For many models you are one of the first; the check
+tells you what is already known for yours. Everything it changes is undone, also if you press Ctrl+C or close the
+terminal. The check never raises a power limit, installs a service, changes your Secure Boot keys, or sends anything
+on its own. With Secure Boot, the module steps need a signing key your system trusts (`--setup-signing` helps to set
+one up; read what it says first, in particular if your disk is unlocked by the TPM); without one they are skipped. The
+result is one file `surface-power-check-<model>-<date>.md`, without serial numbers, user or host names and blob
+content. Please read it, then add it to the issue "Device report: &lt;your model&gt;" of this repository (create it
+from the template if it does not exist yet). With the GitHub CLI (`gh`) logged in, the script offers to do that for
+you.
 
 Without root, the report alone also works and writes nothing: `PYTHONPATH=src python3 -m surface_power.tools.report`.
 

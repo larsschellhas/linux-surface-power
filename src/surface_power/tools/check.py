@@ -26,8 +26,8 @@ from .. import supervisor
 from ..adapters import inputs as inp
 from ..loader.model import ChannelRef
 from . import kernelcheck, report, sensorprobe
-from .kit import (KIT_VERSION, PLATFORM, chain, consent, evidence_ec, load, module, result, sh, signing, system, term, undo,
-                  watch, write)
+from .kit import (KIT_VERSION, PLATFORM, chain, consent, evidence_ec, load, module, result, sh, signing, signing_setup, system,
+                  term, undo, watch, write)
 
 REPO_SLUG = "larsschellhas/linux-surface-power"
 WORK = "/run/surface-power-check"
@@ -193,7 +193,8 @@ class Check:
         if sig.case == "E":
             return sig.describe(), None
         if not sig.usable:
-            return sig.describe(), "a signing key that your system trusts (the setup help is not built yet)"
+            return sig.describe(), ("a signing key that your system trusts. `sudo ./scripts/surface-power-check --setup-signing` "
+                                    "explains what that changes and asks before it does anything")
         if module.loaded(self.root):
             return "the module surface_rapl_mmio is already loaded", "unload it first (and stop what uses it)"
         missing = module.prerequisites(self.root, self.release, state["compiler"])
@@ -626,6 +627,21 @@ class Check:
         self.say(f"If it does, paste the file as a comment there; else open it here and paste the file: {new}")
 
 
+def signing_command(c: Check, args) -> int:
+    """--setup-signing and --remove-signing: commands of their own, never part of a check; --yes does not answer them."""
+    if not sys.stdin.isatty():
+        c.say("This asks for passwords: please run it in a terminal.")
+        return 1
+    try:
+        if args.remove_signing:
+            return signing_setup.remove(c.root, c.term, c._input, sh.interactive)
+        return signing_setup.setup(c.root, c.release, c.term, c._input, sh.interactive, own=args.own_key)
+    except KeyboardInterrupt:
+        c.say()
+        c.say("Stopped.")
+        return 130
+
+
 def run_all(c: Check, agreed: dict[str, bool]) -> bool:
     """Run the agreed stages and undo everything on every way out. True if the tester or a signal interrupted."""
     interrupted = False
@@ -660,6 +676,11 @@ def main(argv=None) -> int:
     ap.add_argument("--no-load", action="store_true", help="skip the load test")
     ap.add_argument("--no-module", action="store_true", help="skip the kernel module tests")
     ap.add_argument("--no-issue", action="store_true", help="do not offer to put the result into an issue")
+    ap.add_argument("--setup-signing", action="store_true",
+                    help="set up a key for the module tests (explains first; changes what your system trusts)")
+    ap.add_argument("--remove-signing", action="store_true", help="remove the key that --setup-signing enrolled")
+    ap.add_argument("--own-key", action="store_true",
+                    help="with --setup-signing: make a key of the kit even if one works already (to test the setup)")
     args = ap.parse_args(argv)
     if os.geteuid() != 0:
         print("run as root: sudo ./scripts/surface-power-check", file=sys.stderr)
@@ -668,6 +689,8 @@ def main(argv=None) -> int:
     if not c.device.supported:
         print(f"not a Surface SMF device (vendor {c.device.vendor!r}, SMF {c.device.smf}): nothing to check")
         return 0
+    if args.setup_signing or args.remove_signing:
+        return signing_command(c, args)
     try:
         c.undo.lock()
     except undo.Busy as e:

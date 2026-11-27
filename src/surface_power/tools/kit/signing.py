@@ -11,7 +11,9 @@ from . import read, sh
 # (private key, certificate): where distributions keep a module signing key. Ubuntu [M, SB3]; DKMS and akmods [H, not seen].
 KEYS = (("var/lib/shim-signed/mok/MOK.priv", "var/lib/shim-signed/mok/MOK.der"),
         ("var/lib/dkms/mok.key", "var/lib/dkms/mok.pub"),
-        ("etc/pki/akmods/private/private_key.priv", "etc/pki/akmods/certs/public_key.der"))
+        ("etc/pki/akmods/private/private_key.priv", "etc/pki/akmods/certs/public_key.der"),
+        # the kit's own key, made by --setup-signing (signing_setup.OWN_KEY)
+        ("var/lib/surface-power-check-signing/mok.priv", "var/lib/surface-power-check-signing/mok.der"))
 TEXT = {"A": "signature enforcement off and no lockdown: the module loads unsigned",
         "B": "signature enforcement on, a signing key is there",
         "C": "signature enforcement on, a key exists but it is not enrolled",

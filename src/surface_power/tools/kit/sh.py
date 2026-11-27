@@ -2,6 +2,14 @@
 import subprocess
 
 
+def interactive(cmd: list[str]) -> int:
+    """Run a command on the tester's own terminal, uncaptured: mokutil asks for its password there."""
+    try:
+        return subprocess.run(cmd).returncode
+    except OSError:
+        return -1
+
+
 def run(cmd: list[str], timeout: int = 120, **kw) -> tuple[int, str]:
     """Run a command; (exit code, output). -1 if it could not run."""
     try:

@@ -36,7 +36,8 @@ node, it sends TMP `0x04`, then `0x0E` and `0x01` for the sensors in the mask, t
 to `0x04` nothing else is sent. `--probe-sensors` forces it. Cross-checked on the Surface Book 3 against `surface_thermal` (`plan.md` D11) [M].
 
 ## 2. What the script never does
-Install a package or a unit, enable a unit, change Secure Boot, lockdown or the MOK list, set a power limit higher than one the machine already has,
+In a check: install a package or a unit, enable a unit, change Secure Boot, lockdown or the MOK list (only the separate commands of 8 change the
+MOK list, and never Secure Boot or lockdown), set a power limit higher than one the machine already has,
 send anything to the internet by itself. It writes outside its own result files only: the undo and watchdog scripts and a lock under `/run`, the markers
 under `/var/lib/surface-power-check/` (7), and during S5 the MMIO limit as 6.5 says.
 
@@ -262,13 +263,47 @@ checked on such a system].
 constant of the platform type (the module's own check), and reads the limit register, the MMIO unit register and the lock bits through `/dev/mem`. Missing
 then are only "the zone equals the register" and "unload leaves the register unchanged".
 
-**Setup for cases C and D (10 E1; K7, not built yet):** a separate command, `sudo ./scripts/surface-power-check --setup-signing`, never part of the normal run. The
-normal run offers it to every tester whose module stages cannot run for lack of a usable key. It explains what enrolment means, uses the distribution's own tool or key where
-there is one, runs `mokutil --import` in the tester's terminal (the tester types the one-time password into `mokutil`; the kit never reads or stores it),
-and tells the tester what the blue MOK screen at the next boot asks. After the reboot the normal command is run again. `--remove-signing` explains
-`mokutil --delete` for a key the kit created. **Open and to be checked before this is built:** which key restriction makes shim accept an enrolled key for
-kernel modules only and not for boot programs, and whether the distributions' default keys carry it [H]. An enrolled key whose private part lies on the disk
-lets anyone with root sign code that the system then trusts; the text must say that.
+**Setup for cases C and D (10 E1; K7, built 27.11.2026, `kit/signing_setup.py`):** `sudo ./scripts/surface-power-check --setup-signing`, never part of a
+check; the check names it to every tester whose module stages lack a usable key. It needs a terminal, and `--yes` does not answer it.
+
+**The rule:** only a certificate limited to kernel modules is handed to `mokutil` for enrolment, checked again on the very file right before.
+- **Why it is enough** [C]: shim does not use a certificate with the extended key usage `1.3.6.1.4.1.2312.16.1.2` to check boot programs:
+  `verify_eku` in shim 15, 15.4, 15.8 (`shim.c`) and 16.1 (`verify.c`), in front of every check against `db`/`MokListRT` certificates
+  (`check_db_cert_in_ram`; the two other certificate checks use certificates built into shim). A certificate **without** it can sign boot programs.
+- **Why it matters** [C]: current DKMS (v3.4.5 `dkms.in`) makes its default key with `extendedKeyUsage=codeSigning` only, and the fallback of DKMS
+  3.0.11 without any usage: enrolling such a key would let it sign boot programs. The kit never enrols them. Ubuntu's `update-secureboot-policy` makes
+  keys with the restriction (`/usr/lib/shim/mok/openssl.cnf`); the SB3's key has it [M].
+- **Not checked** [H]: whether a running kernel accepts such a key for `kexec`; shim builds a distribution patched.
+
+**Which key:** an existing one of the distribution if it is limited (others are named and left alone); else, on Ubuntu's family, the distribution's own
+tool (`update-secureboot-policy --new-key`, only if it has no key); else a key of the kit in `/var/lib/surface-power-check-signing/` (root only,
+CA:FALSE, no host name in its subject; Ubuntu's tool puts the host name into its certificate, so a result never contains a certificate's content).
+
+**Stops before anything changes:** nothing to set up (cases A, B), lockdown (E), no `mokutil` or `openssl`, the system does not boot through shim (no
+`MokListRT`), `CONFIG_INTEGRITY_CA_MACHINE_KEYRING=y` (the kernel would not use such a key for modules).
+
+**What the tester is told before typing `enrol`:** a lasting change; whoever has root can use the private key; what the restriction covers and what is
+not checked; how to undo it; and **the TPM warning**: shim measures `MokList` and `MokListX` into PCR 14 [C: shim 15.8 `mok.c`], so a disk unlock
+bound to the TPM may ask for the passphrase or recovery key at the next boot (the same before removing). Below it, what was seen on the one machine
+tried (`knowledge/module-signing.md`). Then `mokutil --import` runs on the tester's
+terminal (the kit never sees the password), the kit checks that the request waits, and explains the blue screen: before confirming, View key 0 must
+show the certificate's name, which the kit prints; for the removal there must be no further key. After the reboot the normal check finds
+the key (case B).
+
+**Removal** (`--remove-signing`) concerns only what the kit enrolled (record in its directory): a waiting request is withdrawn, unless other keys wait
+too; an enrolled key is removed with `mokutil --delete` (confirmed at the blue screen), the kit's own private key is deleted at once, the rest of its
+files at the next run that finds the key gone. A distribution's key files stay. If `mokutil` does not answer clearly, nothing is removed or deleted.
+`--own-key` (with `--setup-signing`) makes the kit's own key although one works already: for the maintainer's test of this setup.
+
+**Run on the Surface Book 3, 27.11.2026** [M] (one complete cycle with `--own-key`, because a distribution key worked already there): without
+`--own-key` the setup said "nothing to set up" (case B); the key was created, enrolled at the blue screen and was the only one waiting before each of
+the two boots (name and restriction read with `sudo mokutil`); the kernel refused the module unsigned and loaded it signed with the kit's key (S3
+passed, register bit-identical after the unload); the removal deleted the private key, the key was gone after the boot, and the next
+`--remove-signing` found that and removed the kit's directory. TPM and disk unlock as in `knowledge/module-signing.md`. The blue-screen steps with
+the View key check were given to the maintainer by hand in that run; the kit prints them since then (that output has run on the simulated machine
+only). **Not run on any machine:** the setup without `--own-key` on a machine without a usable key (cases C, D), `update-secureboot-policy
+--new-key`, an existing limited key that is not enrolled yet, withdrawing a waiting request, a skipped blue screen, an unclear `mokutil` answer,
+other distributions, other shim versions.
 
 Not offered: switching Secure Boot or lockdown off. A module signed by the linux-surface project, which would need no setup at all, comes only with the
 module in the linux-surface kernel (D5, gate R5).
@@ -328,6 +363,6 @@ the run and unloaded again, one issue per model.
 | K5 | S3, S4, unlock chain, markers, `kit-evidence.toml`, KM-A5 test | built; S3, S4 passed on the SB3 [M] |
 | K6 | S5 | built; passed on the SB3 (disabled copy) [M]; the enabled-copy path only in simulation |
 | – | **SB3 run of the whole chain** (6.2, with killed kit and leftover marker) | passed 27.11.2026, steps A–G [M] (`kit-sb3-test/TESTPLAN.md` in the working folder) |
-| K7 | signing setup (8) | not built; first the key restriction has to be checked |
+| K7 | signing setup and removal (8) | built 27.11.2026; certificates tested with real `openssl`, `mokutil` simulated; **one complete cycle on the SB3 passed** 27.11.2026 (own key: enrol, module accepted, remove; 8); the other paths in simulation only |
 
 Testers get K1–K4 as soon as they pass on the SB3. They get S4 and S5 once the check of 6.2 ("before testers get it") has passed.
