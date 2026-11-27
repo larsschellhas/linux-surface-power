@@ -57,6 +57,53 @@ class CheckTest(unittest.TestCase):
         self.assertIn("mce: CPU0", text)
         self.assertNotIn("usb 3-2", text)
 
+    def interrupted(self, c, calls, step):
+        def fake_run(cmd, timeout=120, **kw):
+            calls.append(cmd[0] if cmd[0] != "systemctl" else " ".join(cmd[:2]))
+            return 0, ""
+        with mock.patch.object(check, "run", fake_run), self.assertRaises(KeyboardInterrupt):
+            step()
+
+    def test_ctrl_c_during_the_module_test_unloads_the_module(self):
+        c, calls = check.Check(self.fs.root, out=io.StringIO()), []
+        with mock.patch.object(c, "_register", lambda: (None, "test")), \
+                mock.patch.object(c, "_zone_values", side_effect=KeyboardInterrupt):
+            self.interrupted(c, calls, lambda: c.load_and_compare("x.ko", ["allow_write=0"]))
+        self.assertEqual(calls, ["insmod", "dmesg", "rmmod"])
+        self.assertEqual(c.cleanup, [])
+
+    def test_a_refused_module_is_not_unloaded_and_the_reason_is_kept(self):
+        c = check.Check(self.fs.root, out=io.StringIO())
+        calls = []
+
+        def fake_run(cmd, timeout=120, **kw):
+            calls.append(cmd[0])
+            if cmd[0] == "insmod":
+                return 1, "insmod: ERROR: Key was rejected by service"
+            return 0, "[1.0] Loading of module with unavailable key is rejected\n[2.0] usb 3-2: new device"
+        with mock.patch.object(check, "run", fake_run), mock.patch.object(c, "_register", lambda: (None, "test")):
+            c.load_and_compare("x.ko", ["allow_write=0"])
+        text = "\n".join(c.result)
+        self.assertIn("unavailable key is rejected", text)
+        self.assertNotIn("usb 3-2", text)
+        self.assertNotIn("rmmod", calls)
+        self.assertEqual(c.cleanup, [])
+
+    def test_restore_undoes_everything_newest_first_and_only_once(self):
+        c, calls = check.Check(self.fs.root, out=io.StringIO()), []
+        c.undo_later(["modprobe", "-r", "surface_aggregator_cdev"])
+        c.undo_later(["systemctl", "stop", "surface-power-check"])
+        with mock.patch.object(check, "run", lambda cmd, timeout=120, **kw: calls.append(cmd[0]) or (0, "")):
+            c.restore()
+            c.restore()
+        self.assertEqual(calls, ["systemctl", "modprobe"])
+
+    def test_the_result_names_the_checkout(self):
+        with mock.patch.object(check, "run", lambda cmd, timeout=120, **kw: (0, "abc123def456" if "rev-parse" in cmd else "")):
+            self.assertEqual(check.repo_state(), "abc123def456")
+        with mock.patch.object(check, "run", lambda cmd, timeout=120, **kw: (0, "abc123def456" if "rev-parse" in cmd else " M x")):
+            self.assertEqual(check.repo_state(), "abc123def456 + local changes")
+
     def test_issue_title_and_links(self):
         self.assertEqual(check.issue_title("Surface Pro 9"), "Device report: Surface Pro 9")
         search, new = check.issue_links("Surface Pro 9")

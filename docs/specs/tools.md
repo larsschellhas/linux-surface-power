@@ -44,7 +44,9 @@ Prints a short text that contains no blob content and no serial numbers:
 - the default mode (control only with a tested profile, else dry-run unless `--control`) and **the daemon's own verdict** whether control is possible on
   this machine, with its reasons (25.11.2026, plan B10: the report builds the daemon in dry-run, writing nothing, and takes the verdict from it, so that
   both cannot disagree); as a normal user it says that the answer under the unit needs root;
-- with `--with-ec` (root): whether the `0x53` and DPTF requests answer. Only yes/no is reported, not the values;
+- with `--with-ec` (root): whether the `0x53` and DPTF requests answer, and through the debug device their values;
+- with `--with-ec`, where the blob reads SAM temperature sensors and the kernel has no sensor node (DV-10): the read-only sensor probe (mask, names,
+  temperatures; `tester-kit.md` 1); `--probe-sensors` forces it on a device with the node. The probe is not an input source of the daemon;
 - the PL1/PL2 copies: presence of 00:04.0 and of `intel-rapl-mmio`, the PL path the daemon would choose at its start with the reason (`kernel-mmio-daemon.md` 2),
   the MMIO copy (register as root, else the zone, else why it is not readable) and the MSR copy; on an AMD CPU only "not applicable";
 - running writers (thermald, tuned, TLP, power-profiles-daemon) with what each of them changes (ppd: platform profile and EPP/EPB, not the power limits [M]);

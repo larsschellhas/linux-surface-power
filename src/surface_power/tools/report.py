@@ -24,6 +24,7 @@ from ..engine.graph import build_graph
 from ..loader import container, parser
 from ..loader.errors import BlobError
 from ..loader.source import EFIVAR, NoBlob, read_raw
+from . import sensorprobe
 
 MODULES = ("surface_aggregator", "surface_aggregator_cdev", "surface_temp", "surface_fan", "surface_dtx", "surface_battery",
            "surface_charger", "surface_platform_profile")
@@ -167,6 +168,8 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
     ap = argparse.ArgumentParser(prog="surface-power-report", description="Validation report without blob content.")
     ap.add_argument("--blob", help="blob file (default: the UEFI variable)")
     ap.add_argument("--with-ec", action="store_true", help="also check whether EC requests answer (needs root)")
+    ap.add_argument("--probe-sensors", action="store_true",
+                    help="with --with-ec: probe the SAM temperature sensors even where the kernel has their node (cross-check)")
     ap.add_argument("--root", default="/", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     root = args.root
@@ -282,6 +285,14 @@ def main(argv=None, fan_transport=None, ec_transport=None) -> int:
     if args.with_ec and fan.chans:                          # the fan commands are asked only if the blob has fan outputs
         probe = fan_probe(fan.transport, want_spl=any(c.spec.tc == TC_FAN and c.spec.cid == 0x13 for c in fan.chans.values()))
         lines[:] = lines[:ec_pos] + probe + lines[ec_pos:]
+    # SAM temperature sensors without a kernel node (DV-10): ask the EC once, read only, whether it has them (plan D9-D11).
+    sam_sensors = sensorprobe.wanted_sensors(graph.inputs)
+    no_node = bool(sam_sensors) and not any(sensorprobe.wanted_sensors([r]) for r in inp.HwmonTemperatures(root).channels)
+    if args.with_ec and (no_node or args.probe_sensors):
+        probe = sensorprobe.lines(fan.transport, sam_sensors,
+                                  "the kernel has no sensor node here" if no_node else "forced with --probe-sensors")
+        at = lines.index("inputs:")
+        lines[:] = lines[:at] + probe + lines[at:]
     stand_in = gpu.find_nvidia_gpu(root) is not None          # the stand-in needs an NVIDIA dGPU
     lines.append("outputs:")
     missing = []

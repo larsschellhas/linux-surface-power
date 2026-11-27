@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -21,7 +22,7 @@ import time
 
 from .. import supervisor
 from ..adapters import msr, rapl_copies
-from . import report
+from . import kernelcheck, report
 
 REPO_SLUG = "larsschellhas/linux-surface-power"
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -62,6 +63,16 @@ def run(cmd: list[str], timeout: int = 120, **kw) -> tuple[int, str]:
         return -1, str(e)
 
 
+def repo_state() -> str:
+    """The checkout this run came from (an evaluation needs it): short commit, "+ local changes" if files differ."""
+    git = ["git", "-c", f"safe.directory={REPO}", "-C", REPO]
+    code, head = run(git + ["rev-parse", "--short=12", "HEAD"])
+    if code != 0:
+        return "unknown (no git checkout)"
+    code, changed = run(git + ["status", "--porcelain", "--untracked-files=no"])
+    return head + (" + local changes" if code == 0 and changed else "")
+
+
 def secure_boot(root: str = "/") -> bool | None:
     try:
         with open(os.path.join(root, SECURE_BOOT), "rb") as f:
@@ -92,7 +103,8 @@ class Check:
         self.result: list[str] = []
         self.device = supervisor.detect(root)
         self.profile = supervisor.find_profile(self.device)
-        self.cleanup: list[list[str]] = []
+        self.kernel = kernelcheck.advise(os.uname().release, root)
+        self.cleanup: list[list[str]] = []      # what has to be undone, newest last; run by restore(), also after Ctrl+C
 
     # --- output ---
     def say(self, text: str = "") -> None:
@@ -109,13 +121,47 @@ class Check:
         except EOFError:
             return False
 
+    # --- undo ---
+    def undo_later(self, cmd: list[str]) -> list[str]:
+        self.cleanup.append(cmd)
+        return cmd
+
+    def undo(self, cmd: list[str]) -> tuple[int, str]:
+        """Run one pending undo command now."""
+        if cmd in self.cleanup:
+            self.cleanup.remove(cmd)
+        return run(cmd)
+
+    def restore(self) -> None:
+        """Run everything still pending, newest first. Safe to call twice."""
+        while self.cleanup:
+            run(self.cleanup.pop())
+
     # --- steps ---
+    def kernel_gate(self) -> bool:
+        """Shown before anything runs. For an outdated kernel the tester is asked whether to go on (default: no)."""
+        if not self.kernel.details:
+            return True
+        self.say()
+        self.say(("PLEASE UPDATE FIRST: " if self.kernel.ask else "NOTE: ") + self.kernel.summary)
+        for line in self.kernel.details:
+            self.say("  " + line)
+        self.say()
+        if not self.kernel.ask:
+            return True
+        if self.ask("Run the check with this kernel anyway?"):
+            self.kernel.summary += "; the tester chose to go on"
+            return True
+        return False
+
     def preflight(self) -> list[str]:
         d, p = self.device, self.profile
         vendor = report.cpu_vendor(self.root)
-        lines = [f"device: {d.product} (sku {d.sku}), Microsoft {d.microsoft}, SMF {d.smf}",
+        lines = [f"repository: {repo_state()}",
+                 f"device: {d.product} (sku {d.sku}), Microsoft {d.microsoft}, SMF {d.smf}",
                  f"profile: {p.file + (' (tested)' if p.tested else ' (untested)') if p else 'none'}",
                  f"kernel: {os.uname().release}, CPU {vendor or 'unknown'}",
+                 f"kernel check: {self.kernel.summary}",
                  f"Secure Boot: {({True: 'on', False: 'off', None: 'unknown'})[secure_boot(self.root)]}, "
                  f"lockdown: {_read(self.root, 'sys/kernel/security/lockdown') or 'not available'}, "
                  f"module signatures enforced: {_read(self.root, 'sys/module/module/parameters/sig_enforce') or 'unknown'}"]
@@ -176,13 +222,15 @@ class Check:
         cmd = ["systemd-run", f"--unit={unit}", "--collect", "--quiet"] + [f"--property={p}" for p in props] + \
             [sys.executable, "-m", "surface_power.daemon", "--dry-run", "--run-dir", f"{work}/run", "--state-dir", f"{work}/state"]
         t0 = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        stop = self.undo_later(["systemctl", "stop", unit])
         code, text = run(cmd)
         if code != 0:
+            self.cleanup.remove(stop)
             self.add(f"could not start the transient unit: {text}")
             return
         self.say(f"   dry-run running for {DRY_RUN_S} s ...")
         time.sleep(DRY_RUN_S)
-        run(["systemctl", "stop", unit])       # a clean stop (SIGTERM); RuntimeMaxSec is only the safety net
+        self.undo(stop)                        # a clean stop (SIGTERM); RuntimeMaxSec is only the safety net
         _, journal = run(["journalctl", "-u", unit, "--since", t0, "--no-pager", "-o", "cat"])
         self.add("```")
         self.add(journal)
@@ -251,17 +299,30 @@ class Check:
                     self.add("skipped: Secure Boot needs a signed module and no DKMS key of the distribution was found "
                              "(the kit does not enrol a new key)")
                     return
+                # The output is recorded as it is: mokutil 0.6.0 exits with 1 for an enrolled key [M, Surface Book 3].
+                self.add(f"mokutil --test-key {key[1]}: {run(['mokutil', '--test-key', key[1]])[1] or 'no output'}")
                 code, text = run([os.path.join(build, "scripts/sign-file"), "sha512", key[0], key[1], ko])
                 if code != 0:
                     self.add(f"signing failed: {text}")
                     return
                 self.add(f"signed with the DKMS key {os.path.dirname(key[0])}")
-            before, why = self._register()
             params = ["allow_write=0"] + ([] if self.device.sku in IN_MODULE_TABLE else [f"unsafe_platform={platform}"])
+            self.load_and_compare(ko, params)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def load_and_compare(self, ko: str, params: list[str]) -> None:
+        """Load the module, compare its zone with the register, unload it. The unload also runs after Ctrl+C."""
+        before, why = self._register()
+        unload = self.undo_later(["rmmod", "surface_rapl_mmio"])
+        try:
             code, text = run(["insmod", ko] + params)
             _, dmesg = run(["dmesg"])
-            mod_lines = [ln for ln in dmesg.splitlines()[-40:] if "surface_rapl_mmio" in ln or "intel_rapl" in ln]
+            # "is rejected": the signature check's own line says why (unsigned module / module with unavailable key) [C, signing.c]
+            mod_lines = [ln for ln in dmesg.splitlines()[-40:]
+                         if "surface_rapl_mmio" in ln or "intel_rapl" in ln or "is rejected" in ln]
             if code != 0:
+                self.cleanup.remove(unload)
                 self.add(f"insmod {' '.join(params)}: refused ({text})")
                 self.add("```\n" + "\n".join(mod_lines) + "\n```")
                 return
@@ -278,27 +339,27 @@ class Check:
                     self.add("zone equals the register: " + ("yes" if same else "NO"))
             else:
                 self.add(f"register not readable: {why}")
-            code, text = run(["rmmod", "surface_rapl_mmio"])
+            code, text = self.undo(unload)
             after, _ = self._register()
             self.add(f"rmmod: {'ok' if code == 0 else text}")
             if before is not None and after is not None:
                 self.add("register after unload bit-identical: " + ("yes" if after.raw == before.raw else f"NO ({after.raw:#018x})"))
         finally:
-            shutil.rmtree(tmp, ignore_errors=True)
+            if unload in self.cleanup:         # interrupted between load and unload
+                self.undo(unload)
 
     def cdev(self) -> None:
         if os.path.isdir(os.path.join(self.root, "sys/module/surface_aggregator_cdev")):
             return
         code, text = run(["modprobe", "surface_aggregator_cdev"])
         if code == 0:
-            self.cleanup.append(["modprobe", "-r", "surface_aggregator_cdev"])
+            self.undo_later(["modprobe", "-r", "surface_aggregator_cdev"])
             self.say("   loaded surface_aggregator_cdev for this run (unloaded at the end)")
         else:
             self.say(f"   surface_aggregator_cdev could not be loaded ({text}); the EC parts stay unchecked")
 
     def finish(self) -> str:
-        for cmd in self.cleanup:
-            run(cmd)
+        self.restore()
         model = re.sub(r"[^A-Za-z0-9]+", "-", self.device.product or "device").strip("-").lower()
         name = f"surface-power-check-{model}-{dt.datetime.now():%Y%m%d-%H%M}.md"
         user_dir = os.getcwd()
@@ -338,6 +399,28 @@ class Check:
         self.say(f"If it does, paste the file as a comment there; else open it here and paste the file: {new}")
 
 
+def _interrupt(signum, frame):
+    raise KeyboardInterrupt
+
+
+def collect(c: Check, args) -> str:
+    """All steps; returns the result file's path."""
+    c.add(f"# {issue_title(c.device.product)}: check of {dt.datetime.now():%Y-%m-%d %H:%M}")
+    c.add("```")
+    c.result += c.preflight()
+    c.add("```")
+    c.cdev()
+    c.say("1. report ...")
+    c.step_report()
+    c.step_kernel_messages()
+    if not args.no_dry_run:
+        c.say("2. dry-run ...")
+        c.step_dry_run()
+    c.say("3. module ...")
+    c.step_module()
+    return c.finish()
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="surface-power-check", description="One command for a tester's device check (writes nothing for good).")
     ap.add_argument("--yes", action="store_true", help="answer every question with yes")
@@ -354,25 +437,25 @@ def main(argv=None) -> int:
     c.say("surface-power-check: this machine")
     for line in c.preflight():
         c.say("  " + line)
+    if not c.kernel_gate():
+        c.say("Nothing was run. Update, reboot, and start the check again.")
+        return 0
     c.say("It will run, writing nothing for good:")
     for s in c.plan():
         c.say("  " + s)
     if not c.ask("Start?"):
         return 0
-    c.add(f"# {issue_title(c.device.product)}: check of {dt.datetime.now():%Y-%m-%d %H:%M}")
-    c.add("```")
-    c.result += c.preflight()
-    c.add("```")
-    c.cdev()
-    c.say("1. report ...")
-    c.step_report()
-    c.step_kernel_messages()
-    if not args.no_dry_run:
-        c.say("2. dry-run ...")
-        c.step_dry_run()
-    c.say("3. module ...")
-    c.step_module()
-    path = c.finish()
+    try:
+        # A closed terminal or `kill` must undo like Ctrl+C. SIGKILL cannot be caught.
+        for sig in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(sig, _interrupt)
+        path = collect(c, args)
+    except KeyboardInterrupt:
+        c.restore()
+        c.say("interrupted: the module test, the dry-run unit and the debug device module are undone")
+        return 130
+    finally:
+        c.restore()
     c.say(f"Result: {path} (please read it before you share it)")
     if not args.no_issue:
         c.issue(path)

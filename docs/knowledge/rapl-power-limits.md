@@ -13,7 +13,10 @@
 - **The lower enabled copy is in force:** measured on the Pro 10 (MSR below MMIO, tester), the Pro 8 (MMIO below MSR, tester) and the SB3 (MMIO enabled through
   the module at 8 W against MSR 30 W: package 8.0 W, 24.11.2026) [M]; as a general rule still [H]. A disabled copy does not limit [M, SB3].
 - Firmware state differs per device: SB3 MMIO 25/61 W **disabled** (PL1 clamp 1), MSR 30/61 W; Pro 8 MMIO 30/60 W enabled, MSR 35/60 W; Pro 9 MMIO 30/60 W
-  enabled, MSR 35/60 W; Pro 10 MMIO 28/35 W enabled, MSR 35/64 W [M, `research/15` 4]. Never transfer these values.
+  enabled, MSR 35/60 W; Pro 10 MMIO 28/35 W enabled, MSR 35/64 W; Pro 7+ MMIO 30/60 W enabled, MSR 30/60 W (one report, 25.11.2026) [M, `research/15` 4].
+  Never transfer these values.
+- **Module signing** [C, `kernel/module/signing.c`, `ima_efi.c`]: `sig_enforce` and lockdown decide whether a module needs a known signature, not Secure Boot
+  itself; with `CONFIG_IMA_ARCH_POLICY` Secure Boot switches `sig_enforce` on (SB3 [M]). Details `../specs/tester-kit.md` 4.1.
 - On the SB3 the blob's highest PL1/PL2 (30/61 W) equal the firmware MSR copy [M, `research/02`], so leaving the MSR copy at its firmware value costs nothing
   there; on the Pro 10 the blob allows more than the MSR copy (`kernel-mmio-daemon.md` 3).
 
@@ -59,3 +62,8 @@ Installed: 2.5.6 (Ubuntu unit with `--adaptive`); read: tag `v2.5.6` and master 
 `intel-rapl:0` (master no longer does); its RAPL cooling device writes `enabled` 1/0 on the zone it drives; `--workaround-enabled` writes `enabled=0` to the MMIO
 zone every ~30 s (Kaby Lake: directly through `/dev/mem`); no RAPL restore at exit found. Adaptive mode needs an INT3400-type device with GDDV; the SB3 has none.
 thermald must not run next to the daemon (`Conflicts=`) (`../specs/kernel-mmio-rapl.md` 7).
+
+## 7. User-space writes to PL3 are logged by the kernel
+On the SB3 (7.3.6-1-surface) the kernel logs "msr: Write to unrecognized MSR 0x615 by surface-powerd …, tainting CPU_OUT_OF_SPEC" when the daemon writes
+PL3 through the `msr` device (two such lines in one boot's log) [M, 27.11.2026, tester kit run]. So a machine on which the daemon has written PL3 is already
+tainted; a test that looks for new taint has to compare with the state before it. Relevant for the kernel path of PL3 (plan D6, E5).

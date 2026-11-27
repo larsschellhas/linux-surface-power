@@ -91,12 +91,12 @@ At load the module records the limit register (all 64 bits). At unload it first 
 |---|---|---|---|---|---|---|---|
 | Surface Book 3 15" (`Surface_Book_3_1899`) | icelake | ✓ | ✓ | ✓ [M 23.11.]: MCHBAR `0xfed10000` = constant, zone values equal the register, energy counter runs | enable bits 0, PL1 clamp 1, PL2 clamp 0, lock bits 0 [M] | ✓ [M 23.–24.11.]: 8 W in force with `enabled=1` (8.0 W against 13–15 W), restore bit-identical | in the table as test bed (the SKU matches this machine) |
 | Surface Book 3 13" | icelake | ✓ | ✓ | – | – | – | SKU not confirmed (`plan.md` C5) |
-| Pro 10 | meteorlake | ✓ | ✓ | – | ✓ | measured through MSR only | candidate, tester has an own module |
-| Pro 8, Pro 7+ | tigerlake | ✓ | ✓ | – | Pro 8 ✓ | – | candidates |
+| Pro 10 | meteorlake | ✓ | ✓ | ✓ [M, tester, 25.11., issue #3]: MCHBAR check passed (`0xfedc0000`), zone equals the register, unload bit-identical | ✓ enabled, PL1 clamp 1, lock bits 0 (register `0x0000811800dd80e0`) | measured through MSR only | candidate; items 1–4 present, 5 open |
+| Pro 8, Pro 7+ | tigerlake | ✓ | ✓ | – (Pro 8: key not accepted; Pro 7+: skipped by the kit, 25.11.) | ✓ both enabled, 30/60 W [M, testers, issues #4, #2] | – | candidates |
 | Pro 9 Intel | alderlake | ✓ | ✓ | – | ✓ | – | candidate |
 | others | see `research/15` 2 | ✓ | ✓ | – | – | – | no report yet |
 ### 6.3 Developer override
-`unsafe_platform=<type>` lets a tester load the module on a device without an entry, to collect items 3–5. The MCHBAR check stays; the kernel is tainted; on any recent Intel machine whose MCHBAR equals the constant the zone would be created, so the parameter is for the maintainer and named testers only (R). The report goes to `linux-surface#2383`.
+`unsafe_platform=<type>` lets a tester load the module on a device without an entry, to collect items 3–5. The MCHBAR check stays; the kernel is tainted; on any recent Intel machine whose MCHBAR equals the constant the zone would be created, so the parameter is used only by the maintainer and by the tester kit's unlock chain (decision 27.11.2026, `tester-kit.md` 6.2, which replaces "named testers only"; until its module stages for testers are built, the kit loads read only). The chain does not add a device to the table (6.1 stays). The module's parameter text still says "Developers only". Kit reports go to the device issues of this repository.
 
 ## 7. Coexistence
 - Kernel's own zone: module declines (4.2). Name conflict: fails (4.5).
