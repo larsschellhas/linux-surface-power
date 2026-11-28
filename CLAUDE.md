@@ -71,9 +71,11 @@ Decided 23.11.2026; concept `docs/requirements/kernel-modules.md`, specs `docs/s
   Surface Book 3 with the maintainer's explicit yes before each step; `sudo` only through a terminal tab.
 - **Other hardware only through the tester kit's unlock chain** (decided 27.11.2026, `docs/specs/tester-kit.md` 6.2): testers unlock the stages
   themselves, a stage that passed on their machine unlocks the next one, after the disclaimer and his consent; no release by the maintainer per device.
-  Testers get a new or changed module or write stage only after the whole chain has passed on the SB3 through the kit. The repository informs and can
+  Testers get a new or changed module or write stage only after the whole chain has passed on the SB3 through the kit. Exception (decided
+  28.11.2026): a change that cannot act on the SB3, such as a DMI table entry for another device, needs no new SB3 run. The repository informs and can
   block (`kit-evidence.toml`). Outside this chain (loading by hand, other tools, a control run) nothing changes: not on other hardware until the
-  maintainer says so.
+  maintainer says so. Said on 28.11.2026: the supervised control test of `docs/control-test.md` for devices in the module's table whose module
+  steps and first write passed (module loaded by hand there), before the safety suite B7 exists.
 - `checkpatch.pl --no-tree -f` and `make W=1` clean before every commit that touches `kernel/`; the checks run against the kernel tree the
   module is meant for (the linux-surface kernel, `v7.3-surface-devel`).
 

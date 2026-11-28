@@ -1,6 +1,6 @@
 # Evidence for the MMIO write path of PL1/PL2 (per platform type)
 
-23.11.2026, updated 24.11.2026 (SB3 module tests). Basis of `specs/kernel-mmio-rapl.md`. Markers as in `README.md`: [C] driver code or kernel source, [M] measured, [H] hypothesis.
+23.11.2026, updated 24.11.2026 (SB3 module tests) and 28.11.2026 (tester kit runs). Basis of `specs/kernel-mmio-rapl.md`. Markers as in `README.md`: [C] driver code or kernel source, [M] measured, [H] hypothesis.
 Nothing here names Windows functions or reproduces code; it states behaviour, registers and parameters.
 
 ## 1. What the Windows CPU client writes [C]
@@ -36,7 +36,7 @@ devices), `463d42bc` (Pro 10), `3db5fe38` (Pro 10 5G), `f884dca0` (Laptop 7 5G).
 | 7 Meteor Lake | `…MeteorlakeClient` | E | `0xfedc0000` | Pro 10 (`463d42bc`), Pro 10 5G (`3db5fe38`), Laptop 6 (`0d5efa50`), Laptop 7 5G (`f884dca0`) |
 | 8 `MSHW0600` | – | F | `0xfedc0000` | Pro 11 Intel, Laptop 7 Intel (`0d5efa50`) |
 | Go 3 | – | via ACPI `_DSM` | type 1 in the public dump [H firmware] | Go 3 |
-The assignment of device to type comes from the integration driver of each package (`pl3-treiberbeleg`, earlier work); only the Pro 10 table (E) was re-read on 23.11.2026. **Verified on 23.11.2026:** both constants occur once in every client binary. **Not re-verified:** which constant belongs to which type, and the device-to-type mapping (taken from the earlier notes); the names "Alder Lake (EC)", Raptor Lake and Lunar Lake are the notes' labels. The module's MCHBAR check can only tell Ice Lake from the others.
+The assignment of device to type comes from the integration driver of each package (`pl3-treiberbeleg`, earlier work); only the Pro 10 table (E) was re-read on 23.11.2026. **Verified on 23.11.2026:** both constants occur once in every client binary. **Re-checked on 28.11.2026 for the Pro 8 and the Pro 10 [C, pefile and disassembly of the packages' drivers]:** the integration driver of each package names exactly one CPU client hardware ID (Pro 8, `49a04ebf`: Tigerlake; Pro 10, `62d2a88e`: Meteorlake); the client's hardware-ID table gives type 2 and type 7; in both builds (`18ed0894`, `463d42bc`) the preparation code keeps table A and sets MCHBAR `0xfedc0000` for type 2, takes table E and `0xfedc0000` for type 7, sets `0xfed10000` for types 1 and 3 and `0xfedc0000` for types 4–6; in the two tables used, channels 51, 52 and 61 go to MMIO `0x59a0`, `0x59a4` and `0x59a0` bits 23:17 with the masks and OR bits of section 1. **Not re-verified:** the device-to-type mapping of the other devices (taken from the earlier notes); the names "Alder Lake (EC)", Raptor Lake and Lunar Lake are the notes' labels. The module's MCHBAR check can only tell Ice Lake from the others.
 Both constants appear once in every client binary. Tables for types 3 (Gemini Lake) are not used.
 - **Linux reads the real MCHBAR** from the host bridge 00:00.0, config `0x48`/`0x4c` (bit 0 enable, address bits 41:15). Compared with the client's constant:
   Surface Book 3 15" `0xfed10000` [M, 18.11.2026, script `mmio-pl-read.py`]; Pro 10 `0xfedc0000` (config `0xfedc0001`) [M, tester, 18.11.]; Pro 9 `0xfedc0000` [M, tester]; Pro 8: the tester read the MMIO copy with the script, which reads the address from the same config register (it has no constant); the values are plausible [M, tester]. For the other types the match is [H].
@@ -60,14 +60,22 @@ Both constants appear once in every client binary. Tables for types 3 (Gemini La
 | Pro 7+ | 30 / 60 W | yes | 30 / 60 W |
 | Pro 9 Intel | 30 / 60 W | yes | 35 / 60 W |
 | Pro 10 | 28 / 35 W | yes | 35 / 64 W |
+| Laptop 4 Intel 15" | 30 / 60 W | yes | 30 / 60 W (through powercap, after the tester's daemon had stopped; MSR not readable there) |
 Further registers read on the SB3 [M, 24.11.2026, read-only through `/dev/mem`]: info `0x5930` = `0x78` (thermal spec 15.000 W, min 0, max 0, window 0, so no upper bound can be derived from the device), units `0x5938` = `0x000a0e03` (1/8 W, 1/16384 J, 1/1024 s), MMIO PL4 `0x59b0` field 87.625 W (effect unknown, the module does not touch it).
-The lower enabled copy limits (`specs/deviations.md` DV-8): measured on the Pro 10 with four MSR values below the MMIO value, and on the SB3 with the copy enabled through the test module (PL1 8 W in the MMIO copy, 30 W in the MSR copy: package 8.0 W) [M, 24.11.2026]; on the Pro 8 and Pro 9 static only. Pro 7+ row: one tester, read only, 25.11.2026 (issue #2 of this repository).
+The lower enabled copy limits (`specs/deviations.md` DV-8): measured on the Pro 10 with four MSR values below the MMIO value, and on the SB3 with the copy enabled through the test module (PL1 8 W in the MMIO copy, 30 W in the MSR copy: package 8.0 W) [M, 24.11.2026]; Pro 7+ row: one tester, read only, 25.11.2026 (issue #2 of this repository).
+**Tester kit runs of 27.–28.11.2026** [M, testers; issues #3, #4, #6, #7]: registers Pro 10 `0x0000811800dd80e0`, Pro 8, Pro 9 and Laptop 4 Intel
+`0x000081e000dd80f0` (PL1 clamp 1, PL2 clamp 0, both lock bits 0); MCHBAR `0xfedc0000` on all four. Full load settled at the MMIO PL1 with a higher MSR
+PL1 on the Pro 10 (28.0 W), Pro 8 (29.9 W) and Pro 9 (29.6 W). First writes through the module on enabled copies: Pro 10 28 → 23 W (package 23.0 W),
+Pro 8 30 → 24 W (23.9 W); only the PL1 field changed (XOR `0x58`, `0x30`, recomputed), register bit-identical after the unload, no kernel warning.
+For about 28 s after the write the package stayed above the new PL1 (Pro 10 at 35 W, its MMIO PL2; Pro 8 at about 40 W while psys power sat at its
+psys PL1 of 52 W), then held it, consistent with the 28 s window [M for the course, H for the explanation]. The Laptop 4 was held by psys PL1 45 W
+(package 27.8 W). For the Pro 10 and Pro 8 code version: taken as `0ac2dd5`, the commit that was current when the results were posted (maintainer's decision, 28.11.2026); the results themselves say "local changes" (Pro 10) and name no commit (Pro 8).
 On the SB3 [M, 24.11.2026, `specs/kernel-mmio-rapl.md` 5.4]: a limit in the copy takes effect when its **enable** bit is set, with or without clamp, for PL1 and PL2 independently; the clamp alone does nothing; the firmware's state (PL1 enable 0, clamp 1) leaves a written limit without effect. The register survives s2idle; a cold boot restores the firmware value.
 
 ## 5. Open
 - Access width of the Windows write (dword at `0x59a4` in most tables) versus the module's 64-bit read-modify-write (works on the SB3 [M]).
-- The clamp on CPUs other than Ice Lake (on the SB3 not needed [M]); the clamp bits of the enabled firmware copies of the Pro 8, 9, 10 (not reported).
-- Whether the firmware's lock bit (31/63) is set on any device (raw registers show lock 0 on the SB3 [M 23.11.2026], the Pro 9 and the Pro 10; not reported for the Pro 8).
+- The clamp on CPUs other than Ice Lake (on the SB3 not needed [M]); the enabled firmware copies of the Pro 8, 9 and 10 have PL1 clamp 1 and PL2 clamp 0 (raw registers above).
+- Whether the firmware's lock bit (31/63) is set on any device (raw registers show lock 0 on the SB3 [M 23.11.2026], Pro 8, Pro 9, Pro 10 and Laptop 4 Intel 15" [M, testers]).
 - MCHBAR of types 4–8 on devices other than the Pro 9 and Pro 10; Lunar Lake in particular.
-- Whether writing the MMIO copy has side effects beyond the limit: none seen in the SB3 tests of 23.–24.11.2026 (energy counter equal to the MSR zone's, MSR copy and the untouched register bits unchanged [M]); not measured elsewhere.
+- Whether writing the MMIO copy has side effects beyond the limit: none seen in the SB3 tests of 23.–24.11.2026 (energy counter equal to the MSR zone's, MSR copy and the untouched register bits unchanged [M]); on the Pro 10 and Pro 8 first writes of 27.11.2026 the other register bits were unchanged and no kernel message appeared; suspend with a written enabled copy is not measured there.
 - The window rounding table of the SB3 client `8030e5ac` (read in the Pro 10 client, `research/12` 2.1).

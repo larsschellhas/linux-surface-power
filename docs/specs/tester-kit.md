@@ -149,12 +149,15 @@ device, S3–S5 on every Intel device with a profile. Within one run:
   takes effect for a tester after `git pull`; the kit sends and fetches nothing, so it shows the age of the checkout and asks to pull first if it is older
   than 14 days [D]. A tester with an old checkout is not reached by a new block.
 - **Before testers get it (once, not per tester):** the maintainer runs the whole chain through the kit on the Surface Book 3, including a killed kit
-  (watchdog, 7) and a leftover marker, and the module's guard test KM-A5 exists. The same again whenever the module or a write stage changes.
+  (watchdog, 7) and a leftover marker, and the module's guard test KM-A5 exists. The same again whenever the module or a write stage changes. **Exception (maintainer, 28.11.2026):** a change that cannot act on the SB3, such as
+  a DMI table entry for another device, needs no new run; `W=1`, `checkpatch` and the tests still apply.
   **Limit of this check:** the SB3's firmware leaves the MMIO copy disabled, so S4 and S5 on an enabled copy (Pro 7+, 8, 9, 10) run for the first time on
   a tester's machine. S4 exists for this: it writes nothing, and against a changed register there are two guards, the module's refusal of the core's
   clean-up writes and its restore at unload [C].
 - **Not part of the chain:** the control run of the daemon. It sets the blob's limits, which can be higher than the firmware's, unlike every kit stage. Its
   gate is designed with the stage [proposal: S5 passed on the machine, the safety suite B7 passed for the profile, its own consent; no per-tester release].
+  **Maintainer, 28.11.2026:** outside the kit, a supervised control test by hand (`../control-test.md`) is open now to devices in the module's table
+  whose module stages passed, before B7 exists.
 
 ### 6.3 What the tester sees
 - **Console** (`tools/kit/term.py`, 27.11.2026): a heading per part, the machine's properties as aligned rows, text wrapped to the terminal (at most 96
@@ -197,7 +200,8 @@ device, S3–S5 on every Intel device with a profile. Within one run:
 - **Writers:** thermald and tuned write limits, so a measurement next to them says little. The kit (10, E2) stops `surface-powerd`, its dry-run unit,
   thermald, tuned, tuned-ppd, TLP and power-profiles-daemon for the load and module stages and starts afterwards exactly what ran before; tuned,
   tuned-ppd and power-profiles-daemon come back through D-Bus, so they are masked with `--runtime` meanwhile (a unit the tester had masked stays
-  masked). Stopping does not undo what they wrote. The pause is part of the consent to the load or module tests. If a writer is still running, the
+  masked). At the end every unit is unmasked before the first one is started, because one can need another (tuned-ppd needs tuned; before
+  28.11.2026 the order left tuned-ppd stopped, plan B18). Stopping does not undo what they wrote. The pause is part of the consent to the load or module tests. If a writer is still running, the
   result says "measured next to programs that write limits", and S4 and S5 do not run. Without a watchdog (7) nothing is paused and no module loaded.
 - **Watch (all stages from S1 on):** every RAPL limit (all zones and constraints, MSR `0x601`, `0x610`, `0x615`, `0x65c`, the MMIO register) is read once a
   second and every change is logged with its time. This finds writers by what they do, bespoke services included. A change between two samples is missed.

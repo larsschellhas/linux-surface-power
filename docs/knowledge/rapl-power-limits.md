@@ -10,10 +10,14 @@
 - **Windows writes the MMIO copy** (channels 51/52/61) with enable and clamp (`0x18000`) on every write, in every Intel client build of the corpus, and leaves the
   MSR copy alone (channels 56/57 used by no blob) [C, `research/15` 1]. **Linux writes the MSR copy** by default (DV-8); since 24.11.2026 the daemon writes the MMIO copy where a writable MMIO zone exists (`kernel-mmio-daemon.md`;
   checked on the SB3: 9.98 W at a 10 W MMIO PL1, MSR copy 30 W [M]).
-- **The lower enabled copy is in force:** measured on the Pro 10 (MSR below MMIO, tester), the Pro 8 (MMIO below MSR, tester) and the SB3 (MMIO enabled through
+- **The lower enabled copy is in force:** measured on the Pro 10 (MSR below MMIO, tester; and full load at the firmware's MMIO PL1 below the MSR PL1,
+  tester kit 27.11.2026), the Pro 8 and Pro 9 (full load at the MMIO PL1 below the MSR PL1, tester kit 27.–28.11.2026) and the SB3 (MMIO enabled through
   the module at 8 W against MSR 30 W: package 8.0 W, 24.11.2026) [M]; as a general rule still [H]. A disabled copy does not limit [M, SB3].
+- **Writing an enabled copy** through `surface_rapl_mmio` took effect on a Pro 10 and a Pro 8 and the unload restored the register bit-identical
+  (27.11.2026) [M, testers].
 - Firmware state differs per device: SB3 MMIO 25/61 W **disabled** (PL1 clamp 1), MSR 30/61 W; Pro 8 MMIO 30/60 W enabled, MSR 35/60 W; Pro 9 MMIO 30/60 W
-  enabled, MSR 35/60 W; Pro 10 MMIO 28/35 W enabled, MSR 35/64 W; Pro 7+ MMIO 30/60 W enabled, MSR 30/60 W (one report, 25.11.2026) [M, `research/15` 4].
+  enabled, MSR 35/60 W; Pro 10 MMIO 28/35 W enabled, MSR 35/64 W; Pro 7+ MMIO 30/60 W enabled, MSR 30/60 W (one report, 25.11.2026); Laptop 4 Intel 15"
+  MMIO 30/60 W enabled, MSR PL1/PL2 30/60 W, firmware PL4 121 W and psys 45/45 W (one report, 27.11.2026) [M, `research/15` 4].
   Never transfer these values.
 - **Module signing** [C, `kernel/module/signing.c`, `ima_efi.c`]: `sig_enforce` and lockdown decide whether a module needs a known signature, not Secure Boot
   itself; with `CONFIG_IMA_ARCH_POLICY` Secure Boot switches `sig_enforce` on (SB3 [M]). Details `../specs/tester-kit.md` 4.1.
@@ -54,6 +58,9 @@
   exists (since 24.11.2026, source `zone` in `status.json`).
 
 ## 5. Without the daemon the SB3 is held by psys
+A Laptop 4 Intel 15" showed the same pattern in one tester run: under full load platform power sat at its firmware psys PL1 of 45 W and the package at
+27.8 W, below its package PL1 of 30 W [M, 27.11.2026, issue #6]. The statements below are for the SB3.
+
 With the daemon stopped, the firmware's psys limits 25 W (long) / 40 W (short) hold the whole platform: under full load the package sits at ~13–15 W after a
 ~10 s burst at psys 40 W [M, 23.–24.11.2026]. A limit above ~13 W cannot show an effect in a test without the daemon.
 

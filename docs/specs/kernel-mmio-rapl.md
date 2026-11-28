@@ -1,6 +1,6 @@
 # Spec: kernel module `surface_rapl_mmio`
 
-Version 0.4, 24.11.2026 (0.2 revised after the independent review, 0.3 after test steps 0–3, 0.4 after the tests on the Surface Book 3 15" of
+Version 0.5, 28.11.2026 (0.5: Pro 8 and Pro 10 in the table; 0.2 revised after the independent review, 0.3 after test steps 0–3, 0.4 after the tests on the Surface Book 3 15" of
 23.–24.11.2026 and their independent re-check against the raw data). Implements KM-1 … KM-13 of `../requirements/kernel-modules.md`; the
 daemon side (KM-9) is specified in `kernel-mmio-daemon.md`; evidence in `../research/15-mmio-evidence.md`. Markers [C] source or driver,
 [M] measured, [H] hypothesis, [D] design decision. Findings of the first review are marked (R).
@@ -86,15 +86,17 @@ At load the module records the limit register (all 64 bits). At unload it first 
 3. Read-only load on the device: MCHBAR from config equals the constant; zone values equal the raw registers read through `/dev/mem` (script `scripts/mmio-pl-read.py`) [M, tester or maintainer].
 4. Firmware state of the copy reported (enabled, clamp and lock bits).
 5. For the first write test on a device: the effective limit measured against the written value, with the original value restored [M].
-### 6.2 Table status (24.11.2026)
+### 6.2 Table status (28.11.2026)
 | Device | Type | 1 | 2 | 3 | 4 | 5 | State |
 |---|---|---|---|---|---|---|---|
 | Surface Book 3 15" (`Surface_Book_3_1899`) | icelake | ✓ | ✓ | ✓ [M 23.11.]: MCHBAR `0xfed10000` = constant, zone values equal the register, energy counter runs | enable bits 0, PL1 clamp 1, PL2 clamp 0, lock bits 0 [M] | ✓ [M 23.–24.11.]: 8 W in force with `enabled=1` (8.0 W against 13–15 W), restore bit-identical | in the table as test bed (the SKU matches this machine) |
 | Surface Book 3 13" | icelake | ✓ | ✓ | – | – | – | SKU not confirmed (`plan.md` C5) |
-| Pro 10 | meteorlake | ✓ | ✓ | ✓ [M, tester, 25.11., issue #3]: MCHBAR check passed (`0xfedc0000`), zone equals the register, unload bit-identical | ✓ enabled, PL1 clamp 1, lock bits 0 (register `0x0000811800dd80e0`) | measured through MSR only | candidate; items 1–4 present, 5 open |
-| Pro 8, Pro 7+ | tigerlake | ✓ | ✓ | – (Pro 8: key not accepted; Pro 7+: skipped by the kit, 25.11.) | ✓ both enabled, 30/60 W [M, testers, issues #4, #2] | – | candidates |
-| Pro 9 Intel | alderlake | ✓ | ✓ | – | ✓ | – | candidate |
+| Pro 10 (`Surface_Pro_10_for_Business_2079`) | meteorlake | ✓ | ✓ | ✓ [M, tester, 25.11. and 27.11., issue #3]: MCHBAR check passed (`0xfedc0000`), zone equals the register, energy counter counts, unload bit-identical, also with `allow_write=1` and no write | ✓ enabled, PL1 clamp 1, lock bits 0 (register `0x0000811800dd80e0`) | ✓ [M, tester, 27.11.]: MMIO PL1 28 → 23 W, package 28.0 → 23.0 W, only the PL1 field changed, restore bit-identical, 27.9 W again | **in the table since 28.11.2026** (maintainer) |
+| Pro 8 (`Surface_Pro_8_1983`) | tigerlake | ✓ | ✓ (re-checked in the drivers 28.11., `research/15` 2) | ✓ [M, tester, 27.11., issue #4]: as the Pro 10 | ✓ enabled 30/60 W, PL1 clamp 1, PL2 clamp 0, lock bits 0 (register `0x000081e000dd80f0`) | ✓ [M, tester, 27.11.]: 30 → 24 W, package 29.94 → 23.94 W, only the PL1 field changed, restore bit-identical, 29.78 W again. The result names no repository commit | **in the table since 28.11.2026** (maintainer); Wi-Fi model only, the LTE model is not reported |
+| Pro 7+ | tigerlake | ✓ | ✓ | – (skipped by the kit, 25.11.) | ✓ enabled, 30/60 W [M, tester, issue #2] | – | candidate |
+| Pro 9 Intel | alderlake | ✓ | ✓ | – (headers missing on the tester's image, 28.11., issue #7) | ✓ enabled 30/60 W (register `0x000081e000dd80f0`) [M] | – | candidate |
 | others | see `research/15` 2 | ✓ | ✓ | – | – | – | no report yet |
+For the Pro 8 and Pro 10 entries the code version: taken as `0ac2dd5`, the commit that was current when the results were posted (maintainer's decision, 28.11.2026); the results themselves say "local changes" (Pro 10) and name no commit (Pro 8). Items 1 and 2 were re-checked in both packages' drivers on 28.11.2026. A table entry only lets the module load without `unsafe_platform`: it stays read-only without `allow_write=1` and has no alias.
 ### 6.3 Developer override
 `unsafe_platform=<type>` lets a tester load the module on a device without an entry, to collect items 3–5. The MCHBAR check stays; the kernel is tainted; on any recent Intel machine whose MCHBAR equals the constant the zone would be created, so the parameter is used only by the maintainer and by the tester kit's unlock chain (decision 27.11.2026, `tester-kit.md` 6.2, which replaces "named testers only"; until its module stages for testers are built, the kit loads read only). The chain does not add a device to the table (6.1 stays). The module's parameter text still says "Developers only". Kit reports go to the device issues of this repository.
 

@@ -124,7 +124,7 @@ iGPU there (tester report [H]); its `notes` line says so in the report and the l
 
 ## 4. PL3 through MSR (FR-O2)
 - **Encoding:** MSR 0x615 holds PL3 in power units from MSR 0x606 (`1/2^PU W`). The adapter changes only bits 0–12, the field Windows writes (`../research/10-outputs.md` 4.1 [C]); bits 13–14, the time window and the enable bit stay as read.
-- **Availability:** this needs `/dev/cpu/0/msr` and kernel lockdown `none`. If either is missing, PL3 is log-only and reported once (AC-O1).
+- **Availability:** this needs `/dev/cpu/0/msr` and kernel lockdown `none`. If either is missing, PL3 is log-only and reported once (AC-O1). Not every system loads the `msr` module: both daemon units ask for it (`modprobe@msr.service`), and the tester kit loads it for its run and unloads it before it restarts the services (plan B19). The daemon looks once, at its start.
 - **Default:** opt-in per device profile (`outputs.pl3 = true`), only where Windows' write of MSR 0x615 is verified in the driver of that device (DV-9, since 17.11.2026). Without it PL3 is log-only. The profiles of the SB3, Pro 8, Pro 9 Intel, Pro 10, Laptop Go 1, Laptop Studio 1/2 and (since 23.11.2026) the Pro 7+, Pro 10 5G, Pro 11 Intel, Laptop 4 Intel, Laptop 5, Laptop 6, Laptop 7 Intel, Laptop 7 5G, Laptop Go 2/3, Go 3 and Go 4 switch it on (`../research/10-outputs.md` 4.1).
 - **Snapshot:** the firmware value of MSR 0x615 is part of the snapshot (`supervisor.md` 3) and restored with the powercap values.
 - **Not readable (plan B9, 25.11.2026):** the target is created only if MSR 0x615 itself reads, not only 0x606; the Pro 9 answers 0x615 with EIO although 0x606
@@ -275,10 +275,20 @@ Dry-run computes the frames and sends nothing. The status file shows `would send
 
 ### 9.8 Sensor offsets (`A79674B4/5xx`) [C for the command, H for the effect]
 Sent by the same stage as the fan outputs (9.1): TMP `0x24`, instance = sensor number (channel - 500), payload = sensor number (u8) + float32 K (value x 0.1), flags 0.
-Hard bound +-5 K [D] (the blob has no range for it; the corpus has -2 K to +2 K), neutral frame = offset 0 (recorded in the snapshot as `sam:A79674B4/509`), status target `SAM TMP 0x24 (cdev)`.
-In the Pro 10 blob it is constantly 0; other blobs use -2.0 to +1.5 K. Effect on the EC not measured with this frame.
+Hard bound +-5 K [D] (the blob has no range for it; the corpus has -3.0 K to +2.5 K as table sums), neutral frame = offset 0 (recorded in the snapshot as `sam:A79674B4/509`), status target `SAM TMP 0x24 (cdev)`.
+In the Pro 10 blob it is constantly 0; other blobs use -3.0 to +2.5 K. Effect on the EC not measured with this frame.
 
-**Open contradiction (23.11.2026, `plan.md` H6):** the frame above (the sensor number in the SSAM instance field and again in the payload) is what the Windows SMF client builds, read in two builds: the Pro 10/Laptop Studio 2/Laptop 6 client (sha256 `0f18750c…`) and the Laptop Go 1 client (sha256 `68f6cffd…`) [C]. A tester on a Laptop Go 1 reports [M, one device, one tester] that this frame has no effect on `I_VTS1`, while the instance field 0 with the sensor number only in the payload shifts it by the float on the next 5 s EC tick. A write with flags 0 is acknowledged on the link whether or not the EC acts on it (DV-11), so "status 0" proves nothing. Whether Windows' own write has no effect on that EC, whether the Windows serial-hub layer changes the instance, or whether the EC firmware differs is not known. The daemon keeps the Windows frame until this is settled; the offset output is therefore sent on every device but its effect is measured on none.
+**EC side (27.11.2026, `../research/12-remaining-outputs.md` 2.5 and 2.6, `plan.md` H6):** the frame above is what the Windows SMF client builds (builds named in 2.5 and `plan.md` H6) [C]. The SAM firmware of 13 driver packages was read (static) [C]. Every handler takes the sensor from the payload, does not read the instance field and checks no range, so the driver's or daemon's bound is the only one. Three kinds:
+
+| Firmware | What `0x24` does | Sensors accepted |
+|---|---|---|
+| Go 1, Go 2, Pro 7+, Pro 8, Laptop 4 Intel | new constant of a virtual sensor = value + factory constant (0 = factory value); dropped when the EC loads the constants again | virtual 9-11 (Pro 7+: 9-12); 10 and 11 broken on the Go 1, 10-12 on the Pro 7+ |
+| Pro 10, Pro 11 Intel, Laptop 6, Laptop 7 Intel and 7 5G | separate offset field (0 = factory state), lost at an EC restart; **the value is cut to whole kelvin** (+1.5 acts as +1.0, +2.5 as +2.0) | virtual 9-11 (7 5G: 9-12) **and hardware sensors 1-5** (7 5G: 1-7), which also moves the thermistors and virtual sensors computed from them |
+| Go 3, Laptop 5, Pro 9 Intel | **no handler**: the request does nothing | – |
+
+All blobs of the corpus use channel 509 only, so the daemon's frames name sensor 9. The truncation and the missing handlers affect Windows' own request in the same way. A Go 1 tester reports no effect with instance = sensor and an effect with instance 0 [M, one tester]; the firmware does not explain the first. The daemon keeps the Windows frame. A device may run another firmware version than its package [H]; the SB3 package was not read (its blobs have no channel 509); the effect of our frame is measured on none.
+
+**Open (`plan.md` B17):** the send table holds channels 501-512. Only 509 occurs in the corpus; on the firmware above another channel can break a sensor constant or move hardware sensors, so the adapter is to send 509 only. Not implemented.
 
 ### 9.9 Battery mode (`0B7B5350/70`) [C for the request, H for its meaning] (`adapters/prochot.py`)
 Value 1 sends one SAM request: category TMP `0x03`, target ID 1, instance 0, flags 0, command `0x1b`, no payload; the Windows Intel client does the same and sends nothing for 0.
