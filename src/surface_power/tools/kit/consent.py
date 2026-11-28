@@ -41,7 +41,8 @@ NOT_COLLECTED = ("No serial numbers, nothing from your files, no history of what
 WHERE_IT_GOES = ("One text file in the folder you started the check from. Nothing is sent anywhere: read it, then decide whether to "
                  "post it. Issues on GitHub are public. At the end the check can post it for you, only if you say yes.")
 HOW = ("By reading only, and by a trial run of this project's daemon that writes nothing. To ask the Surface's controller, the "
-       "check loads surface_aggregator_cdev (part of linux-surface) if needed and unloads it again. Where your kernel does not "
+       "check loads surface_aggregator_cdev (part of linux-surface) if needed and unloads it again; the same goes for msr (part of "
+       "your kernel), which gives access to processor registers. Where your kernel does not "
        "provide temperature sensors your device needs, the check asks the controller for them directly.")
 DISCLOSED = {"run": "Your system", "machine": "Your device", "system": "Your system", "software": "Power software",
              "paused": "Power software", "limits": "Power and heat", "watch": "Power and heat", "sam_devices": "Power and heat",

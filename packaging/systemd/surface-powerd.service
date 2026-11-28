@@ -4,9 +4,10 @@ Documentation=https://github.com/larsschellhas/linux-surface-power
 # thermald changes package PL1 itself and would fight the daemon (FR-S6). Conflicts= alone does not order the two: without After=
 # the daemon can start while thermald is still stopping, refuses to run ("thermald is running") and, after a failover to
 # thermald through the OnFailure= line below, never comes back (seen 18.11.2026, 25 min without the controller).
-After=systemd-modules-load.service thermald.service surface-gpu-clockd.socket
+After=systemd-modules-load.service thermald.service surface-gpu-clockd.socket modprobe@msr.service
 # The dGPU stand-in sends its clock cap to the helper; without it only the stand-in is off (spec dgpu-standin-service 6).
-Wants=surface-gpu-clockd.socket
+# PL3 needs the msr module, which not every system loads; the daemon looks for it once, at its start (spec outputs 4).
+Wants=surface-gpu-clockd.socket modprobe@msr.service
 Conflicts=thermald.service
 StartLimitIntervalSec=600
 StartLimitBurst=3

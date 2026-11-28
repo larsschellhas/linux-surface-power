@@ -43,3 +43,107 @@ sku = "Surface_Book_3_1899"
 model = "Surface Book 3"
 platform = "icelake"
 note = "The maintainer's reference device, 27.11.2026; its firmware leaves the MMIO copy switched off"
+
+[[passed]]
+stage = "S1"
+sku = "Surface_Pro_10_for_Business_2079"
+model = "Surface Pro 10 for Business"
+platform = "meteorlake"
+issue = 3
+note = "27.11.2026, firmware MMIO copy enabled; code taken as 0ac2dd5"
+
+[[passed]]
+stage = "S2"
+sku = "Surface_Pro_10_for_Business_2079"
+model = "Surface Pro 10 for Business"
+platform = "meteorlake"
+issue = 3
+note = "27.11.2026, firmware MMIO copy enabled; code taken as 0ac2dd5"
+
+[[passed]]
+stage = "S4"
+sku = "Surface_Pro_10_for_Business_2079"
+model = "Surface Pro 10 for Business"
+platform = "meteorlake"
+issue = 3
+note = "27.11.2026, firmware MMIO copy enabled; code taken as 0ac2dd5"
+
+[[passed]]
+stage = "S5"
+sku = "Surface_Pro_10_for_Business_2079"
+model = "Surface Pro 10 for Business"
+platform = "meteorlake"
+issue = 3
+note = "27.11.2026, firmware MMIO copy enabled; code taken as 0ac2dd5"
+
+[[passed]]
+stage = "S1"
+sku = "Surface_Pro_8_1983"
+model = "Surface Pro 8"
+platform = "tigerlake"
+issue = 4
+note = "27.11.2026, firmware MMIO copy enabled; code taken as 0ac2dd5"
+
+[[passed]]
+stage = "S2"
+sku = "Surface_Pro_8_1983"
+model = "Surface Pro 8"
+platform = "tigerlake"
+issue = 4
+note = "27.11.2026, firmware MMIO copy enabled; code taken as 0ac2dd5"
+
+[[passed]]
+stage = "S3"
+sku = "Surface_Pro_8_1983"
+model = "Surface Pro 8"
+platform = "tigerlake"
+issue = 4
+note = "27.11.2026, firmware MMIO copy enabled; code taken as 0ac2dd5"
+
+[[passed]]
+stage = "S4"
+sku = "Surface_Pro_8_1983"
+model = "Surface Pro 8"
+platform = "tigerlake"
+issue = 4
+note = "27.11.2026, firmware MMIO copy enabled; code taken as 0ac2dd5"
+
+[[passed]]
+stage = "S5"
+sku = "Surface_Pro_8_1983"
+model = "Surface Pro 8"
+platform = "tigerlake"
+issue = 4
+note = "27.11.2026, firmware MMIO copy enabled; code taken as 0ac2dd5"
+
+[[passed]]
+stage = "S1"
+sku = "Surface_Laptop_4_1978:1979"
+model = "Surface Laptop 4"
+platform = "tigerlake"
+issue = 6
+note = "27.11.2026, on a stock distribution kernel, not linux-surface"
+
+[[passed]]
+stage = "S2"
+sku = "Surface_Laptop_4_1978:1979"
+model = "Surface Laptop 4"
+platform = "tigerlake"
+issue = 6
+note = "27.11.2026, on a stock distribution kernel, not linux-surface"
+
+[[passed]]
+stage = "S1"
+sku = "Surface_Pro_9_for_Business_2038"
+model = "Surface Pro 9"
+platform = "alderlake"
+issue = 7
+note = "28.11.2026"
+
+[[passed]]
+stage = "S2"
+sku = "Surface_Pro_9_for_Business_2038"
+model = "Surface Pro 9"
+platform = "alderlake"
+issue = 7
+note = "28.11.2026"

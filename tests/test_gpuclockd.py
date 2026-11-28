@@ -242,7 +242,8 @@ class UnitFilesTest(unittest.TestCase):
 
     def test_daemon_unit_wants_the_socket_and_gets_no_new_capability(self):
         unit = self.lines("surface-powerd.service")
-        self.assertIn("Wants=surface-gpu-clockd.socket", unit)
+        wanted = [word for line in unit if line.startswith("Wants=") for word in line.split("=", 1)[1].split()]
+        self.assertIn("surface-gpu-clockd.socket", wanted)
         self.assertIn("CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SYS_RAWIO", unit)
 
 

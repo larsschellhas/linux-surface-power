@@ -1,6 +1,7 @@
 """The tester kit's parts: signing cases, the undo with its watchdog (real /bin/sh), load analysis, registers, evidence."""
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -13,7 +14,7 @@ from fakesys import FakeSys, MCHBAR, RAPL_UNITS
 
 from surface_power.adapters import inputs as inp
 from surface_power.loader.model import ChannelRef
-from surface_power.tools.kit import chain, load, module, result, sh, signing, system, undo, watch, write
+from surface_power.tools.kit import MODULE_SRC, chain, load, module, result, sh, signing, system, undo, watch, write
 
 
 class Signing(unittest.TestCase):
@@ -49,13 +50,29 @@ class Signing(unittest.TestCase):
 
 
 class UndoWithRealShell(unittest.TestCase):
+    """A real /bin/sh, but never the real system tools: as a normal user `systemctl stop` opens a password prompt."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.u = undo.Undo(self.tmp.name)
+        os.makedirs(self.f("bin"))
+        self.fake("systemctl", 1)                  # nothing to stop, and no unit is active
+        self.fake("systemd-run", 1)
+        self.fake("rmmod", 1)                      # a module that will not go
+        self.fake("modprobe", 1)
+        path = mock.patch.dict(os.environ, {"PATH": self.f("bin") + os.pathsep + os.environ["PATH"]})
+        path.start()
+        self.addCleanup(path.stop)
 
     def f(self, name):
         return os.path.join(self.tmp.name, name)
+
+    def fake(self, tool, code):
+        path = self.f(os.path.join("bin", tool))
+        with open(path, "w") as f:
+            f.write(f"#!/bin/sh\nexit {code}\n")
+        os.chmod(path, 0o755)
 
     def watchdog_script(self, pid, max_s):
         with mock.patch.object(sh, "run", lambda cmd, timeout=120, **kw: (0, "")):
@@ -113,14 +130,10 @@ class UndoWithRealShell(unittest.TestCase):
         os.makedirs(modules)
         self.assertEqual(subprocess.run(undo.unload_module("surface_rapl_mmio", modules)).returncode, 0)
         self.assertEqual(subprocess.run(undo.stop_unit("surface-power-no-such-unit.service")).returncode, 0)
-        os.makedirs(os.path.join(modules, "surface_rapl_mmio"))
-        fake = self.f("bin")
-        os.makedirs(fake)
-        with open(os.path.join(fake, "rmmod"), "w") as f:            # a module that will not go: the failure must show
-            f.write("#!/bin/sh\nexit 1\n")
-        os.chmod(os.path.join(fake, "rmmod"), 0o755)
-        env = {**os.environ, "PATH": fake + os.pathsep + os.environ["PATH"]}
-        self.assertEqual(subprocess.run(undo.unload_module("surface_rapl_mmio", modules), env=env).returncode, 1)
+        os.makedirs(os.path.join(modules, "surface_rapl_mmio"))      # a module that will not go: the failure must show
+        self.assertEqual(subprocess.run(undo.unload_module("surface_rapl_mmio", modules)).returncode, 1)
+        self.fake("systemctl", 0)                                    # `is-active` succeeds: the unit did not stop
+        self.assertEqual(subprocess.run(undo.stop_unit("surface-power-no-such-unit.service")).returncode, 1)
 
     def test_nothing_pending_leaves_no_script_and_a_second_kit_is_refused(self):
         cmd = self.u.push(["true"])
@@ -143,10 +156,67 @@ class UndoWithRealShell(unittest.TestCase):
         self.assertIn(["systemctl", "unmask", "--runtime", "tuned.service"], calls)
         self.assertFalse(any("thermald.service" in c for c in calls))
 
+    def test_a_unit_that_needs_another_paused_unit_comes_back(self):
+        """tuned-ppd requires tuned: every unmask has to run before the first start (plan B18, Pro 9 report of 28.11.2026)."""
+        units = {"tuned.service", "tuned-ppd.service", "power-profiles-daemon.service"}
+        needs = {"tuned-ppd.service": ["tuned.service"]}
+        active, masked = set(units), set()
+
+        def run(cmd, timeout=120, **kw):
+            verb, name = cmd[1], cmd[-1]
+            if verb == "mask":
+                masked.add(name)
+            elif verb == "unmask":
+                masked.discard(name)
+            elif verb == "stop":
+                active.discard(name)
+            elif verb == "start":
+                wanted = [name] + needs.get(name, [])
+                for unit in wanted:
+                    if unit in masked:
+                        return 1, f"Failed to start {name}: Unit {unit} is masked."
+                active.update(wanted)
+            return 0, ""
+        states = {n.removesuffix(".service"): {"active": "active", "enabled": "enabled"} for n in units}
+        with mock.patch.object(sh, "run", run):
+            self.u.pause_services(states)
+            self.assertEqual((active, masked), (set(), units))
+            self.assertTrue(self.u.restore(), self.u.failures)
+        self.assertEqual((active, masked), (units, set()))
+
+    def test_the_undo_script_unmasks_everything_before_the_first_start(self):
+        """The watchdog runs the script, not restore(): it needs the same order."""
+        with mock.patch.object(sh, "run", lambda cmd, timeout=120, **kw: (0, "")):
+            self.u.pause_services({n: {"active": "active", "enabled": "enabled"} for n in undo.SERVICES})
+        script = self.u.leftover().splitlines()
+        unmasks = [i for i, line in enumerate(script) if line.startswith("systemctl unmask")]
+        starts = [i for i, line in enumerate(script) if line.startswith("systemctl start")]
+        self.assertEqual((len(unmasks), len(starts)), (len(undo.BUS_ACTIVATED), len(undo.SERVICES)))
+        self.assertLess(max(unmasks), min(starts))
+
     def test_a_unit_the_tester_had_masked_stays_masked(self):
         with mock.patch.object(sh, "run", lambda cmd, timeout=120, **kw: (0, "")):
             self.u.pause_services({"tuned": {"active": "active", "enabled": "masked"}})
             self.assertEqual(self.u.pending, [["systemctl", "start", "tuned.service"]])
+
+
+class ModuleTable(unittest.TestCase):
+    def test_the_table_of_the_module_and_the_kit_agree(self):
+        """Pinned on purpose: a new entry needs the evidence of spec kernel-mmio-rapl 6.1. The kit passes no unsafe_platform for
+        a SKU it believes is in the table, so the two lists must not drift apart."""
+        with open(os.path.join(MODULE_SRC, "surface_rapl_mmio.c")) as f:
+            source = f.read()
+        body = source[source.index("srm_devices[] = {"):source.index("{ }\n};", source.index("srm_devices[] = {"))]
+        table = {sku: platform.lower() for sku, platform in re.findall(
+            r'DMI_EXACT_MATCH\(DMI_PRODUCT_SKU, "([^"]+)"\),\s*\},\s*\.driver_data = \(void \*\)SRM_(\w+),', body)}
+        self.assertEqual(table, {"Surface_Book_3_1899": "icelake", "Surface_Pro_8_1983": "tigerlake",
+                                 "Surface_Pro_10_for_Business_2079": "meteorlake"})
+        self.assertEqual(body.count("DMI_PRODUCT_SKU"), len(table))
+        self.assertEqual(module.IN_MODULE_TABLE, set(table))
+        for sku, platform in table.items():
+            self.assertEqual(module.parameters(platform, sku, False), ["allow_write=0"])
+        self.assertEqual(module.parameters("alderlake", "Surface_Pro_9_2038", True),           # not in the table
+                         ["allow_write=1", "unsafe_platform=alderlake"])
 
 
 class Registers(unittest.TestCase):

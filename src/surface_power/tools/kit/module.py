@@ -14,7 +14,8 @@ from .undo import unload_module
 
 NAME = "surface_rapl_mmio"
 SOURCES = ("surface_rapl_mmio.c", "Kbuild", "Makefile")
-IN_MODULE_TABLE = {"Surface_Book_3_1899"}      # SKUs in the module's DMI table: no unsafe_platform needed
+# SKUs in the module's DMI table: no unsafe_platform needed
+IN_MODULE_TABLE = {"Surface_Book_3_1899", "Surface_Pro_8_1983", "Surface_Pro_10_for_Business_2079"}
 LOCK_BITS = (1 << 31) | (1 << 63)
 PL1_FIELD, PL2_FIELD = 0x7FFF, 0x7FFF << 32
 ENABLE_BITS = (3 << 15) | (3 << 47)            # enable and clamp of PL1 and PL2

@@ -1,7 +1,9 @@
 [Unit]
 Description=Surface power management (SMF blob interpreter), dry-run next to thermald
 Documentation=https://github.com/larsschellhas/linux-surface-power
-After=systemd-modules-load.service
+After=systemd-modules-load.service modprobe@msr.service
+# PL3 needs the msr module, which not every system loads; the daemon looks for it once, at its start (spec outputs 4).
+Wants=modprobe@msr.service
 # Dry-run only (acceptance test AC-L4, idea I-10): computes and logs, writes nothing, so thermald keeps running.
 # Do not enable together with surface-powerd.service.
 Conflicts=surface-powerd.service

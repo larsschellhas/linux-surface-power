@@ -643,5 +643,17 @@ class DaemonTest(unittest.TestCase):
         self.assertIn("2E8B14C2/509", header)
 
 
+class Units(unittest.TestCase):
+    def test_both_daemon_units_load_the_msr_module(self):
+        """PL3 needs /dev/cpu/0/msr, and not every system loads `msr` by itself (plan B19). The daemon looks once, at its start."""
+        folder = os.path.join(os.path.dirname(__file__), "..", "packaging", "systemd")
+        for name in ("surface-powerd.service", "surface-powerd-dryrun.service"):
+            with self.subTest(name), open(os.path.join(folder, name)) as f:
+                lines = f.read().splitlines()
+                for key in ("Wants", "After"):
+                    named = [word for line in lines if line.startswith(key + "=") for word in line.split("=", 1)[1].split()]
+                    self.assertIn("modprobe@msr.service", named, f"{name}: {key}=")
+
+
 if __name__ == "__main__":
     unittest.main()

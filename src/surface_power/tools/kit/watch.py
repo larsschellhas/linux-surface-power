@@ -23,6 +23,7 @@ class Watch:
         self.dropped = 0
         self.last: dict[str, str] | None = None
         self.mchbar = None
+        self.read_msr = True
         self._stop = threading.Event()
         self._thread = None
         self._lock = threading.Lock()
@@ -37,7 +38,7 @@ class Watch:
                 v = read("/", f)
                 if v is not None:
                     out[f"{z}/{os.path.basename(f)}"] = v
-        for reg in MSR_LIMITS:
+        for reg in MSR_LIMITS if self.read_msr else ():
             v = msr.read(self.root, reg)
             if v is not None:
                 out[f"msr {reg:#x}"] = f"{v:#018x}"
@@ -51,9 +52,18 @@ class Watch:
                 self.mchbar = 0
         return out
 
+    def forget_msr(self) -> None:
+        """Stop watching the processor registers: their device is about to go."""
+        with self._lock:
+            self.read_msr = False
+            if self.last is not None:
+                self.last = {k: v for k, v in self.last.items() if not k.startswith("msr ")}
+
     def sample(self) -> None:
         now = self.values()
         with self._lock:
+            if not self.read_msr:
+                now = {k: v for k, v in now.items() if not k.startswith("msr ")}
             if self.last is not None:
                 t = round(self.clock() - self.t0, 1)
                 for key in sorted(set(self.last) | set(now)):

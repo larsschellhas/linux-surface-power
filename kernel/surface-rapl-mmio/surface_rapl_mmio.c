@@ -82,6 +82,22 @@ static const struct dmi_system_id srm_devices[] = {
 		},
 		.driver_data = (void *)SRM_ICELAKE,
 	},
+	{
+		.ident = "Surface Pro 8 (Wi-Fi)",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
+			DMI_EXACT_MATCH(DMI_PRODUCT_SKU, "Surface_Pro_8_1983"),
+		},
+		.driver_data = (void *)SRM_TIGERLAKE,
+	},
+	{
+		.ident = "Surface Pro 10 for Business",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Microsoft Corporation"),
+			DMI_EXACT_MATCH(DMI_PRODUCT_SKU, "Surface_Pro_10_for_Business_2079"),
+		},
+		.driver_data = (void *)SRM_METEORLAKE,
+	},
 	{ }
 };
 

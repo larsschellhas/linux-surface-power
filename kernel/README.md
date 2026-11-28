@@ -8,7 +8,7 @@ linux-surface kernel and later for mainline. Concept and requirements: [`docs/re
 
 | Directory | Module | Spec | State |
 |---|---|---|---|
-| `surface-rapl-mmio/` | `surface_rapl_mmio`: powercap zone for the MMIO copy of PL1/PL2 | [`docs/specs/kernel-mmio-rapl.md`](../docs/specs/kernel-mmio-rapl.md) | prototype; loaded read-only on the Surface Book 3 15" (23.11.2026: zone equals the registers, three clean unloads); never loaded with `allow_write=1` |
+| `surface-rapl-mmio/` | `surface_rapl_mmio`: powercap zone for the MMIO copy of PL1/PL2 | [`docs/specs/kernel-mmio-rapl.md`](../docs/specs/kernel-mmio-rapl.md) | prototype; tested on the Surface Book 3 15" including writes (23.–24.11.2026); on a Pro 8 and a Pro 10, whose firmware enables the copy, testers ran read, write permission and a first PL1 write with restore (27.11.2026). DMI table: Book 3 15", Pro 8 (Wi-Fi), Pro 10 for Business |
 | (not started) | `surface_pl3`: PL3 from the kernel | [`docs/specs/kernel-pl3.md`](../docs/specs/kernel-pl3.md) | concept |
 
 **Not for everyone:** the module acts only on devices in its DMI table, is read-only unless loaded with `allow_write=1`, and with that taints the kernel. It

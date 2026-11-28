@@ -125,6 +125,28 @@ class FullChain(KitRun):
         self.assertLess(len(text), result.LIMIT)
 
 
+class MsrModule(KitRun):
+    """Not every system loads `msr` (plan B19: a Laptop 4 on an Arch-based kernel read ENOENT on every register)."""
+
+    def test_msr_is_loaded_for_the_run_and_gone_before_the_services_start_again(self):
+        os.remove(self.m.fs.path("dev/cpu/0/msr"))
+        c, _, _ = self.go()
+        self.assertEqual(self.statuses(c)["S5"], "passed", c.out.getvalue())
+        self.assertIn("value", c.result.data["limits"]["msr"]["0x610"])
+        commands = [" ".join(cmd) for cmd in self.m.commands]
+        self.assertEqual(commands.count("modprobe msr"), 1)
+        # a daemon that ran without msr must not find it at its restart and lose it right after
+        self.assertLess(commands.index("modprobe -r msr"), commands.index("systemctl start surface-powerd.service"))
+        self.assertFalse(os.path.exists(self.m.fs.path("dev/cpu/0/msr")))
+        self.assert_everything_undone(c)
+        self.assertEqual([e for e in c.result.data["watch"]["events"] if e["what"].startswith("msr ")], [])
+
+    def test_msr_that_is_there_is_left_alone(self):
+        c, _, _ = self.go()
+        self.assertEqual([cmd for cmd in self.m.commands if cmd[0] == "modprobe" and cmd[-1] == "msr"], [])
+        self.assertTrue(os.path.exists(self.m.fs.path("dev/cpu/0/msr")))
+
+
 class EnabledCopy(KitRun):
     machine_args = {"register": ENABLED_28, "hold_w": None}
 
@@ -139,7 +161,7 @@ class EnabledCopy(KitRun):
         d = c.result.stages["S5"]["details"]
         self.assertEqual((d["target_w"], [w["file"] for w in d["writes"]]), (23, ["constraint_0_power_limit_uw"]))
         loads = [cmd[2:] for cmd in self.m.commands if cmd[0] == "insmod"]
-        self.assertEqual(loads[0], ["allow_write=0", "unsafe_platform=meteorlake"])
+        self.assertEqual(loads, [["allow_write=0"], ["allow_write=1"], ["allow_write=1"]])    # in the table since 28.11.2026
         self.assertIn("passed on 1 machine of this model (issue #3)", c.out.getvalue())
 
 

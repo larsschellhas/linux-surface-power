@@ -25,7 +25,8 @@ class FakeMachine:
         self.register_at_boot = register
         self.hold_w = hold_w
         # the fake msr file is byte-addressed: only registers whose 8 bytes do not overlap may be set
-        self.fs.add_msr({0x606: RAPL_UNITS, 0x610: MSR_PL, 0x65C: 0, 0x17: 1})
+        self.msr_values = {0x606: RAPL_UNITS, 0x610: MSR_PL, 0x65C: 0, 0x17: 1}
+        self.fs.add_msr(self.msr_values)
         self.fs.add_mmio_register(register)
         self.fs.write("proc/cpuinfo", "processor\t: 0\nvendor_id\t: GenuineIntel\nmodel name\t: Fake CPU\n")
         self.fs.write("proc/version", "Linux version 7.3.6-1-surface (builder@somewhere) (gcc 13.3) #1")
@@ -150,6 +151,12 @@ class FakeMachine:
             if "-u" in cmd:
                 return 0, "dry-run started\nstopped"
             return 0, "\n".join(self.journal)
+        if name == "modprobe" and cmd[-1] == "msr":
+            if "-r" in cmd:
+                os.remove(self.fs.path("dev/cpu/0/msr"))
+            else:
+                self.fs.add_msr(self.msr_values)
+            return 0, ""
         if name == "mokutil":
             return 1, "MOK.der is already enrolled"
         return 0, ""

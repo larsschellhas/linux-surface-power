@@ -145,12 +145,12 @@ class Undo:
     def pause_services(self, states: dict) -> tuple[list[str], list[str]]:
         """Stop the active ones. (paused, could not be paused). Only what was running before is started again."""
         paused, failed = [], []
-        for unit in SERVICES:
-            state = states.get(unit)
-            if not state or state.get("active") not in ("active", "activating", "reloading"):
-                continue
-            name = f"{unit}.service"
-            start = self.push(["systemctl", "start", name])             # runs after the unmask (newest first)
+        active = [u for u in SERVICES if (states.get(u) or {}).get("active") in ("active", "activating", "reloading")]
+        # Every start is entered before the first unmask, so that all unmasks run before the first start (newest first): a unit
+        # may need another paused one (tuned-ppd needs tuned, and cannot be started while that one is still masked).
+        starts = {u: self.push(["systemctl", "start", f"{u}.service"]) for u in active}
+        for unit in active:
+            state, name, start = states[unit], f"{unit}.service", starts[unit]
             unmask = None
             if unit in BUS_ACTIVATED and not str(state.get("enabled")).startswith("masked"):
                 unmask = self.push(["systemctl", "unmask", "--runtime", name])

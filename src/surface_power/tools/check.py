@@ -24,6 +24,7 @@ import traceback
 
 from .. import supervisor
 from ..adapters import inputs as inp
+from ..adapters import msr
 from ..loader.model import ChannelRef
 from . import kernelcheck, report, sensorprobe
 from .kit import (KIT_VERSION, PLATFORM, chain, consent, evidence_ec, load, module, result, sh, signing, signing_setup, system,
@@ -69,6 +70,7 @@ class Check:
         self.repo = system.repo_state()
         self.consent = consent.Consent(ask_line or self._input, self.term, assume_yes)
         self.undo = undo.Undo(root)
+        self.msr_unload: list[str] | None = None     # pending only if this run loaded `msr`
         self.markers = chain.Markers(root, {"commit": self.repo.get("commit"), "kernel": self.release})
         self.evidence = chain.Evidence()
         self.watch = watch.Watch(root)
@@ -288,6 +290,19 @@ class Check:
         self.term.stage(sid, dict(result.STAGES)[sid], s["status"], s["summary"], s.get("unlock"))
 
     # --- S1 ---
+    def msr_module(self) -> None:
+        """`/dev/cpu/0/msr` holds PL4, psys, PL3 and the RAPL units, and not every system loads `msr` (plan B19)."""
+        if os.path.exists(msr.path(self.root)):
+            return
+        unload = self.undo.push(["modprobe", "-r", "msr"])
+        code, text = sh.run(["modprobe", "msr"])
+        if code == 0:
+            self.msr_unload = unload
+            self.say("Loaded msr for this run (unloaded at the end).")
+        else:
+            self.undo.drop(unload)
+            self.say(f"msr could not be loaded ({text}); the processor registers stay unread.")
+
     def cdev(self) -> None:
         if os.path.isdir(os.path.join(self.root, "sys/module/surface_aggregator_cdev")):
             return
@@ -407,6 +422,11 @@ class Check:
     def pause(self) -> None:
         self.watch.stage = "pause"             # stopping a service can change limits: they are recorded under this name
         paused, failed = self.undo.pause_services(system.unit_states())
+        if self.msr_unload in self.undo.pending:
+            # Newest first: `msr` goes before the services start again. A daemon that ran without it must not find it at its
+            # restart and lose it a moment later.
+            self.undo.drop(self.msr_unload)
+            self.undo.push(self.msr_unload)
         if paused:
             self.say()
             self.say("Paused: " + ", ".join(paused) + " (started again at the end).")
@@ -535,6 +555,7 @@ class Check:
 
     # --- the whole run ---
     def execute(self, agreed: dict[str, bool]) -> None:
+        self.msr_module()                      # before the watch's first sample
         self.watch.start()
         self.snapshot()
         changes = agreed["load"] or agreed["module"]
@@ -554,6 +575,8 @@ class Check:
     def close(self) -> None:
         """Undo, stop watching, and forget the markers of a run that left nothing behind. Safe to call twice."""
         self.watch.stage = "restore"
+        if self.msr_unload in self.undo.pending:
+            self.watch.forget_msr()            # unloading it is not a change of a limit
         paused = bool((self.result.data.get("paused") or {}).get("services"))
         undone = self.undo.restore()
         if paused and self.watch.running:
